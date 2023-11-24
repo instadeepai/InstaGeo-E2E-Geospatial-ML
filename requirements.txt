@@ -1,0 +1,12 @@
+black
+flake8
+hydra-core
+isort
+jupyter
+mypy
+neptune-client
+numpy
+omegaconf
+pre-commit
+pytest
+setuptools
