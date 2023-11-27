@@ -3,7 +3,7 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - python=3.8
+  - python=3.10
   - pip
   - pip:
       - --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html

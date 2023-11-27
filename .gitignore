@@ -140,9 +140,6 @@ dmypy.json
 # MacBook Finder
 .DS_Store
 
-# cache
-3.8/
-
 # Experiment results
 outputs/
 
