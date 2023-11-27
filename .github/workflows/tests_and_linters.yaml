@@ -1,6 +1,6 @@
 name: Tests and Linters 🧪
 
-on: [ push, pull_request ]
+on: [push, pull_request]
 
 jobs:
   tests-and-linters:
@@ -9,7 +9,7 @@ jobs:
 
     strategy:
       matrix:
-        python-version: ["3.8", "3.9"]
+        python-version: ["3.8", "3.9", "3.10"]
         os: [self-hosted]
 
     steps:
@@ -19,13 +19,13 @@ jobs:
         uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
-            python-version: "${{ matrix.python-version }}"
+          python-version: "${{ matrix.python-version }}"
       - name: Install python dependencies 🔧
         run: pip install -r requirements.txt
       - name: Run linters 🖌️
         run: pre-commit run --all-files --verbose
       - name: Run tests 🧪
-        run: pytest --verbose ml_research_template
+        run: pytest --verbose .
 #        run: pytest -n 2 --cov=jumanji --cov-report=term-missing --junit-xml=test-results.xml -vv jumanji
 #      - name: Run coverage
 #        run: |
