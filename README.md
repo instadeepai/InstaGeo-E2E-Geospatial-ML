@@ -1,59 +1,41 @@
-# 🧩 Machine Learning Research Project Template
+# InstaGeo
 
-## 👀 Overview
+## Overview
 
-With the growth of our research activities, our team started experiencing inconsistencies in our coding practices and tools.
-Researchers needed to copy-paste boilerplate codes between repositories, and couldn't easily benefit from the utils created in other projects.
-This was the source of wasted time and energy on low value-add works and hindered collaborations between projects.
-Our objective with this template is therefore to help our researchers to:
+InstaGeo is geospatial deep learning Python package designed to facilitate geospatial tasks using satellite imagery data from [Harmonized Landsat and Sentinel-2 (HLS)](https://hls.gsfc.nasa.gov/) Data Product as well as [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M). It consists of three core components: Data, Model, and Apps, each tailored to support various aspects of geospatial data manipulation, model training, and application deployment.
 
-1. Reduce the time to set up a new repository and the time-to-experimentation.
-2. Share the collective knowledge acquired while building up our software activities.
+### Components
 
-In practice, this template:
+1. [**Data**](./instageo/data/README.md): Focuses on reading, manipulating, and processing Harmonized Landsat Sentinel-2 (HLS) data for tasks like disaster mapping, crop mapping, and breeding ground prediction.
+2. [**Model**](./instageo/model/README.md): Centers around data loading, training, and evaluating models, particularly leveraging the Prithvi model for various tasks. It includes pre-training custom foundational models.
+3. [**Apps**](./instageo/apps/README.md): Aims to operationalize models developed in the Model component for practical applications, such as locust infestation dashboards.
 
-1. Provides a generic structure to organise your code.
-2. Provide boilerplate codes, i.e. pre-commit and linters, CI, license, documentation, standard dockerfile and makefile, gitignore, AIchor manifest, etc.
-3. Put forward a set of good practices and guidelines that have demonstrated their benefits.
+## Installation
 
-In this quest to facilitate your setup, assumptions have been made.
-For instance, we assume here that your work will be done in Python (3.8), that you will use JAX as your Deep Learning library, and will run your code either on AIchor and/or GCP VM (GPU, TPU).
-Be aware that these assumptions might not hold for your project, and adjustments should be made.
+To install InstaGeo, run the following command:
 
-### 🎃 Out of Scope
-
-It is tempting to add as much as possible to this repository. We may indeed be slightly too generous in our offering,
-especially when the feature can be easily ignored or removed (e.g. CI pipeline).
-However, we should keep a strong focus on our objective and not deviate by trying to incorporate too many elements in this single template.
-In particular, we do not seek to:
-- Push for production-level code, i.e. testing, release process, strict type hinting, etc.
-- Provide all the components required to open-source the code.
-
-### 🤝 Contribution
-
-Contributions are welcome!
-This template must be an up-to-date reflection of our practices and preferred tooling.
-If you spot a problem or think of an improvement, don’t wait. Draft a PR and share it with your colleagues.
-
-## 🚀 Getting started
-
-This template already includes certain example workflows that will often be repeated between many, or all, projects.
-In particular the [Makefile](Makefile) is configured for ease of building [Docker](docker) images,
-starting containers and launching experiments locally and on both single- and multi-node TPU devices.
-
-**Local quickstart**
-```commandline
-make docker_build_cpu
-make docker_run command="python experiments/run.py"
+```bash
+pip install instageo
 ```
 
-**TPU VM**
+## Usage
 
-Edit the [Makefile](Makefile) with the desired TPU configuration.
+### Data Component
 
-```commandline
-export GITHUB_USER_TOKEN={TOKEN} GITHUB_ACCESS_TOKEN={TOKEN}
-make create
-make run command="cd ml-research-template; make docker_build_tpu"
-make run command="cd ml-research-template; make docker_run command='python experiments/run.py'"
-```
+- **Mirror HLS Data**: Access up-to-date HLS data mirrored on GCP for your projects.
+- **Create Chips and Segmentation Maps**: Use the provided tools to create chips and segmentation maps from HLS data.
+
+### Model Component
+
+- **Train Models**: Leverage the Prithvi model for training on your specific geospatial task.
+- **Evaluate Performance**: Use the evaluation tools to assess the performance of your models.
+
+### Apps Component
+
+- **Operationalize Models**: Deploy models into applications like the Locust Dashboard to make real-world impacts.
+
+## Contributing
+
+We welcome contributions to InstaGeo. Please follow the [contribution guidelines](./CONTRIBUTING.md) for submitting pull requests and reporting issues to help us improve the package.
+
+<!-- ## License -->

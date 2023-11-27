@@ -1,3 +1,14 @@
+geopandas
+shapely
+pandas
+xarray
+rasterio
+earthpy
+rioxarray
+cftime
+h5pyd
+Bottleneck
+absl-py
 black
 flake8
 hydra-core

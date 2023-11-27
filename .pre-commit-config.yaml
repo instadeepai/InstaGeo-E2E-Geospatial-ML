@@ -1,64 +1,89 @@
-default_stages: [ "commit", "commit-msg", "push" ]
+# Pre-commit hooks for repo.
+
+# Packages:
+#   pre-commit: General pre-commits for formatting.
+#   black: Python code strict formatting.
+#   pyupgrade:  Upgrade syntax for newer versions of the language.
+#   isort: Sorts imports.
+#   flake8: Checks code follows PEP8 standard.
+#   mypy: Static typing.
+#   conventional-pre-commit: commit format checker.
+#   blacken-docs: Checks docs follow black format standard.
+#   pydocstyle: Checking docstring style.
+
+default_stages: ["commit", "commit-msg", "push"]
 default_language_version:
-  python: python3.8
+  python: python3.10
 
 repos:
-  - repo: https://github.com/timothycrosley/isort
-    rev: 5.10.1
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
     hooks:
-      - id: isort
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+        exclude_types: [image]
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: mixed-line-ending
+      - id: check-yaml
 
   - repo: https://github.com/psf/black
-    rev: 22.3.0
+    rev: 23.11.0
     hooks:
       - id: black
-        name: "Code formatter"
+        exclude_types: [image]
+        language_version: python3
 
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.1.0
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.15.0
     hooks:
-      - id: end-of-file-fixer
-        name: "End of file fixer"
-      - id: debug-statements
-        name: "Debug imports and breakpoints checker"
-      - id: requirements-txt-fixer
-        name: "Requirements txt fixer"
-      - id: mixed-line-ending
-        name: "Mixed line ending fixer"
-      - id: check-yaml
-        name: "Yaml checker"
-        args: [ '--unsafe' ]
-      - id: trailing-whitespace
-        name: "Trailing whitespace fixer"
+      - id: pyupgrade
+
+  - repo: https://github.com/timothycrosley/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        args: ["--profile", "black", "--filter-files"]
 
   - repo: https://github.com/PyCQA/flake8
-    rev: 4.0.1
+    rev: 6.1.0
     hooks:
       - id: flake8
-        name: "Linter"
         args:
-          - --config=setup.cfg
-        additional_dependencies:
-          - pep8-naming
-          - flake8-builtins
-          - flake8-comprehensions
-          - flake8-bugbear
-          - flake8-pytest-style
-          - flake8-cognitive-complexity
+          [
+            "--max-line-length=89",
+            "--extend-ignore=E203,BLK100",
+            "--exclude=*tests*",
+          ]
 
-  - repo: local
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.7.0
     hooks:
       - id: mypy
-        name: "Static type checker"
-        entry: mypy ml_research_template/
-        language: system
-        types: [ python ]
-        pass_filenames: false
+        exclude: ^docs/|test
+        args: [--config-file=setup.cfg]
 
-  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
-    rev: v4.1.0
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.0.0
     hooks:
-      - id: commitlint
-        name: "Commit linter"
-        stages: [ commit-msg ]
-        additional_dependencies: [ '@commitlint/config-conventional' ]
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: https://github.com/asottile/blacken-docs
+    rev: 1.16.0
+    hooks:
+      - id: blacken-docs
+        additional_dependencies: [black>=22.1.0]
+        language_version: python3
+
+  - repo: https://github.com/pycqa/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+        name: Checking docstring style.
+        args:
+          [
+            "--convention=google",
+            "--add-ignore=D100,D202,D101,D415",
+            "--match=^((?!test).)*$",
+          ]
