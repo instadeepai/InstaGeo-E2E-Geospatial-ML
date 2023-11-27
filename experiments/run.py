@@ -9,9 +9,8 @@ import logging
 
 import hydra
 import jax
-from omegaconf import DictConfig, OmegaConf
-
 from ml_research_template.module import MyClass
+from omegaconf import DictConfig, OmegaConf
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -27,7 +26,7 @@ log.setLevel(logging.INFO)
     config_name="default",
 )
 def run(cfg: DictConfig) -> None:
-
+    """Sample run function."""
     log.info(f"Script: {__file__}")
     log.info(f"Imported hydra config:\n{OmegaConf.to_yaml(cfg)}")
     log.info(f"Imported module: MyClass.some_variable: {MyClass.some_variable}")
