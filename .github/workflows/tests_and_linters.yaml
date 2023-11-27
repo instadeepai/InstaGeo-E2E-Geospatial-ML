@@ -24,6 +24,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run linters 🖌️
         run: pre-commit run --all-files --verbose
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
       - name: Run tests 🧪
         run: pytest --verbose .
 #        run: pytest -n 2 --cov=jumanji --cov-report=term-missing --junit-xml=test-results.xml -vv jumanji
