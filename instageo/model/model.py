@@ -1,5 +1,6 @@
 import os
 import time
+from pathlib import Path
 
 import numpy as np
 import requests  # type: ignore
@@ -7,10 +8,10 @@ import torch
 import torch.nn as nn
 import yaml  # type: ignore
 
-from instageo.model.Prithvi import MaskedAutoencoderViT
+from instageo.model.Prithvi import ViTEncoder
 
 
-def download_file(url: str, filename: str, retries: int = 3) -> None:
+def download_file(url: str, filename: str | Path, retries: int = 3) -> None:
     """Downloads a file from the given URL and saves it to a local file.
 
     Args:
@@ -51,20 +52,69 @@ def download_file(url: str, filename: str, retries: int = 3) -> None:
         raise Exception("Failed to download the file after several attempts.")
 
 
+class Norm2D(nn.Module):
+    """A normalization layer for 2D inputs.
+
+    This class implements a 2D normalization layer using Layer Normalization.
+    It is designed to normalize 2D inputs (e.g., images or feature maps in a
+    convolutional neural network).
+
+    Attributes:
+        ln (nn.LayerNorm): The layer normalization component.
+
+    Args:
+        embed_dim (int): The number of features of the input tensor (i.e., the number of
+            channels in the case of images).
+
+    Methods:
+        forward: Applies normalization to the input tensor.
+    """
+
+    def __init__(self, embed_dim: int):
+        """Initializes the Norm2D module.
+
+        Args:
+            embed_dim (int): The number of features of the input tensor.
+        """
+        super().__init__()
+        self.ln = nn.LayerNorm(embed_dim, eps=1e-6)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Applies the normalization process to the input tensor.
+
+        Args:
+            x (torch.Tensor): A 4D input tensor with shape
+                (batch_size, channels, height, width).
+
+        Returns:
+            torch.Tensor: The normalized tensor, having the same shape as the input.
+        """
+        x = x.permute(0, 2, 3, 1)
+        x = self.ln(x)
+        x = x.permute(0, 3, 1, 2).contiguous()
+        return x
+
+
 class PrithviSeg(nn.Module):
-    def __init__(self, temporal_step: int = 1) -> None:
+    def __init__(
+        self, temporal_step: int = 1, num_classes: int = 2, freeze_backbone: bool = True
+    ) -> None:
         """Initialize the PrithviSeg model.
 
         This model is designed for image segmentation tasks on remote sensing data.
-        It loads Prithvi configuration and weights and sets up a MaskedAutoencoderViT
-        backbone along with a segmentation head.
+        It loads Prithvi configuration and weights and sets up a ViTEncoder backbone
+        along with a segmentation head.
 
         Args:
             temporal_step (int): Size of temporal dimension.
+            num_classes (int): Number of target classes.
+            freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
         """
         super().__init__()
-        weights_path = "./prithvi/Prithvi_100M.pt"
-        cfg_path = "./prithvi/Prithvi_100M_config.yaml"
+        weights_dir = Path.home() / ".instageo" / "prithvi"
+        weights_dir.mkdir(parents=True, exist_ok=True)
+        weights_path = weights_dir / "Prithvi_100M.pt"
+        cfg_path = weights_dir / "Prithvi_100M_config.yaml"
         download_file(
             "https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M/resolve/main/Prithvi_100M.pt?download=true",  # noqa
             weights_path,
@@ -82,11 +132,11 @@ class PrithviSeg(nn.Module):
         model_args["num_frames"] = temporal_step
         self.model_args = model_args
         # instantiate model
-        model = MaskedAutoencoderViT(**model_args)
-        for param in model.parameters():
-            param.requires_grad = False
+        model = ViTEncoder(**model_args)
+        if freeze_backbone:
+            for param in model.parameters():
+                param.requires_grad = False
         del checkpoint["pos_embed"]
-        del checkpoint["decoder_pos_embed"]
         _ = model.load_state_dict(checkpoint, strict=False)
 
         self.prithvi_100M_backbone = model
@@ -102,20 +152,33 @@ class PrithviSeg(nn.Module):
                 An upscaling block configured to upscale spatially.
             """
             return nn.Sequential(
-                nn.Upsample(scale_factor=2),
-                nn.Conv2d(
-                    kernel_size=3,
+                nn.ConvTranspose2d(
                     in_channels=in_channels,
                     out_channels=out_channels,
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    output_padding=1,
+                ),
+                nn.Conv2d(
+                    in_channels=out_channels,
+                    out_channels=out_channels,
+                    kernel_size=3,
                     padding=1,
                 ),
+                nn.BatchNorm2d(out_channels),
                 nn.ReLU(),
             )
 
-        embed_dims = [model_args["embed_dim"] // (2**i) for i in range(5)]
+        embed_dims = [
+            (model_args["embed_dim"] * model_args["num_frames"]) // (2**i)
+            for i in range(5)
+        ]
         self.segmentation_head = nn.Sequential(
             *[upscaling_block(embed_dims[i], embed_dims[i + 1]) for i in range(4)],
-            nn.Conv2d(kernel_size=1, in_channels=embed_dims[-1], out_channels=2),
+            nn.Conv2d(
+                kernel_size=1, in_channels=embed_dims[-1], out_channels=num_classes
+            ),
         )
 
     def forward(self, img: torch.Tensor) -> torch.Tensor:
@@ -127,17 +190,15 @@ class PrithviSeg(nn.Module):
         Returns:
             torch.Tensor: Output tensor after image segmentation.
         """
-        features, _, _ = self.prithvi_100M_backbone.forward_encoder(img, mask_ratio=0)
+        features = self.prithvi_100M_backbone(img)
         # drop cls token
         reshaped_features = features[:, 1:, :]
-        feature_img_side_length = int(np.sqrt(reshaped_features.shape[1]))
-        reshaped_features = reshaped_features.view(
-            -1,
-            feature_img_side_length,
-            feature_img_side_length,
-            self.model_args["embed_dim"],
+        feature_img_side_length = int(
+            np.sqrt(reshaped_features.shape[1] // self.model_args["num_frames"])
         )
-        # channels first
-        reshaped_features = reshaped_features.permute(0, 3, 1, 2)
+        reshaped_features = reshaped_features.permute(0, 2, 1).reshape(
+            features.shape[0], -1, feature_img_side_length, feature_img_side_length
+        )
+
         out = self.segmentation_head(reshaped_features)
         return out

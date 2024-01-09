@@ -3,4 +3,5 @@ torch
 timm==0.4.12
 einops
 tensorboard
-absl-py
+omegaconf
+hydra-core

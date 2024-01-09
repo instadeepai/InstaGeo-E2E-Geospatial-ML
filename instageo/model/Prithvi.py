@@ -14,7 +14,6 @@ from typing import Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange
 from timm.models.layers import to_2tuple
 from timm.models.vision_transformer import Block
 
@@ -166,7 +165,7 @@ class PatchEmbed(nn.Module):
         return x
 
 
-class MaskedAutoencoderViT(nn.Module):
+class ViTEncoder(nn.Module):
     """Masked Autoencoder with a Vision Transformer (ViT) backbone.
 
     This class represents an autoencoder architecture suitable for vision tasks,
@@ -183,14 +182,12 @@ class MaskedAutoencoderViT(nn.Module):
         embed_dim: int = 1024,
         depth: int = 24,
         num_heads: int = 16,
-        decoder_embed_dim: int = 512,
-        decoder_depth: int = 8,
-        decoder_num_heads: int = 16,
         mlp_ratio: float = 4.0,
         norm_layer: nn.Module = nn.LayerNorm,
         norm_pix_loss: bool = False,
-    ):
-        """Initializes the MaskedAutoencoderViT model.
+        **kwargs: int,
+    ) -> None:
+        """Initializes the ViTEncoder model.
 
         Args:
             img_size (int): Size of the input images.
@@ -216,6 +213,7 @@ class MaskedAutoencoderViT(nn.Module):
         encoding with a Transformer-based architecture, and decoding with a separate
         Transformer-based architecture.
         """
+        del kwargs  # unused kwargs
         super().__init__()
 
         # --------------------------------------------------------------------------
@@ -245,37 +243,6 @@ class MaskedAutoencoderViT(nn.Module):
         self.norm = norm_layer(embed_dim)
         # --------------------------------------------------------------------------
 
-        # --------------------------------------------------------------------------
-        # MAE decoder specifics
-        self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
-
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
-
-        self.decoder_pos_embed = nn.Parameter(
-            torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False
-        )  # fixed sin-cos embedding
-
-        self.decoder_blocks = nn.ModuleList(
-            [
-                Block(
-                    decoder_embed_dim,
-                    decoder_num_heads,
-                    mlp_ratio,
-                    qkv_bias=True,
-                    norm_layer=norm_layer,
-                )
-                for i in range(decoder_depth)
-            ]
-        )
-
-        self.decoder_norm = norm_layer(decoder_embed_dim)
-        self.decoder_pred = nn.Linear(
-            decoder_embed_dim,
-            tubelet_size * patch_size * patch_size * in_chans,
-            bias=True,
-        )  # decoder to patch
-        # --------------------------------------------------------------------------
-
         self.norm_pix_loss = norm_pix_loss
 
         self.initialize_weights()
@@ -290,20 +257,12 @@ class MaskedAutoencoderViT(nn.Module):
         )
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
-        decoder_pos_embed = get_3d_sincos_pos_embed(
-            self.decoder_pos_embed.shape[-1], self.patch_embed.grid_size, cls_token=True
-        )
-        self.decoder_pos_embed.data.copy_(
-            torch.from_numpy(decoder_pos_embed).float().unsqueeze(0)
-        )
-
         # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
         w = self.patch_embed.proj.weight.data
         torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
 
         # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.) # noqa
         torch.nn.init.normal_(self.cls_token, std=0.02)
-        torch.nn.init.normal_(self.mask_token, std=0.02)
 
         # initialize nn.Linear and nn.LayerNorm
         self.apply(self._init_weights)
@@ -323,89 +282,8 @@ class MaskedAutoencoderViT(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def patchify(self, imgs: torch.Tensor) -> torch.Tensor:
-        """Transforms images into a sequence of flattened patches.
-
-        Args:
-            imgs (torch.Tensor): Input images, tensor of shape (B, C, T, H, W).
-
-        Returns:
-            torch.Tensor: Flattened patches, tensor of shape (B, L, D).
-        """
-        p = self.patch_embed.patch_size[0]
-        tub = self.patch_embed.tubelet_size
-        x = rearrange(
-            imgs, "b c (t tub) (h p) (w q) -> b (t h w) (tub p q c)", tub=tub, p=p, q=p
-        )
-
-        return x
-
-    def unpatchify(self, x: torch.Tensor) -> torch.Tensor:
-        """Reconstructs images from a sequence of flattened patches.
-
-        Args:
-            x (torch.Tensor): Flattened patches, tensor of shape (B, L, D).
-
-        Returns:
-            torch.Tensor: Reconstructed images, tensor of shape (B, C, T, H, W).
-        """
-        p = self.patch_embed.patch_size[0]
-        num_p = self.patch_embed.img_size[0] // p
-        tub = self.patch_embed.tubelet_size
-        imgs = rearrange(
-            x,
-            "b (t h w) (tub p q c) -> b c (t tub) (h p) (w q)",
-            h=num_p,
-            w=num_p,
-            tub=tub,
-            p=p,
-            q=p,
-        )
-        return imgs
-
-    def random_masking(
-        self, x: torch.Tensor, mask_ratio: float
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Perform per-sample random masking by per-sample shuffling.
-
-        Shuffling is done by argsorting random noise.
-
-        Args:
-            x (torch.Tensor): The input tensor of shape [N, L, D], where N is the batch
-                size, L is the sequence length, and D is the dimension of each sequence
-                element.
-            mask_ratio (float): The proportion of the sequence to be masked.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the
-            masked input tensor the binary mask indicating the masked positions
-            (0 for kept, 1 for removed), and the indices to restore the original order.
-        """
-        N, L, D = x.shape  # batch, length, dim
-        len_keep = int(L * (1 - mask_ratio))
-
-        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
-
-        # sort noise for each sample
-        ids_shuffle = torch.argsort(
-            noise, dim=1
-        )  # ascend: small is keep, large is remove
-        ids_restore = torch.argsort(ids_shuffle, dim=1)
-
-        # keep the first subset
-        ids_keep = ids_shuffle[:, :len_keep]
-        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
-
-        # generate the binary mask: 0 is keep, 1 is remove
-        mask = torch.ones([N, L], device=x.device)
-        mask[:, :len_keep] = 0
-        # unshuffle to get the binary mask
-        mask = torch.gather(mask, dim=1, index=ids_restore)
-
-        return x_masked, mask, ids_restore
-
-    def forward_encoder(
-        self, x: torch.Tensor, mask_ratio: float
+    def forward(
+        self, x: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Encodes the input patches and applies random masking.
 
@@ -423,9 +301,6 @@ class MaskedAutoencoderViT(nn.Module):
         # add pos embed w/o cls token
         x = x + self.pos_embed[:, 1:, :]
 
-        # masking: length -> length * mask_ratio
-        x, mask, ids_restore = self.random_masking(x, mask_ratio)
-
         # append cls token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
         cls_tokens = cls_token.expand(x.shape[0], -1, -1)
@@ -435,91 +310,4 @@ class MaskedAutoencoderViT(nn.Module):
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
-
-        return x, mask, ids_restore
-
-    def forward_decoder(
-        self, x: torch.Tensor, ids_restore: torch.Tensor
-    ) -> torch.Tensor:
-        """Decodes the masked and encoded input tensor.
-
-        Args:
-            x (torch.Tensor): The encoded and masked input tensor.
-                ids_restore (torch.Tensor): The indices to restore the original order
-                of the input tensor.
-
-        Returns:
-            torch.Tensor: The decoded tensor.
-        """
-        # embed tokens
-        x = self.decoder_embed(x)
-
-        # append mask tokens to sequence
-        mask_tokens = self.mask_token.repeat(
-            x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1
-        )
-        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
-        x_ = torch.gather(
-            x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2])
-        )  # unshuffle
-        x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
-
-        # add pos embed
-        x = x + self.decoder_pos_embed
-
-        # apply Transformer blocks
-        for blk in self.decoder_blocks:
-            x = blk(x)
-        x = self.decoder_norm(x)
-
-        # predictor projection
-        x = self.decoder_pred(x)
-
-        # remove cls token
-        x = x[:, 1:, :]
-
         return x
-
-    def forward_loss(
-        self, imgs: torch.Tensor, pred: torch.Tensor, mask: torch.Tensor
-    ) -> torch.Tensor:
-        """Calculates the reconstruction loss for the masked autoencoder.
-
-        Args:
-            imgs (torch.Tensor): The original images, tensor of shape [B, C, T, H, W].
-            pred (torch.Tensor): The predicted output, tensor of shape [B, L, D].
-            mask (torch.Tensor): The binary mask used during masking, tensor of shape
-                [B, L] with 0 for kept positions and 1 for removed positions.
-
-        Returns:
-            torch.Tensor: The calculated loss.
-        """
-        target = self.patchify(imgs)
-        if self.norm_pix_loss:
-            mean = target.mean(dim=-1, keepdim=True)
-            var = target.var(dim=-1, keepdim=True)
-            target = (target - mean) / (var + 1.0e-6) ** 0.5
-
-        loss = (pred - target) ** 2
-        loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
-
-        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        return loss
-
-    def forward(
-        self, imgs: torch.Tensor, mask_ratio: float = 0.75
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Forward pass through the Masked Autoencoder.
-
-        Args:
-            imgs (torch.Tensor): Input images, tensor of shape (B, C, T, H, W).
-            mask_ratio (float): Ratio of patches to be masked.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Tuple containing the loss,
-            predicted images, and the mask used during training.
-        """
-        latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio)
-        pred = self.forward_decoder(latent, ids_restore)
-        loss = self.forward_loss(imgs, pred, mask)
-        return loss, pred, mask

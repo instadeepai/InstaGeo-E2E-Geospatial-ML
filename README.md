@@ -17,7 +17,14 @@ To install InstaGeo, run the following command:
 ```bash
 pip install instageo
 ```
+## Installation
 
+To run InstaGeo tests, run the following command:
+
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+pytest --verbose .
+```
 ## Usage
 
 ### Data Component

@@ -1,5 +1,6 @@
 import os
 import random
+from functools import partial
 from typing import Callable, List, Tuple
 
 import numpy as np
@@ -62,15 +63,14 @@ def normalize_and_convert_to_tensor(
     norm = transforms.Normalize(mean, std)
     ims_tensor = torch.stack([transforms.ToTensor()(im).squeeze() for im in ims])
     _, h, w = ims_tensor.shape
-    ims_tensor = ims_tensor.reshape([temporal_size, -1, h, w])  # C*T,H,W -> T,C,H,W
+    ims_tensor = ims_tensor.reshape([temporal_size, -1, h, w])  # T*C,H,W -> T,C,H,W
     ims_tensor = torch.stack([norm(im) for im in ims_tensor]).permute(
         [1, 0, 2, 3]
     )  # T,C,H,W -> C,T,H,W
-    label = transforms.ToTensor()(label).squeeze()
+    label = torch.from_numpy(np.array(label)).squeeze()
     return ims_tensor, label
 
 
-# @TODO Create a version for inference
 def process_and_augment(
     x: np.ndarray,
     y: np.ndarray,
@@ -78,6 +78,7 @@ def process_and_augment(
     std: List[float],
     temporal_size: int = 1,
     im_size: int = 224,
+    train: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Process and augment the given images and labels.
 
@@ -87,6 +88,7 @@ def process_and_augment(
         mean (List[float]): The mean of each channel in the image
         std (List[float]): The standard deviation of each channel in the image
         temporal_size: The number of temporal steps
+        train: To identify training mode.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A tuple of tensors representing the processed
@@ -96,9 +98,93 @@ def process_and_augment(
 
     # convert to PIL for easier transforms
     ims, label = [Image.fromarray(im) for im in ims], Image.fromarray(label.squeeze())
-    ims, label = random_crop_and_flip(ims, label, im_size)
+    if train:
+        ims, label = random_crop_and_flip(ims, label, im_size)
     ims, label = normalize_and_convert_to_tensor(ims, label, mean, std, temporal_size)
     return ims, label
+
+
+def crop_array(
+    arr: np.ndarray, left: int, top: int, right: int, bottom: int
+) -> np.ndarray:
+    """Crop Numpy Image.
+
+    Crop a given array (image) using specified left, top, right, and bottom indices.
+
+    This function supports cropping both grayscale (2D) and color (3D) images.
+
+    Args:
+        arr (np.ndarray): The input array (image) to be cropped.
+        left (int): The left boundary index for cropping.
+        top (int): The top boundary index for cropping.
+        right (int): The right boundary index for cropping.
+        bottom (int): The bottom boundary index for cropping.
+
+    Returns:
+        np.ndarray: The cropped portion of the input array (image).
+
+    Raises:
+        ValueError: If the input array is not 2D or 3D.
+    """
+    if len(arr.shape) == 2:  # Grayscale image (2D array)
+        return arr[top:bottom, left:right]
+    elif len(arr.shape) >= 3:  # Color image (3D array)
+        return arr[:, top:bottom, left:right]
+    else:
+        raise ValueError("Input array must be a 2D or 3D array")
+
+
+def process_test(
+    x: np.ndarray,
+    y: np.ndarray,
+    mean: List[float],
+    std: List[float],
+    temporal_size: int = 1,
+    img_size: int = 512,
+    crop_size: int = 224,
+    stride: int = 224,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Process and augment test data.
+
+    Args:
+        x (np.ndarray): Input image array.
+        y (np.ndarray): Corresponding mask array.
+        mean (List[float]): Mean values for normalization.
+        std: (List[float]): Standard deviation values for normalization.
+        temporal_size (int, optional): Temporal dimension size. Defaults to 1.
+        img_size (int, optional): Size of the input images. Defaults to
+            512.
+        crop_size (int, optional): Size of the crops to be extracted from the
+            images. Defaults to 224.
+        stride (int, optional): Stride for cropping. Defaults to 224.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Tuple of tensors containing the processed
+            images and masks.
+    """
+    preprocess_func = partial(
+        process_and_augment,
+        mean=mean,
+        std=std,
+        temporal_size=temporal_size,
+        train=False,
+    )
+
+    img_crops, mask_crops = [], []
+    width, height = img_size, img_size
+
+    for top in range(0, height - crop_size + 1, stride):
+        for left in range(0, width - crop_size + 1, stride):
+            bottom = top + crop_size
+            right = left + crop_size
+
+            img_crops.append(crop_array(x, left, top, right, bottom))
+            mask_crops.append(crop_array(y, left, top, right, bottom))
+
+    samples = [preprocess_func(x, y) for x, y in zip(img_crops, mask_crops)]
+    imgs = torch.stack([sample[0] for sample in samples])
+    labels = torch.stack([sample[1] for sample in samples])
+    return imgs, labels
 
 
 def get_arr_flood(
@@ -122,7 +208,13 @@ def get_arr_flood(
 
 
 def process_data(
-    im_fname: str, mask_fname: str, bands: List[int] | None = None
+    im_fname: str,
+    mask_fname: str,
+    no_data_value: int | None = -9999,
+    reduce_to_zero: bool = False,
+    replace_label: Tuple | None = None,
+    bands: List[int] | None = None,
+    constant_multiplier: float = 1.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Process image and mask data from filenames.
 
@@ -130,15 +222,25 @@ def process_data(
         im_fname (str): Filename for the image data.
         mask_fname (str): Filename for the mask data.
         bands (List[int]): Indices of bands to select from array.
+        no_data_value (int | None): NODATA value in image raster.
+        reduce_to_zero (bool): Reduces the label index to start from Zero.
+        replace_label (Tuple): Tuple of value to replace and the replacement value.
+        constant_multiplier (float): Constant multiplier for image.
 
     Returns:
         Tuple[np.ndarray, np.ndarray]: A tuple of numpy arrays representing the processed
         image and mask data.
     """
     arr_x = get_arr_flood(im_fname, is_label=False, bands=bands)
-    # replace raster NODATA value with 0.0001
-    arr_x = np.where(arr_x == -9999, 0.0001, arr_x).astype(np.float32)
+    if no_data_value:
+        # replace raster NODATA value with 0
+        arr_x = np.where(arr_x == no_data_value, 0, arr_x).astype(np.float32)
+    arr_x = arr_x * constant_multiplier
     arr_y = get_arr_flood(mask_fname)
+    if replace_label:
+        arr_y = np.where(arr_y == replace_label[0], replace_label[1], arr_y)
+    if reduce_to_zero:
+        arr_y -= 1
     return arr_x, arr_y
 
 
@@ -169,6 +271,10 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         filename: str,
         input_root: str,
         preprocess_func: Callable,
+        no_data_value: int | None,
+        replace_label: Tuple,
+        reduce_to_zero: bool,
+        constant_multiplier: float,
         bands: List[int] | None = None,
     ):
         """Dataset Class for loading and preprocessing Sentinel11Floods dataset.
@@ -178,12 +284,21 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             input_root (str): Root directory for input images and labels.
             preprocess_func (Callable): Function to preprocess the data.
             bands (List[int]): Indices of bands to select from array.
+            no_data_value (int | None): NODATA value in image raster.
+            reduce_to_zero (bool): Reduces the label index to start from Zero.
+            replace_label (Tuple): Tuple of value to replace and the replacement value.
+            constant_multiplier (float): Constant multiplier for image.
+
         """
 
         self.input_root = input_root
         self.preprocess_func = preprocess_func
         self.bands = bands
         self.file_paths = load_data_from_csv(filename, input_root)
+        self.no_data_value = no_data_value
+        self.replace_label = replace_label
+        self.reduce_to_zero = reduce_to_zero
+        self.constant_multiplier = constant_multiplier
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Retrieves a sample from dataset.
@@ -196,7 +311,15 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             processed images and label.
         """
         im_fname, mask_fname = self.file_paths[i]
-        arr_x, arr_y = process_data(im_fname, mask_fname, self.bands)
+        arr_x, arr_y = process_data(
+            im_fname,
+            mask_fname,
+            no_data_value=self.no_data_value,
+            replace_label=self.replace_label,
+            reduce_to_zero=self.reduce_to_zero,
+            bands=self.bands,
+            constant_multiplier=self.constant_multiplier,
+        )
         return self.preprocess_func(arr_x, arr_y)
 
     def __len__(self) -> int:
