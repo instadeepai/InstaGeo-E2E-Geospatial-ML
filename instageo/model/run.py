@@ -94,6 +94,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         temporal_step: int = 1,
         class_weights: List[float] = [1, 2],
         ignore_index: int = -100,
+        weight_decay: float = 1e-2,
     ) -> None:
         """Initialization.
 
@@ -106,7 +107,8 @@ class PrithviSegmentationModule(pl.LightningModule):
             learning_rate (float): Learning rate for the optimizer.
             freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
             class_weights (List[float]): Class weights for mitigating class imbalance.
-            ignore_index (int): Class index to ignore during loss computation
+            ignore_index (int): Class index to ignore during loss computation.
+            weight_decay (float): Weight decay for L2 regularization.
         """
         super().__init__()
         self.net = PrithviSeg(
@@ -120,6 +122,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         )
         self.learning_rate = learning_rate
         self.ignore_index = ignore_index
+        self.weight_decay = weight_decay
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Define the forward pass of the model.
@@ -191,7 +194,9 @@ class PrithviSegmentationModule(pl.LightningModule):
             Tuple[List[torch.optim.Optimizer], List[torch.optim.lr_scheduler]]:
             A tuple containing the list of optimizers and the list of LR schedulers.
         """
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate)
+        optimizer = torch.optim.AdamW(
+            self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
+        )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer, T_0=10, T_mult=2, eta_min=0
         )
@@ -215,7 +220,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         Returns:
             None.
         """
-        out = self.calculate_iou_and_accuracy(predictions, labels)
+        out = self.compute_metrics(predictions, labels)
         self.log(
             f"{stage}_loss",
             loss,
@@ -240,29 +245,47 @@ class PrithviSegmentationModule(pl.LightningModule):
             prog_bar=True,
             logger=True,
         )
-        for idx, iou in enumerate(out["iou_per_class"]):
+        for idx, value in enumerate(out["iou_per_class"]):
             self.log(
                 f"{stage}_IoU_{idx}",
-                iou,
+                value,
                 on_step=True,
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
             )
-        for idx, acc in enumerate(out["acc_per_class"]):
+        for idx, value in enumerate(out["acc_per_class"]):
             self.log(
                 f"{stage}_Acc_{idx}",
-                acc,
+                value,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+            )
+        for idx, value in enumerate(out["precision_per_class"]):
+            self.log(
+                f"{stage}_Precision_{idx}",
+                value,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+            )
+        for idx, value in enumerate(out["recall_per_class"]):
+            self.log(
+                f"{stage}_Recall_{idx}",
+                value,
                 on_step=True,
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
             )
 
-    def calculate_iou_and_accuracy(
+    def compute_metrics(
         self, pred_mask: torch.Tensor, gt_mask: torch.Tensor
     ) -> dict[str, List[float]]:
-        """Calculate the Intersection over Union (IoU) and Accuracy.
+        """Calculate the Intersection over Union (IoU), Accuracy, Precision and Recall metrics.
 
         Args:
             pred_mask (np.array): Predicted segmentation mask.
@@ -270,37 +293,50 @@ class PrithviSegmentationModule(pl.LightningModule):
 
         Returns:
             dict: A dictionary containing 'iou', 'overall_accuracy', and
-                'accuracy_per_class'.
+                'accuracy_per_class', 'precision_per_class' and 'recall_per_class'.
         """
 
         pred_mask = torch.argmax(pred_mask, dim=1)
         no_ignore = gt_mask.ne(self.ignore_index).to(self.device)
         pred_mask = pred_mask.masked_select(no_ignore).cpu().numpy()
         gt_mask = gt_mask.masked_select(no_ignore).cpu().numpy()
-
-        # Classes present in the masks
         classes = np.unique(np.concatenate((gt_mask, pred_mask)))
 
-        # Initialize IoU and accuracy for each class
         iou_per_class = []
         accuracy_per_class = []
+        precision_per_class = []
+        recall_per_class = []
 
-        # Calculate IoU and accuracy per class
         for clas in classes:
             pred_cls = pred_mask == clas
             gt_cls = gt_mask == clas
 
             intersection = np.logical_and(pred_cls, gt_cls)
             union = np.logical_or(pred_cls, gt_cls)
+            true_positive = np.sum(intersection)
+            false_positive = np.sum(pred_cls) - true_positive
+            false_negative = np.sum(gt_cls) - true_positive
 
             if np.any(union):
                 iou = np.sum(intersection) / np.sum(union)
                 iou_per_class.append(iou)
 
-            accuracy = (
-                np.sum(intersection) / np.sum(gt_cls) if np.sum(gt_cls) > 0 else 0
-            )
+            accuracy = true_positive / np.sum(gt_cls) if np.sum(gt_cls) > 0 else 0
             accuracy_per_class.append(accuracy)
+
+            precision = (
+                true_positive / (true_positive + false_positive)
+                if (true_positive + false_positive) > 0
+                else 0
+            )
+            precision_per_class.append(precision)
+
+            recall = (
+                true_positive / (true_positive + false_negative)
+                if (true_positive + false_negative) > 0
+                else 0
+            )
+            recall_per_class.append(recall)
 
         # Overall IoU and accuracy
         mean_iou = np.mean(iou_per_class) if iou_per_class else 0.0
@@ -311,6 +347,8 @@ class PrithviSegmentationModule(pl.LightningModule):
             "acc": overall_accuracy,
             "acc_per_class": accuracy_per_class,
             "iou_per_class": iou_per_class,
+            "precision_per_class": precision_per_class,
+            "recall_per_class": recall_per_class,
         }
 
 
@@ -381,6 +419,7 @@ def main(cfg: DictConfig) -> None:
             temporal_step=cfg.dataloader.temporal_dim,
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
+            weight_decay=cfg.train.weight_decay,
         )
         hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         checkpoint_callback = ModelCheckpoint(
@@ -439,9 +478,11 @@ def main(cfg: DictConfig) -> None:
             temporal_step=cfg.dataloader.temporal_dim,
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
+            weight_decay=cfg.train.weight_decay,
         )
         trainer = pl.Trainer(accelerator=get_device())
-        trainer.test(model, dataloaders=test_loader)
+        result = trainer.test(model, dataloaders=test_loader)
+        log.info(f"Evaluation results:\n{result}")
 
 
 if __name__ == "__main__":

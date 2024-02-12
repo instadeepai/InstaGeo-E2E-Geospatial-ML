@@ -158,6 +158,52 @@ When the saved checkpoint is evaluated on the test set, you should have results 
 | Mean IoU | 0.48 |
 | Cross Entropy Loss | 0.93 |
 
+5. **Example (Desert Locust Breeding Ground Prediction):**
+Desert Locusts Breeding Ground Prediction using HLS dataset. Observation records of breeding grounds are sourced from [UN-FAO Locust Hub](https://locust-hub-hqfao.hub.arcgis.com/) and used to download HLS tiles used for creating chips and segmentation maps.
+
+- Data: The resulting chips and segmentation maps created using `instageo.chip_creator` can be downloaded using the following command:
+```bash
+gsutil -m cp -r gs://instageo/data/locust_breeding .
+```
+
+- Model: Fine-tune Prithvi on the dataset by running the following command
+
+```bash
+python -m instageo.model.run --config-name=locust \
+    root_dir='locust_breeding' \
+    train_filepath='locust_breeding/train.csv' \
+    valid_filepath='locust_breeding/val.csv' \
+    train.batch_size=16 \
+    train.num_epochs=100 \
+    train.learning_rate=1e-4
+```
+After training you are expected to have a checkpoint with mIoU of ~ 66%
+
+- Evaluate: Evaluate the fine-tuned model on test set using the following command.
+Replace `path/to/checkpoint/checkpoint.ckpt` with the path to your model checkpoint.
+
+```bash
+python -m instageo.model.run --config-name=locust \
+    root_dir='locust_breeding' \
+    test_filepath='locust_breeding/test.csv' \
+    train.batch_size=16 \
+    checkpoint_path=`path/to/checkpoint/checkpoint.ckpt` \
+    mode=eval
+```
+When the saved checkpoint is evaluated on the test set, you should have results comparable to the following
+
+`Class based metrics:`
+| Metric            | Class 0 (Non-Breeding)                 | Class 1 (Breeding)                 |
+|-------------------|-----------------------| -----------------------|
+| Accuracy          | 0.86    | 0.83
+| Intersection over Union (IoU)          | 0.72    | 0.73
+
+`Global metrics:`
+| Metric    | Value |
+|-----------|-------|
+| Overall Accuracy | 0.84 |
+| Mean IoU | 0.73 |
+| Cross Entropy Loss | 0.37 |
 ## Customization
 
 - Modify the `bands`, `mean`, and `std` lists in `configs/config.yaml` to match your dataset's characteristics.
