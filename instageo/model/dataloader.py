@@ -5,7 +5,7 @@ from typing import Callable, List, Tuple
 
 import numpy as np
 import pandas as pd
-import rioxarray
+import rasterio
 import torch
 from PIL import Image
 from torchvision import transforms
@@ -200,8 +200,8 @@ def get_arr_flood(
     Returns:
         np.ndarray: Numpy array representing the processed data.
     """
-    data = rioxarray.open_rasterio(fname)
-    data = data.to_numpy()
+    with rasterio.open(fname) as src:
+        data = src.read()
     if (not is_label) and bands:
         data = data[bands, ...]
     return data
@@ -261,7 +261,13 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str]]:
         im_path = os.path.join(input_root, row["Input"])
         mask_path = os.path.join(input_root, row["Label"])
         if os.path.exists(im_path):
-            file_paths.append((im_path, mask_path))
+            try:
+                with rasterio.open(im_path) as src:
+                    _ = src.crs
+                file_paths.append((im_path, mask_path))
+            except Exception as e:
+                print(e)
+                continue
     return file_paths
 
 

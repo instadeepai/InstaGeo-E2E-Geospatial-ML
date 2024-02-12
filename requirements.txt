@@ -1,7 +1,7 @@
-geopandas
+geopandas==0.14.1
 shapely
 pandas
-xarray
+xarray[complete]
 rasterio
 earthpy
 rioxarray
@@ -19,3 +19,4 @@ numpy
 pre-commit
 pytest
 setuptools
+tqdm

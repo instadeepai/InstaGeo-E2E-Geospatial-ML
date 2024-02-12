@@ -2,12 +2,14 @@ from setuptools import find_packages, setup
 
 data_dependencies = [
     # Add dependencies specific to the data component
-    "geopandas",
+    "geopandas==0.14.1",
     "shapely",
     "cftime",
     "h5pyd",
     "Bottleneck",
     "absl-py",
+    "mgrs==1.4.6",
+    "earthaccess==0.8.2",
 ]
 model_dependencies = [
     # Add dependencies specific to the model component
@@ -32,7 +34,7 @@ setup(
         # Add common dependencies here
         "pandas",
         "numpy",
-        "xarray",
+        "xarray[complete]",
         "rasterio",
         "rioxarray",
     ],
