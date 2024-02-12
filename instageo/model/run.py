@@ -643,6 +643,7 @@ def main(cfg: DictConfig) -> None:
             temporal_step=cfg.dataloader.temporal_dim,
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
+            weight_decay=cfg.train.weight_decay,
         )
         model.eval()
         infer_filepath = os.path.join(root_dir, cfg.test_filepath)
