@@ -5,10 +5,12 @@ from typing import Callable, List, Tuple
 
 import numpy as np
 import pandas as pd
-import rasterio
+import rioxarray
 import torch
 from PIL import Image
 from torchvision import transforms
+
+from instageo.data.geo_utils import open_mf_tiff_dataset
 
 
 def random_crop_and_flip(
@@ -42,7 +44,7 @@ def random_crop_and_flip(
 
 def normalize_and_convert_to_tensor(
     ims: List[Image.Image],
-    label: Image.Image,
+    label: Image.Image | None,
     mean: List[float],
     std: List[float],
     temporal_size: int = 1,
@@ -51,7 +53,7 @@ def normalize_and_convert_to_tensor(
 
     Args:
         ims (List[Image.Image]): List of PIL Image objects representing the images.
-        label (Image.Image): A PIL Image object representing the label.
+        label (Image.Image | None): A PIL Image object representing the label.
         mean (List[float]): The mean of each channel in the image
         std (List[float]): The standard deviation of each channel in the image
         temporal_size: The number of temporal steps
@@ -67,13 +69,14 @@ def normalize_and_convert_to_tensor(
     ims_tensor = torch.stack([norm(im) for im in ims_tensor]).permute(
         [1, 0, 2, 3]
     )  # T,C,H,W -> C,T,H,W
-    label = torch.from_numpy(np.array(label)).squeeze()
+    if label:
+        label = torch.from_numpy(np.array(label)).squeeze()
     return ims_tensor, label
 
 
 def process_and_augment(
     x: np.ndarray,
-    y: np.ndarray,
+    y: np.ndarray | None,
     mean: List[float],
     std: List[float],
     temporal_size: int = 1,
@@ -94,10 +97,13 @@ def process_and_augment(
         Tuple[torch.Tensor, torch.Tensor]: A tuple of tensors representing the processed
         and augmented images and label.
     """
-    ims, label = x.copy(), y.copy()
-
+    ims = x.copy()
+    label = None
     # convert to PIL for easier transforms
-    ims, label = [Image.fromarray(im) for im in ims], Image.fromarray(label.squeeze())
+    ims = [Image.fromarray(im) for im in ims]
+    if not (y is None):
+        label = y.copy()
+        label = Image.fromarray(label.squeeze())
     if train:
         ims, label = random_crop_and_flip(ims, label, im_size)
     ims, label = normalize_and_convert_to_tensor(ims, label, mean, std, temporal_size)
@@ -128,10 +134,12 @@ def crop_array(
     """
     if len(arr.shape) == 2:  # Grayscale image (2D array)
         return arr[top:bottom, left:right]
-    elif len(arr.shape) >= 3:  # Color image (3D array)
+    elif len(arr.shape) == 3:  # Color image (3D array)
         return arr[:, top:bottom, left:right]
+    elif len(arr.shape) == 4:  # Color image (3D array)
+        return arr[:, :, top:bottom, left:right]
     else:
-        raise ValueError("Input array must be a 2D or 3D array")
+        raise ValueError("Input array must be a 2D, 3D or 4D array")
 
 
 def process_test(
@@ -187,29 +195,46 @@ def process_test(
     return imgs, labels
 
 
-def get_arr_flood(
-    fname: str, is_label: bool = True, bands: List[int] | None = None
+def get_raster_data(
+    fname: str | dict[str, str],
+    is_label: bool = True,
+    bands: List[int] | None = None,
+    no_data_value: int | None = -9999,
 ) -> np.ndarray:
-    """Load and process flood data from a file.
+    """Load and process raster data from a file.
 
     Args:
         fname (str): Filename to load data from.
         is_label (bool): Whether the file is a label file.
         bands (List[int]): Index of bands to select from array.
+        no_data_value (int | None): NODATA value in image raster.
 
     Returns:
         np.ndarray: Numpy array representing the processed data.
     """
-    with rasterio.open(fname) as src:
-        data = src.read()
+    if isinstance(fname, dict):
+        data, _ = open_mf_tiff_dataset(fname)
+        data = data.fillna(no_data_value)
+        data = data.band_data.values
+    else:
+        data = rioxarray.open_rasterio(fname)
+        data = data.to_numpy()
     if (not is_label) and bands:
         data = data[bands, ...]
+    # For some reasons, some few HLS tiles are not scaled. In the following lines,
+    # we find and scale them
+    bands = []
+    for band in data:
+        if band.max() > 10:
+            band *= 0.0001
+        bands.append(band)
+    data = np.stack(bands, axis=0)
     return data
 
 
 def process_data(
     im_fname: str,
-    mask_fname: str,
+    mask_fname: str | None = None,
     no_data_value: int | None = -9999,
     reduce_to_zero: bool = False,
     replace_label: Tuple | None = None,
@@ -220,7 +245,7 @@ def process_data(
 
     Args:
         im_fname (str): Filename for the image data.
-        mask_fname (str): Filename for the mask data.
+        mask_fname (str | None): Filename for the mask data.
         bands (List[int]): Indices of bands to select from array.
         no_data_value (int | None): NODATA value in image raster.
         reduce_to_zero (bool): Reduces the label index to start from Zero.
@@ -231,16 +256,21 @@ def process_data(
         Tuple[np.ndarray, np.ndarray]: A tuple of numpy arrays representing the processed
         image and mask data.
     """
-    arr_x = get_arr_flood(im_fname, is_label=False, bands=bands)
+    arr_x = get_raster_data(
+        im_fname, is_label=False, bands=bands, no_data_value=no_data_value
+    )
     if no_data_value:
         # replace raster NODATA value with 0
         arr_x = np.where(arr_x == no_data_value, 0, arr_x).astype(np.float32)
     arr_x = arr_x * constant_multiplier
-    arr_y = get_arr_flood(mask_fname)
-    if replace_label:
-        arr_y = np.where(arr_y == replace_label[0], replace_label[1], arr_y)
-    if reduce_to_zero:
-        arr_y -= 1
+    if mask_fname:
+        arr_y = get_raster_data(mask_fname)
+        if replace_label:
+            arr_y = np.where(arr_y == replace_label[0], replace_label[1], arr_y)
+        if reduce_to_zero:
+            arr_y -= 1
+    else:
+        arr_y = None
     return arr_x, arr_y
 
 
@@ -262,8 +292,7 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str]]:
         mask_path = os.path.join(input_root, row["Label"])
         if os.path.exists(im_path):
             try:
-                with rasterio.open(im_path) as src:
-                    _ = src.crs
+                _ = rioxarray.open_rasterio(im_path).crs
                 file_paths.append((im_path, mask_path))
             except Exception as e:
                 print(e)

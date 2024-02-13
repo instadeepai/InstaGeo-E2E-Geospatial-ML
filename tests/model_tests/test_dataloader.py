@@ -5,7 +5,7 @@ from PIL import Image
 
 from instageo.model.dataloader import (
     crop_array,
-    get_arr_flood,
+    get_raster_data,
     normalize_and_convert_to_tensor,
     process_and_augment,
     process_data,
@@ -58,7 +58,7 @@ def test_process_and_augment():
 
 def test_get_arr_flood():
     test_fname = "tests/data/sample.tif"
-    result = get_arr_flood(test_fname, is_label=False)
+    result = get_raster_data(test_fname, is_label=False)
     assert isinstance(result, np.ndarray)
 
 

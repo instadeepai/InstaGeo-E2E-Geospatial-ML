@@ -1,18 +1,28 @@
+import json
 import logging
+import os
 from functools import partial
 from typing import Any, Callable, List, Optional, Tuple
 
 import hydra
 import numpy as np
 import pytorch_lightning as pl
+import rasterio
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
-from instageo.model.dataloader import InstaGeoDataset, process_and_augment, process_test
+from instageo.model.dataloader import (
+    InstaGeoDataset,
+    process_and_augment,
+    process_data,
+    process_test,
+)
+from instageo.model.infer_utils import sliding_window_inference
 from instageo.model.model import PrithviSeg
 
 log = logging.getLogger(__name__)
@@ -182,6 +192,19 @@ class PrithviSegmentationModule(pl.LightningModule):
         loss = self.criterion(outputs, labels.long())
         self.log_metrics(outputs, labels, "test", loss)
         return loss
+
+    def predict_step(self, batch: Any) -> torch.Tensor:
+        """Perform a prediction step.
+
+        Args:
+            batch (Any): Input batch data.
+
+        Returns:
+            torch.Tensor: The loss value for the batch.
+        """
+        prediction = self.forward(batch)
+        probabilities = torch.nn.functional.softmax(prediction, dim=1)[:, 1, :, :]
+        return probabilities
 
     def configure_optimizers(
         self,
@@ -354,7 +377,16 @@ class PrithviSegmentationModule(pl.LightningModule):
 
 @hydra.main(config_path="configs", version_base=None, config_name="config")
 def main(cfg: DictConfig) -> None:
-    """Trainer Entry Point"""
+    """Runner Entry Point
+
+    Performs training, evaluation or inference/prediction depending on the selected mode.
+
+    Arguments:
+        cfg (DictConfig): Dict-like object containing necessary values used to configure runner.
+
+    Returns:
+        None.
+    """
     log.info(f"Script: {__file__}")
     log.info(f"Imported hydra config:\n{OmegaConf.to_yaml(cfg)}")
 
@@ -483,6 +515,73 @@ def main(cfg: DictConfig) -> None:
         trainer = pl.Trainer(accelerator=get_device())
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
+    elif cfg.mode == "predict":
+        model = PrithviSegmentationModule.load_from_checkpoint(
+            cfg.checkpoint_path,
+            learning_rate=cfg.train.learning_rate,
+            freeze_backbone=cfg.model.freeze_backbone,
+            num_classes=cfg.model.num_classes,
+            temporal_step=cfg.dataloader.temporal_dim,
+            class_weights=cfg.train.class_weights,
+            ignore_index=cfg.train.ignore_index,
+        )
+        model.eval()
+        infer_filepath = os.path.join(root_dir, cfg.test_filepath)
+        assert (
+            os.path.splitext(infer_filepath)[-1] == ".json"
+        ), f"Test file path expects a json file but got {infer_filepath}"
+        output_dir = os.path.join(root_dir, "predictions")
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(infer_filepath)) as json_file:
+            hls_dataset = json.load(json_file)
+        for key, hls_tile_path in tqdm(
+            hls_dataset.items(), desc="Processing HLS Dataset"
+        ):
+            try:
+                hls_tile, _ = process_data(
+                    hls_tile_path,
+                    None,
+                    bands=cfg.dataloader.bands,
+                    no_data_value=cfg.dataloader.no_data_value,
+                    constant_multiplier=cfg.dataloader.constant_multiplier,
+                )
+            except rasterio.RasterioIOError:
+                continue
+            nan_mask = hls_tile == 0
+            nan_mask = np.any(nan_mask, axis=0).astype(int)
+            hls_tile, _ = process_and_augment(
+                hls_tile,
+                None,
+                mean=cfg.dataloader.mean,
+                std=cfg.dataloader.std,
+                temporal_size=cfg.dataloader.temporal_dim,
+                train=False,
+            )
+            prediction = sliding_window_inference(
+                hls_tile,
+                model,
+                window_size=(cfg.test.img_size, cfg.test.img_size),
+                stride=cfg.test.stride,
+                batch_size=cfg.train.batch_size,
+                device=get_device(),
+            )
+            prediction = np.where(nan_mask == 1, np.nan, prediction)
+            prediction_filename = os.path.join(output_dir, f"{key}_prediction.tif")
+            with rasterio.open(hls_tile_path["B02_0"]) as src:
+                crs = src.crs
+                transform = src.transform
+            with rasterio.open(
+                prediction_filename,
+                "w",
+                driver="GTiff",
+                height=prediction.shape[0],
+                width=prediction.shape[1],
+                count=1,
+                dtype=str(prediction.dtype),
+                crs=crs,
+                transform=transform,
+            ) as dst:
+                dst.write(prediction, 1)
 
 
 if __name__ == "__main__":

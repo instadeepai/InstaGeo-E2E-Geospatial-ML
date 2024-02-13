@@ -50,7 +50,19 @@ See `configs/config.yaml` for more.
     python -m instageo.model.run root_dir=path/to/root valid_filepath=path/to/valdata train_filepath=path/to/traindata learning_rate=0.001 num_epochs=100 batch_size=4
     ```
 
-4. **Example (Flood Mapping):**
+4. **Prediction using Sliding Window Inference:** For training we create chips from HLS tiles, this is necessary because our model can only process an input of size 224 x 224. For the purpose of inference we have a sliding window inference feature that inputs HLS tile and perform a sliding window inference on patches of size 224 x 224. This is useful because it skips the process of creating chips using the `instageo.data.chip_creator`, we only need to download HLS tiles and directly runs inference on them. We can run inference using the following command:
+
+```bash
+python -m instageo.model.run --config-name=config.yaml \
+    root_dir='path-to-root_dir-containing-hls_dataset.json' \
+    test_filepath='hls_dataset.json' \
+    train.batch_size=16 \
+    test.stride=224 \
+    checkpoint_path='path-to-checkpoint' \
+    mode=predict
+```
+
+5. **Example (Flood Mapping):**
 [Sen1Floods11](https://github.com/cloudtostreet/Sen1Floods11) is a geospatial dataset of 10m Sentinel-2 imagery for flood detection.
 - Data: Download the Sen1Floods11 hand labelled Sentinel-2 chips as well as `train`, `validation` and `test` splits using the following command
 ```bash
@@ -99,7 +111,7 @@ When the saved checkpoint is evaluated on the test set, you should have results 
 | Mean IoU | 0.89 |
 | Cross Entropy Loss | 0.11 |
 
-5. **Example (Multi-Temporal Crop Classification):**
+6. **Example (Multi-Temporal Crop Classification):**
 [Multi-Temporal Crop Classification](https://huggingface.co/datasets/ibm-nasa-geospatial/multi-temporal-crop-classification) contains Harmonized Landsat-Sentinel (HLS) imagery spanning various land cover and crop type classes throughout the Contiguous United States, captured during the year 2022. The classification labels used in this dataset are based on the Crop Data Layer (CDL) provided by the United States Department of Agriculture (USDA).
 
 - Data: Download the Multi-Temporal Crop Classification data splits using the following command
@@ -158,7 +170,7 @@ When the saved checkpoint is evaluated on the test set, you should have results 
 | Mean IoU | 0.48 |
 | Cross Entropy Loss | 0.93 |
 
-5. **Example (Desert Locust Breeding Ground Prediction):**
+7. **Example (Desert Locust Breeding Ground Prediction):**
 Desert Locusts Breeding Ground Prediction using HLS dataset. Observation records of breeding grounds are sourced from [UN-FAO Locust Hub](https://locust-hub-hqfao.hub.arcgis.com/) and used to download HLS tiles used for creating chips and segmentation maps.
 
 - Data: The resulting chips and segmentation maps created using `instageo.chip_creator` can be downloaded using the following command:
