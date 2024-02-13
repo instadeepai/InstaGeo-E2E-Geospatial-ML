@@ -26,7 +26,7 @@ from typing import Callable, List, Tuple
 
 import numpy as np
 import pandas as pd
-import rasterio
+import rioxarray
 import torch
 from absl import logging
 from PIL import Image
@@ -244,6 +244,14 @@ def get_raster_data(
             data = src.read()
     if (not is_label) and bands:
         data = data[bands, ...]
+    # For some reasons, some few HLS tiles are not scaled. In the following lines,
+    # we find and scale them
+    bands = []
+    for band in data:
+        if band.max() > 10:
+            band *= 0.0001
+        bands.append(band)
+    data = np.stack(bands, axis=0)
     return data
 
 
@@ -313,8 +321,7 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str | Non
         )
         if os.path.exists(im_path):
             try:
-                with rasterio.open(im_path) as src:
-                    _ = src.crs
+                _ = rioxarray.open_rasterio(im_path).crs
                 file_paths.append((im_path, mask_path))
             except Exception as e:
                 logging.error(e)
