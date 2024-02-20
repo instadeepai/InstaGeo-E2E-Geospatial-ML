@@ -1,4 +1,4 @@
-"""Utility Functions for Reading and Processing Harmonized Landsat Sentinel-2 Dataset"""
+"""Utility Functions for Reading and Processing Harmonized Landsat Sentinel-2 Dataset."""
 import os
 import re
 from datetime import datetime, timedelta

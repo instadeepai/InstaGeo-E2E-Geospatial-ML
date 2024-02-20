@@ -84,6 +84,5 @@ repos:
         args:
           [
             "--convention=google",
-            "--add-ignore=D100,D202,D101,D415",
             "--match=^((?!test).)*$",
           ]

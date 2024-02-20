@@ -1,0 +1,7 @@
+absl-py
+plotly
+rasterio
+xarray
+datashader
+matplotlib
+streamlit==1.31.1

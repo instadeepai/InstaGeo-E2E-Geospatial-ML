@@ -1,3 +1,5 @@
+"""InstaGeo Chip Creator Module."""
+
 import bisect
 import json
 import os

@@ -1,3 +1,5 @@
+"""Model Module."""
+
 import os
 import time
 from pathlib import Path
@@ -96,6 +98,8 @@ class Norm2D(nn.Module):
 
 
 class PrithviSeg(nn.Module):
+    """Prithvi Segmentation Model."""
+
     def __init__(
         self, temporal_step: int = 1, num_classes: int = 2, freeze_backbone: bool = True
     ) -> None:

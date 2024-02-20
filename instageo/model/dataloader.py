@@ -1,3 +1,5 @@
+"""Dataloader Module."""
+
 import os
 import random
 from functools import partial
@@ -301,6 +303,8 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str]]:
 
 
 class InstaGeoDataset(torch.utils.data.Dataset):
+    """InstaGeo PyTorch Dataset for Loading and Handling HLS Data."""
+
     def __init__(
         self,
         filename: str,
@@ -325,7 +329,6 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             constant_multiplier (float): Constant multiplier for image.
 
         """
-
         self.input_root = input_root
         self.preprocess_func = preprocess_func
         self.bands = bands
@@ -358,5 +361,5 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         return self.preprocess_func(arr_x, arr_y)
 
     def __len__(self) -> int:
-        """Return length of dataset"""
+        """Return length of dataset."""
         return len(self.file_paths)

@@ -1,3 +1,5 @@
+"""Vision Transformer Module."""
+
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
@@ -76,7 +78,6 @@ def get_3d_sincos_pos_embed(
     Returns:
         np.ndarray: The sinusoidal position embedding (L, D).
     """
-
     assert embed_dim % 16 == 0
 
     t_size, h_size, w_size = grid_size
@@ -156,7 +157,7 @@ class PatchEmbed(nn.Module):
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward Pass"""
+        """Forward Pass."""
         B, C, T, H, W = x.shape
         x = self.proj(x)
         if self.flatten:

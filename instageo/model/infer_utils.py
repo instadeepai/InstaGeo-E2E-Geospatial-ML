@@ -1,3 +1,5 @@
+"""Utils for Running Inference."""
+
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -13,7 +15,7 @@ def sliding_window_inference(
     batch_size: int = 32,
     device: str = "gpu",
 ) -> np.ndarray:
-    """Sliding Window Inference
+    """Sliding Window Inference.
 
     Performs sliding window inference on large inputs using a given model with batching,
     and reassemble the output to match the original image size.

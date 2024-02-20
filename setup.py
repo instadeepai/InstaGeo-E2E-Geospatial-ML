@@ -1,3 +1,5 @@
+"""InstaGeo Package Setup."""
+
 from setuptools import find_packages, setup
 
 data_dependencies = [

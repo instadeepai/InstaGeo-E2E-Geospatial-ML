@@ -1,3 +1,5 @@
+"""Run Module Containing Training, Evaluation and Inference Logic."""
+
 import json
 import logging
 import os
@@ -96,6 +98,8 @@ def create_dataloader(
 
 
 class PrithviSegmentationModule(pl.LightningModule):
+    """Prithvi Segmentation PyTorch Lightning Module."""
+
     def __init__(
         self,
         learning_rate: float = 1e-4,
@@ -318,7 +322,6 @@ class PrithviSegmentationModule(pl.LightningModule):
             dict: A dictionary containing 'iou', 'overall_accuracy', and
                 'accuracy_per_class', 'precision_per_class' and 'recall_per_class'.
         """
-
         pred_mask = torch.argmax(pred_mask, dim=1)
         no_ignore = gt_mask.ne(self.ignore_index).to(self.device)
         pred_mask = pred_mask.masked_select(no_ignore).cpu().numpy()
@@ -377,7 +380,7 @@ class PrithviSegmentationModule(pl.LightningModule):
 
 @hydra.main(config_path="configs", version_base=None, config_name="config")
 def main(cfg: DictConfig) -> None:
-    """Runner Entry Point
+    """Runner Entry Point.
 
     Performs training, evaluation or inference/prediction depending on the selected mode.
 
