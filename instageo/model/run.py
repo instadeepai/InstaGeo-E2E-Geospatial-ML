@@ -661,6 +661,7 @@ def main(cfg: DictConfig) -> None:
                     bands=cfg.dataloader.bands,
                     no_data_value=cfg.dataloader.no_data_value,
                     constant_multiplier=cfg.dataloader.constant_multiplier,
+                    mask_cloud=cfg.test.mask_cloud,
                 )
             except rasterio.RasterioIOError:
                 continue
@@ -684,7 +685,7 @@ def main(cfg: DictConfig) -> None:
             )
             prediction = np.where(nan_mask == 1, np.nan, prediction)
             prediction_filename = os.path.join(output_dir, f"{key}_prediction.tif")
-            with rasterio.open(hls_tile_path["B02_0"]) as src:
+            with rasterio.open(hls_tile_path["tiles"]["B02_0"]) as src:
                 crs = src.crs
                 transform = src.transform
             with rasterio.open(

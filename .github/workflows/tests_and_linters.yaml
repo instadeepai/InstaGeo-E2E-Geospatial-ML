@@ -23,7 +23,6 @@ jobs:
           -r instageo/model/requirements.txt \
           -r instageo/data/requirements.txt \
           -r instageo/apps/requirements.txt
-
       - name: Run linters 🖌️
         run: pre-commit run --all-files --verbose
       - name: Set PYTHONPATH

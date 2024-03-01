@@ -26,7 +26,7 @@ from typing import Callable, List, Tuple
 
 import numpy as np
 import pandas as pd
-import rioxarray
+import rasterio
 import torch
 from absl import logging
 from PIL import Image
@@ -321,7 +321,8 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str | Non
         )
         if os.path.exists(im_path):
             try:
-                _ = rioxarray.open_rasterio(im_path).crs
+                with rasterio.open(im_path) as src:
+                    _ = src.crs
                 file_paths.append((im_path, mask_path))
             except Exception as e:
                 logging.error(e)
