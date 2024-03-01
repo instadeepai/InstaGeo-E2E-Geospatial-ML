@@ -4,7 +4,6 @@ pandas
 xarray[complete]
 rasterio
 earthpy
-rioxarray
 cftime
 h5pyd
 Bottleneck
@@ -21,3 +20,5 @@ pytest
 setuptools
 streamlit
 tqdm
+pytest-cov
+rioxarray

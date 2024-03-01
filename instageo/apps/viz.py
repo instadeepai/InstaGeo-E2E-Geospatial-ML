@@ -4,7 +4,6 @@ import datashader as ds
 import datashader.transfer_functions as tf
 import matplotlib.cm
 import plotly.graph_objects as go
-import plotly.graph_objects as Figure
 import rasterio
 import xarray as xr
 from pyproj import CRS, Transformer
@@ -30,7 +29,7 @@ def add_raster_to_plotly_figure(
     from_crs: CRS,
     column_name: str = "band_data",
     scale: float = 1.0,
-) -> Figure:
+) -> go.Figure:
     """Add a raster plot on a Plotly graph object figure.
 
     This function overlays raster data from an xarray dataset onto a Plotly map figure.
@@ -93,7 +92,7 @@ def add_raster_to_plotly_figure(
     # Apply color map
     img = tf.shade(
         agg,
-        cmap=matplotlib.cm.get_cmap(name="Reds", lut=256),
+        cmap=matplotlib.colormaps["Reds"],
         alpha=100,
         how="linear",
     )[::-1].to_pil()
@@ -112,7 +111,7 @@ def read_geotiff_to_xarray(filepath: str) -> tuple[xr.Dataset, CRS]:
     return xr.open_dataset(filepath).sel(band=1), get_crs(filepath)
 
 
-def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> Figure:
+def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> go.Figure:
     """Create a map with multiple GeoTIFF tiles overlaid.
 
     This function reads GeoTIFF files from a specified directory and overlays them on a

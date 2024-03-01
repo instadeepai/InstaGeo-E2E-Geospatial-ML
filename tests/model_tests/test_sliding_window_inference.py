@@ -19,7 +19,7 @@ def model():
 
 
 def test_sliding_window_inference(model):
-    hls_tile = torch.zeros((2, 18, 448, 448))
+    hls_tile = torch.zeros((2, 18, 672, 672))
     prediction = sliding_window_inference(
         hls_tile, model, window_size=(224, 224), stride=224, batch_size=2, device="cpu"
     )

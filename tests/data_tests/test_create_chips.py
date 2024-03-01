@@ -19,6 +19,7 @@ def setup_and_teardown_output_dir():
 
 def test_create_chips(setup_and_teardown_output_dir):
     geotiff_path = "tests/data/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif"
+    fmask_path = "tests/data/fmask.tif"
     chip_size = 64
     output_directory = "/tmp/output"
     no_data_value = -1
@@ -27,12 +28,16 @@ def test_create_chips(setup_and_teardown_output_dir):
     os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
     os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
     chips, labels = create_and_save_chips_with_seg_maps(
-        {"B02_0": geotiff_path, "B04_0": geotiff_path},
+        {
+            "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
+            "fmasks": {"Fmask_0": fmask_path},
+        },
         df,
         chip_size,
         output_directory,
         no_data_value,
         src_crs=4326,
+        mask_cloud=False,
     )
     num_chips = len(chips)
 

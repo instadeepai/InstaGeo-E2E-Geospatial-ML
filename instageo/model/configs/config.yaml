@@ -33,3 +33,4 @@ test:
   img_size: 224
   crop_size: 224
   stride: 224
+  mask_cloud: False

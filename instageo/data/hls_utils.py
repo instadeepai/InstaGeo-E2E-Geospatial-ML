@@ -1,4 +1,5 @@
 """Utility Functions for Reading and Processing Harmonized Landsat Sentinel-2 Dataset."""
+
 import os
 import re
 from datetime import datetime, timedelta
@@ -7,6 +8,7 @@ from multiprocessing import cpu_count
 import earthaccess
 import mgrs
 import pandas as pd
+from absl import logging
 
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
@@ -266,8 +268,8 @@ def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None
                     os.remove(file_path)
         retries += 1
     if complete:
-        print("Successfully downloaded all granules")
+        logging.info("Successfully downloaded all granules")
     else:
-        print(
+        logging.warning(
             f"Couldn't download the following granules after {max_retries} retries:\n{urls}"  # noqa
         )

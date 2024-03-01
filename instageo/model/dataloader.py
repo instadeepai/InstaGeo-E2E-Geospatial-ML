@@ -7,8 +7,9 @@ from typing import Callable, List, Tuple
 
 import numpy as np
 import pandas as pd
-import rioxarray
+import rasterio
 import torch
+from absl import logging
 from PIL import Image
 from torchvision import transforms
 
@@ -198,10 +199,11 @@ def process_test(
 
 
 def get_raster_data(
-    fname: str | dict[str, str],
+    fname: str | dict[str, dict[str, str]],
     is_label: bool = True,
     bands: List[int] | None = None,
     no_data_value: int | None = -9999,
+    mask_cloud: bool = True,
 ) -> np.ndarray:
     """Load and process raster data from a file.
 
@@ -210,17 +212,18 @@ def get_raster_data(
         is_label (bool): Whether the file is a label file.
         bands (List[int]): Index of bands to select from array.
         no_data_value (int | None): NODATA value in image raster.
+        mask_cloud (bool): Perform cloud masking.
 
     Returns:
         np.ndarray: Numpy array representing the processed data.
     """
     if isinstance(fname, dict):
-        data, _ = open_mf_tiff_dataset(fname)
+        data, _ = open_mf_tiff_dataset(fname, mask_cloud)
         data = data.fillna(no_data_value)
         data = data.band_data.values
     else:
-        data = rioxarray.open_rasterio(fname)
-        data = data.to_numpy()
+        with rasterio.open(fname) as src:
+            data = src.read()
     if (not is_label) and bands:
         data = data[bands, ...]
     # For some reasons, some few HLS tiles are not scaled. In the following lines,
@@ -242,6 +245,7 @@ def process_data(
     replace_label: Tuple | None = None,
     bands: List[int] | None = None,
     constant_multiplier: float = 1.0,
+    mask_cloud: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Process image and mask data from filenames.
 
@@ -253,13 +257,18 @@ def process_data(
         reduce_to_zero (bool): Reduces the label index to start from Zero.
         replace_label (Tuple): Tuple of value to replace and the replacement value.
         constant_multiplier (float): Constant multiplier for image.
+        mask_cloud (bool): Perform cloud masking.
 
     Returns:
         Tuple[np.ndarray, np.ndarray]: A tuple of numpy arrays representing the processed
         image and mask data.
     """
     arr_x = get_raster_data(
-        im_fname, is_label=False, bands=bands, no_data_value=no_data_value
+        im_fname,
+        is_label=False,
+        bands=bands,
+        no_data_value=no_data_value,
+        mask_cloud=mask_cloud,
     )
     if no_data_value:
         # replace raster NODATA value with 0
@@ -294,10 +303,11 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str]]:
         mask_path = os.path.join(input_root, row["Label"])
         if os.path.exists(im_path):
             try:
-                _ = rioxarray.open_rasterio(im_path).crs
+                with rasterio.open(im_path) as src:
+                    _ = src.crs
                 file_paths.append((im_path, mask_path))
             except Exception as e:
-                print(e)
+                logging.error(e)
                 continue
     return file_paths
 

@@ -11,7 +11,7 @@ from absl import flags
 from shapely.geometry import Point
 
 from instageo.data import chip_creator
-from instageo.data.chip_creator import get_chip_coords
+from instageo.data.chip_creator import app, check_required_flags, get_chip_coords
 
 FLAGS = flags.FLAGS
 
@@ -97,7 +97,7 @@ def test_chip_creator(setup_and_teardown_output_dir):
                 "tiles"
             ].tolist()
         )
-        == 18
+        == 21
     )
 
 
@@ -130,3 +130,26 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
     assert os.path.exists(os.path.join(output_directory, "granules_to_download.csv"))
     assert not os.path.exists(os.path.join(output_directory, "chips"))
     assert not os.path.exists(os.path.join(output_directory, "seg_maps"))
+
+
+def test_missing_flags_raises_error():
+    """Test missing flags."""
+    FLAGS.dataframe_path = None
+    FLAGS.output_directory = None
+    with pytest.raises(app.UsageError) as excinfo:
+        check_required_flags()
+    assert "Flag --dataframe_path is required" in str(
+        excinfo.value
+    ) or "Flag --output_directory is required" in str(
+        excinfo.value
+    ), "Expected UsageError with a message about missing required flags"
+
+
+def test_no_missing_flags():
+    """Test correct flags."""
+    FLAGS.dataframe_path = "/path/to/dataframe"
+    FLAGS.output_directory = "/path/to/output"
+    try:
+        check_required_flags()
+    except app.UsageError:
+        pytest.fail("UsageError was raised even though no flags were missing.")

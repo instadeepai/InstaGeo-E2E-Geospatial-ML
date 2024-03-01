@@ -21,17 +21,19 @@ jobs:
         with:
           python-version: "${{ matrix.python-version }}"
       - name: Install python dependencies 🔧
-        run: pip install -r requirements.txt -r instageo/model/requirements.txt -r instageo/data/requirements.txt
+        run: |
+          pip install -r requirements.txt \
+          -r instageo/model/requirements.txt \
+          -r instageo/data/requirements.txt \
+          -r instageo/apps/requirements.txt
       - name: Run linters 🖌️
         run: pre-commit run --all-files --verbose
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
       - name: Run tests 🧪
-        run: pytest --verbose . -m "not auth"
-#        run: pytest -n 2 --cov=jumanji --cov-report=term-missing --junit-xml=test-results.xml -vv jumanji
-#      - name: Run coverage
-#        run: |
-#          coverage html --directory=coverage_html_report
-#          coverage report --fail-under=0.97
+        env:
+          EARTHDATA_USERNAME: ${{ secrets.EARTHDATA_USERNAME }}
+          EARTHDATA_PASSWORD: ${{ secrets.EARTHDATA_PASSWORD }}
+        run: pytest --cov --cov-config=.coveragerc --cov-report=html --cov-report=term-missing --cov-fail-under=50
 #      - name: Test build docs 📖
 #        run: mkdocs build --verbose --site-dir docs_public

@@ -1,11 +1,16 @@
+from functools import partial
+
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 from PIL import Image
 
 from instageo.model.dataloader import (
+    InstaGeoDataset,
     crop_array,
     get_raster_data,
+    load_data_from_csv,
     normalize_and_convert_to_tensor,
     process_and_augment,
     process_data,
@@ -56,9 +61,24 @@ def test_process_and_augment():
     assert processed_label.shape == torch.Size([224, 224])
 
 
-def test_get_arr_flood():
+def test_get_raster_data_with_str():
     test_fname = "tests/data/sample.tif"
-    result = get_raster_data(test_fname, is_label=False)
+    result = get_raster_data(test_fname, is_label=False, bands=[0])
+    assert isinstance(result, np.ndarray)
+
+
+def test_get_raster_data_with_dict():
+    band_files = {
+        "tiles": {
+            "band1": "tests/data/sample.tif",
+            "band2": "tests/data/sample.tif",
+        },
+        "fmasks": {
+            "band1": "tests/data/fmask.tif",
+            "band2": "tests/data/fmask.tif",
+        },
+    }
+    result = get_raster_data(band_files, mask_cloud=True)
     assert isinstance(result, np.ndarray)
 
 
@@ -66,11 +86,28 @@ def test_process_data():
     im_test_fname = "tests/data/sample.tif"
     mask_test_fname = "tests/data/sample.tif"
 
-    arr_x, arr_y = process_data(im_test_fname, mask_test_fname)
+    arr_x, arr_y = process_data(
+        im_test_fname,
+        mask_test_fname,
+        no_data_value=-1,
+        replace_label=(-1, 0),
+        reduce_to_zero=True,
+    )
 
     assert isinstance(arr_x, np.ndarray)
     assert isinstance(arr_y, np.ndarray)
     assert arr_x.shape[:-2] == arr_y.shape[:-2]
+
+
+def test_process_data_without_label():
+    im_test_fname = "tests/data/sample.tif"
+
+    arr_x, arr_y = process_data(
+        im_test_fname, no_data_value=-1, replace_label=(-1, 0), reduce_to_zero=True
+    )
+
+    assert isinstance(arr_x, np.ndarray)
+    assert arr_y is None
 
 
 def test_crop_2d_array():
@@ -122,7 +159,53 @@ def test_output_types_and_shapes():
 def test_invalid_inputs():
     x = np.random.rand(3, 512, 512)
     y = np.random.rand(512, 512)
-    mean = [0.5, 0.5, "invalid"]  # Invalid mean value
+    mean = [0.5, 0.5, "invalid"]
     std = [0.1, 0.1, 0.1]
     with pytest.raises(Exception):
         process_test(x, y, mean, std)
+
+
+def test_load_data_from_csv():
+    sample_filename = "/tmp/sample_data.csv"
+    pd.DataFrame(
+        {
+            "Input": ["sample.tif", "sample.tif"],
+            "Label": ["sample.tif", "sample.tif"],
+        }
+    ).to_csv(sample_filename)
+    data = load_data_from_csv(sample_filename, input_root="tests/data")
+    assert data == [
+        ("tests/data/sample.tif", "tests/data/sample.tif"),
+        ("tests/data/sample.tif", "tests/data/sample.tif"),
+    ]
+
+
+def test_instageo_dataset():
+    sample_filename = "/tmp/sample_data.csv"
+    pd.DataFrame(
+        {
+            "Input": ["sample.tif", "sample.tif"],
+            "Label": ["sample.tif", "sample.tif"],
+        }
+    ).to_csv(sample_filename)
+    dataset = InstaGeoDataset(
+        filename=sample_filename,
+        input_root="tests/data",
+        preprocess_func=partial(
+            process_and_augment,
+            mean=[0.0],
+            std=[1.0],
+            temporal_size=1,
+            im_size=224,
+        ),
+        bands=[0],
+        replace_label=None,
+        reduce_to_zero=False,
+        no_data_value=-1,
+        constant_multiplier=0.001,
+    )
+    im, label = next(iter(dataset))
+    assert isinstance(im, torch.Tensor)
+    assert isinstance(label, torch.Tensor)
+    assert im.shape == torch.Size([1, 1, 224, 224])
+    assert label.shape == torch.Size([224, 224])

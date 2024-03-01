@@ -328,20 +328,33 @@ def test_create_hls_dataset(observation_data):
         data, num_steps=3, temporal_step=10, temporal_tolerance=5
     )
     hls_dataset, tiles_to_download = create_hls_dataset(data_with_tiles, outdir="")
-    assert len(tiles_to_download) == 24
+    assert len(tiles_to_download) == 28
     assert len(hls_dataset) == 2
-    assert len(hls_dataset["2022-06-08_T38PMB"]) == 18
+    assert len(hls_dataset["2022-06-08_T38PMB"]["tiles"]) == 18
+    assert len(hls_dataset["2022-06-08_T38PMB"]["fmasks"]) == 3
     assert (
-        hls_dataset["2022-06-08_T38PMB"]["B02_0"]
+        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_0"]
         == "hls_tiles/HLS.L30.T38PMB.2022154T072604.v2.0.B02.tif"
     )
     assert (
-        hls_dataset["2022-06-08_T38PMB"]["B02_1"]
+        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_0"]
+        == "hls_tiles/HLS.L30.T38PMB.2022154T072604.v2.0.Fmask.tif"
+    )
+    assert (
+        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_1"]
         == "hls_tiles/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif"
     )
     assert (
-        hls_dataset["2022-06-08_T38PMB"]["B02_2"]
+        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_1"]
+        == "hls_tiles/HLS.S30.T38PMB.2022145T072619.v2.0.Fmask.tif"
+    )
+    assert (
+        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_2"]
         == "hls_tiles/HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif"
+    )
+    assert (
+        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_2"]
+        == "hls_tiles/HLS.L30.T38PMB.2022139T071922.v2.0.Fmask.tif"
     )
 
 

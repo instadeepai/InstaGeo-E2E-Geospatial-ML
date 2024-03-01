@@ -184,12 +184,9 @@ gsutil -m cp -r gs://instageo/data/locust_breeding .
 python -m instageo.model.run --config-name=locust \
     root_dir='locust_breeding' \
     train_filepath='locust_breeding/train.csv' \
-    valid_filepath='locust_breeding/val.csv' \
-    train.batch_size=16 \
-    train.num_epochs=100 \
-    train.learning_rate=1e-4
+    valid_filepath='locust_breeding/val.csv'
 ```
-After training you are expected to have a checkpoint with mIoU of ~ 66%
+After training you are expected to have a checkpoint with mIoU of 70%
 
 - Evaluate: Evaluate the fine-tuned model on test set using the following command.
 Replace `path/to/checkpoint/checkpoint.ckpt` with the path to your model checkpoint.
@@ -198,7 +195,6 @@ Replace `path/to/checkpoint/checkpoint.ckpt` with the path to your model checkpo
 python -m instageo.model.run --config-name=locust \
     root_dir='locust_breeding' \
     test_filepath='locust_breeding/test.csv' \
-    train.batch_size=16 \
     checkpoint_path=`path/to/checkpoint/checkpoint.ckpt` \
     mode=eval
 ```
@@ -207,15 +203,16 @@ When the saved checkpoint is evaluated on the test set, you should have results 
 `Class based metrics:`
 | Metric            | Class 0 (Non-Breeding)                 | Class 1 (Breeding)                 |
 |-------------------|-----------------------| -----------------------|
-| Accuracy          | 0.86    | 0.83
-| Intersection over Union (IoU)          | 0.72    | 0.73
+| Accuracy          | 0.74    | 0.93
+| Intersection over Union (IoU)          | 0.68    | 0.73
 
 `Global metrics:`
 | Metric    | Value |
 |-----------|-------|
-| Overall Accuracy | 0.84 |
-| Mean IoU | 0.73 |
-| Cross Entropy Loss | 0.37 |
+| Overall Accuracy | 0.83 |
+| Mean IoU | 0.71 |
+| Cross Entropy Loss | 0.48 |
+
 ## Customization
 
 - Modify the `bands`, `mean`, and `std` lists in `configs/config.yaml` to match your dataset's characteristics.

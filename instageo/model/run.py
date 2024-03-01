@@ -27,6 +27,10 @@ from instageo.model.dataloader import (
 from instageo.model.infer_utils import sliding_window_inference
 from instageo.model.model import PrithviSeg
 
+pl.seed_everything(seed=1042, workers=True)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
@@ -51,14 +55,14 @@ def get_device() -> str:
         import torch_xla.core.xla_model as xm  # noqa: F401
 
         device = "tpu"
-        print("TPU is available. Using TPU...")
+        logging.info("TPU is available. Using TPU...")
     except ImportError:
         if torch.cuda.is_available():
             device = "gpu"
-            print("GPU is available. Using GPU...")
+            logging.info("GPU is available. Using GPU...")
         else:
             device = "cpu"
-            print("Neither GPU nor TPU is available. Using CPU...")
+            logging.info("Neither GPU nor TPU is available. Using CPU...")
     return device
 
 
@@ -463,6 +467,7 @@ def main(cfg: DictConfig) -> None:
             filename="instageo_epoch-{epoch:02d}-val_iou-{val_mIoU:.2f}",
             auto_insert_metric_name=False,
             mode="max",
+            save_top_k=3,
         )
 
         logger = TensorBoardLogger(hydra_out_dir, name="instageo")
@@ -547,6 +552,7 @@ def main(cfg: DictConfig) -> None:
                     bands=cfg.dataloader.bands,
                     no_data_value=cfg.dataloader.no_data_value,
                     constant_multiplier=cfg.dataloader.constant_multiplier,
+                    mask_cloud=cfg.test.mask_cloud,
                 )
             except rasterio.RasterioIOError:
                 continue
@@ -570,7 +576,7 @@ def main(cfg: DictConfig) -> None:
             )
             prediction = np.where(nan_mask == 1, np.nan, prediction)
             prediction_filename = os.path.join(output_dir, f"{key}_prediction.tif")
-            with rasterio.open(hls_tile_path["B02_0"]) as src:
+            with rasterio.open(hls_tile_path["tiles"]["B02_0"]) as src:
                 crs = src.crs
                 transform = src.transform
             with rasterio.open(

@@ -3,19 +3,21 @@
 import bisect
 import json
 import os
-from typing import Any, Dict
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
 import xarray as xr
-from absl import app, flags
+from absl import app, flags, logging
 from shapely.geometry import Point
 from tqdm import tqdm
 
 import instageo.data.hls_utils as hls_utils
 from instageo.data.geo_utils import open_mf_tiff_dataset
+
+logging.set_verbosity(logging.INFO)
 
 FLAGS = flags.FLAGS
 
@@ -39,6 +41,7 @@ flags.DEFINE_integer(
 flags.DEFINE_boolean(
     "download_only", False, "Downloads HLS dataset without creating chips."
 )
+flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
 
 
 def check_required_flags() -> None:
@@ -121,12 +124,13 @@ def get_chip_coords(
 
 
 def create_and_save_chips_with_seg_maps(
-    hls_tile_path: Dict[str, str],
+    hls_tile_dict: dict[str, dict[str, str]],
     df: pd.DataFrame,
     chip_size: int,
     output_directory: str,
     no_data_value: int,
     src_crs: int,
+    mask_cloud: bool,
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -134,18 +138,19 @@ def create_and_save_chips_with_seg_maps(
     an output directory.
 
     Args:
-        hls_tile_path (Dict): A dict mapping band names to HLS tile filepath.
+        hls_tile_dict (Dict): A dict mapping band names to HLS tile filepath.
         df (pd.DataFrame): DataFrame containing the data for segmentation maps.
         chip_size (int): Size of each chip.
         output_directory (str): Directory where the chips and segmentation maps will be
             saved.
         no_data_value (int): Value to use for no data areas in the segmentation maps.
         src_crs (int): CRS of points in `df`
+        mask_cloud (bool): Perform cloud masking if True.
 
     Returns:
         A tuple conatinging the lists of created chips and segmentation maps.
     """
-    ds, crs = open_mf_tiff_dataset(hls_tile_path)
+    ds, crs = open_mf_tiff_dataset(hls_tile_dict, mask_cloud)
     df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
     df.set_crs(epsg=src_crs, inplace=True)
     df = df.to_crs(crs=crs)
@@ -157,7 +162,7 @@ def create_and_save_chips_with_seg_maps(
         & (df["geometry"].y <= ds["y"].max().item())
     ]
     os.makedirs(output_directory, exist_ok=True)
-    tile_name_splits = hls_tile_path["B02_0"].split(".")
+    tile_name_splits = hls_tile_dict["tiles"]["B02_0"].split(".")
     tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
     date_id = df.iloc[0]["date"].strftime("%Y%m%d")
     chips = []
@@ -181,10 +186,10 @@ def create_and_save_chips_with_seg_maps(
             x=slice(x * chip_size, (x + 1) * chip_size),
             y=slice(y * chip_size, (y + 1) * chip_size),
         )
-        if np.unique(chip.band_data.values).size == 1:
+        if chip.count().values == 0:
             continue
         seg_map = create_segmentation_map(chip, df, no_data_value)
-        if np.unique(seg_map.values).size == 1:
+        if seg_map.where(seg_map != -1).count().values == 0:
             continue
         seg_maps.append(seg_map_name)
         seg_map.rio.to_raster(seg_map_filename)
@@ -196,7 +201,7 @@ def create_and_save_chips_with_seg_maps(
 
 def create_hls_dataset(
     data_with_tiles: pd.DataFrame, outdir: str
-) -> tuple[dict[str, dict[str, str]], set[str]]:
+) -> tuple[dict[str, dict[str, dict[str, str]]], set[str]]:
     """Creates HLS Dataset.
 
     A HLS dataset is list of dictionary mapping band names to corresponding GeoTiff
@@ -220,45 +225,49 @@ def create_hls_dataset(
     assert not data_with_tiles.empty, "No observation record with valid HLS tiles"
     hls_dataset = {}
     granules_to_download = []
-    s30_bands = ["B02", "B03", "B04", "B8A", "B11", "B12"]
-    l30_bands = ["B02", "B03", "B04", "B05", "B06", "B07"]
+    s30_bands = ["B02", "B03", "B04", "B8A", "B11", "B12", "Fmask"]
+    l30_bands = ["B02", "B03", "B04", "B05", "B06", "B07", "Fmask"]
     for hls_tiles, obsv_date in zip(
         data_with_tiles["hls_tiles"], data_with_tiles["date"]
     ):
-        keys, values = [], []
+        band_id, band_path = [], []
+        mask_id, mask_path = [], []
         for idx, tile in enumerate(hls_tiles):
             tile = tile.strip(".")
             if "HLS.S30" in tile:
-                keys.extend([f"{band}_{idx}" for band in s30_bands])
-                values.extend(
-                    [
-                        os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
-                        for band in s30_bands
-                    ]
-                )
-                granules_to_download.extend(
-                    [
+                for band in s30_bands:
+                    if band == "Fmask":
+                        mask_id.append(f"{band}_{idx}")
+                        mask_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    else:
+                        band_id.append(f"{band}_{idx}")
+                        band_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    granules_to_download.append(
                         f"https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSS30.020/{tile}/{tile}.{band}.tif"  # noqa
-                        for band in s30_bands
-                    ]
-                )
+                    )
             else:
-                keys.extend([f"{band}_{idx}" for band in l30_bands])
-                values.extend(
-                    [
-                        os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
-                        for band in l30_bands
-                    ]
-                )
-                granules_to_download.extend(
-                    [
+                for band in l30_bands:
+                    if band == "Fmask":
+                        mask_id.append(f"{band}_{idx}")
+                        mask_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    else:
+                        band_id.append(f"{band}_{idx}")
+                        band_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    granules_to_download.append(
                         f"https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/{tile}/{tile}.{band}.tif"  # noqa
-                        for band in l30_bands
-                    ]
-                )
+                    )
 
         hls_dataset[f'{obsv_date.strftime("%Y-%m-%d")}_{tile.split(".")[2]}'] = {
-            k: v for k, v in zip(keys, values)
+            "tiles": {k: v for k, v in zip(band_id, band_path)},
+            "fmasks": {k: v for k, v in zip(mask_id, mask_path)},
         }
     return hls_dataset, set(granules_to_download)
 
@@ -282,14 +291,15 @@ def main(argv: Any) -> None:
             os.path.join(FLAGS.output_directory, "granules_to_download.csv")
         )
     ):
-        # Add the temporal series of tiles to each observation
+        logging.info("Creating HLS dataset JSON.")
+        logging.info("Retrieving HLS tile ID for each observation.")
         sub_data_with_tiles = hls_utils.add_hls_granules(
             sub_data,
             num_steps=FLAGS.num_steps,
             temporal_step=FLAGS.temporal_step,
             temporal_tolerance=FLAGS.temporal_tolerance,
         )
-        # Retrieve hls_dataset and tiles to be downloaded
+        logging.info("Retrieving HLS tiles that will be downloaded.")
         hls_dataset, granules_to_download = create_hls_dataset(
             sub_data_with_tiles, outdir=FLAGS.output_directory
         )
@@ -301,6 +311,7 @@ def main(argv: Any) -> None:
             os.path.join(FLAGS.output_directory, "granules_to_download.csv")
         )
     else:
+        logging.info("HLS dataset JSON already created")
         with open(
             os.path.join(FLAGS.output_directory, "hls_dataset.json")
         ) as json_file:
@@ -309,34 +320,41 @@ def main(argv: Any) -> None:
             os.path.join(FLAGS.output_directory, "granules_to_download.csv")
         )["tiles"].tolist()
     os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
-    # download tiles
+    logging.info("Downloading HLS Tiles")
     hls_utils.parallel_download(
         granules_to_download,
         outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
     )
     if FLAGS.download_only:
         return
-    # create and save chips
+    logging.info("Creating Chips and Segmentation Maps")
     all_chips = []
     all_seg_maps = []
     os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
     os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-    for key, hls_tile_path in tqdm(hls_dataset.items(), desc="Processing HLS Dataset"):
-        obsv_date_str, _ = key.split("_")
-        obsv_data = sub_data[sub_data["date"] == pd.to_datetime(obsv_date_str)]
+    for key, hls_tile_dict in tqdm(hls_dataset.items(), desc="Processing HLS Dataset"):
+        obsv_date_str, tile_id = key.split("_")
+        obsv_data = sub_data[
+            (sub_data["date"] == pd.to_datetime(obsv_date_str))
+            & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
+        ]
         try:
             chips, seg_maps = create_and_save_chips_with_seg_maps(
-                hls_tile_path,
+                hls_tile_dict,
                 obsv_data,
                 chip_size=FLAGS.chip_size,
                 output_directory=FLAGS.output_directory,
                 no_data_value=FLAGS.no_data_value,
                 src_crs=FLAGS.src_crs,
+                mask_cloud=FLAGS.mask_cloud,
             )
             all_chips.extend(chips)
             all_seg_maps.extend(seg_maps)
         except rasterio.errors.RasterioIOError as e:
-            print(f"Error {e} when reading dataset containing: {hls_tile_path}")
+            logging.error(f"Error {e} when reading dataset containing: {hls_tile_dict}")
+        except IndexError as e:
+            logging.error(f"Error {e} when processing {key}")
+    logging.info("Saving dataframe of chips and segmentation maps.")
     pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
         os.path.join(FLAGS.output_directory, "hls_chips_dataset.csv")
     )

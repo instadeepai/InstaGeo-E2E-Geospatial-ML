@@ -9,6 +9,7 @@ import requests  # type: ignore
 import torch
 import torch.nn as nn
 import yaml  # type: ignore
+from absl import logging
 
 from instageo.model.Prithvi import ViTEncoder
 
@@ -29,7 +30,7 @@ def download_file(url: str, filename: str | Path, retries: int = 3) -> None:
         None
     """
     if os.path.exists(filename):
-        print(f"File '{filename}' already exists. Skipping download.")
+        logging.info(f"File '{filename}' already exists. Skipping download.")
         return
 
     for attempt in range(retries):
@@ -38,14 +39,14 @@ def download_file(url: str, filename: str | Path, retries: int = 3) -> None:
             if response.status_code == 200:
                 with open(filename, "wb") as f:
                     f.write(response.content)
-                print(f"Download successful on attempt {attempt + 1}")
+                logging.info(f"Download successful on attempt {attempt + 1}")
                 break
             else:
-                print(
+                logging.warning(
                     f"Attempt {attempt + 1} failed with status code {response.status_code}"  # noqa
                 )
         except requests.RequestException as e:
-            print(f"Attempt {attempt + 1} failed with error: {e}")
+            logging.warning(f"Attempt {attempt + 1} failed with error: {e}")
 
         if attempt < retries - 1:
             time.sleep(2)

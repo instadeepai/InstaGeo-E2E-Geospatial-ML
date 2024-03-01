@@ -47,7 +47,7 @@ setup(
         "all": data_dependencies + model_dependencies + apps_dependencies,
     },
     python_requires=">=3.10",
-    tests_require=["pytest"],
+    tests_require=["pytest", "pytest-cov"],
     setup_requires=["pytest-runner"],
     test_suite="tests",
     author="Ibrahim Salihu Yusuf",
