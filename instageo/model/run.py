@@ -553,6 +553,8 @@ def main(cfg: DictConfig) -> None:
                     no_data_value=cfg.dataloader.no_data_value,
                     constant_multiplier=cfg.dataloader.constant_multiplier,
                     mask_cloud=cfg.test.mask_cloud,
+                    replace_label=cfg.dataloader.replace_label,
+                    reduce_to_zero=cfg.dataloader.reduce_to_zero,
                 )
             except rasterio.RasterioIOError:
                 continue

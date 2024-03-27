@@ -25,8 +25,10 @@ model_dependencies = [
 ]
 apps_dependencies = [
     # Add dependencies specific to the apps component
-    "dash",
     "plotly",
+    "datashader",
+    "matplotlib",
+    "streamlit==1.31.1",
 ]
 setup(
     name="instageo",

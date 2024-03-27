@@ -149,3 +149,4 @@ __pycache__/
 *prithvi/
 *.ipynb
 nul/
+!*InstaGeo_Demo.ipynb

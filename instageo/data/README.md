@@ -1,4 +1,4 @@
-# InstaGeo Chip Creator
+# InstaGeo - Data (Chip Creator)
 
 ## Overview
 The [Harmonized Landsat-8 Sentinel-2 (HLS)](https://hls.gsfc.nasa.gov/) satellite data product is en effort by [NASA](https://www.nasa.gov/) to provide a consistent and long-term data record of the Earth's land surface at a high temporal (2-3 days) and spatial (30m) resolutions.

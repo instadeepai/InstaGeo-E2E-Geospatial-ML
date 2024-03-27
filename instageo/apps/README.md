@@ -1,23 +1,23 @@
-# InstaGeo Serve
+# InstaGeo - Apps (Serve)
 
 ## Overview
-InstaGeo Serve is a web application that enables the visualization of GeoTIFF raster data on interactive maps. It's perfect for geospatial data analysis, providing a user-friendly interface to overlay raster imagery on map projections.
+InstaGeo Serve is a web application that enables the visualization of HLS tile predictions created using InstaGeo Model component.
 
-InstaGeo Serve is a user-friendly web application designed for a seamless visualization of GeoTIFF raster data on interactive maps. Ideal for users engaging in geospatial data analysis, this web app offers a seamless interface for overlaying raster imagery onto various map projections, enhancing the analysis and interpretation of geographical data.
+To visualize the predictions, a user simply needs to provide the absolute path of the parent directory containing the predictions in a specific format.
 
-## Web App Features
-- **Dynamic Directory Specification**: Provides flexibility in accessing GeoTIFF files by allowing users to easily specify the directory of their GeoTIFF files directly within the web application interface.
+![InstaGeo Serve](../../assets/instageo_serve.png)
+
 
 ## Getting Started
-Here's how you can quickly start visualizing your geospatial data with InstaGeo Serve:
+The predictions need to be stored in a directory having the format `parent/directory/year/month`, where `month` is an integer representing the month, for example January is `1`.
 
 1. **Launch the Application**: Initiate the Streamlit app by executing the command `streamlit run app.py` in your terminal. This will start the InstaGeo Serve application.
 
-2. **Specify GeoTIFF Directory**: Upon starting the app, you'll be prompted to input the file path to your GeoTIFF files. Enter the directory path where your files are stored, fill in the date information and submit to proceed.
+2. **Specify Options**: Upon starting the app, you'll be required to input the parent directory containing the prediction in the specified format. Also specify date information and country of interest.
 
-3. **Explore Your Data on the Map**: After submitting your directory, the application will display an interactive map showcasing your GeoTIFF data. You can now explore and analyze your geospatial data within a dynamic and user-friendly mapping environment.
+3. **Explore Your Predictions on the Map**: After specifying the options, lick on `Generate Map` to fetch predictions for specified the date and country, which will be overlaid on an interactive map for exploration.
 
-By streamlining the process of visualizing GeoTIFF data, InstaGeo Serve aims to empower users with an efficient and accessible tool for advanced geospatial analysis.
+By streamlining the process of visualizing GeoTiff files, InstaGeo Serve aims to empower users with an efficient and accessible tool for visualizing model predictions.
 
 ## Dependencies
 - Python 3.x

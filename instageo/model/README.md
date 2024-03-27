@@ -1,29 +1,30 @@
-# InstaGeo Training Module
+# InstaGeo - Model
 
 ## Overview
 
-The InstaGeo Training Module is designed to train deep learning models for geospatial data analysis using PyTorch and PyTorch Lightning frameworks. The module focuses on segmenting geospatial imagery using the [Prithvi_100M](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M) foundational model. It includes features for dataset loading, preprocessing, and augmentation, along with a training loop setup.
+The InstaGeo Model component is designed for training, validation and inference using custom deep learning models having [Prithvi_100M](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M) foundational model as backbone.
 
 ## Requirements
 
 See `requirements.txt`
 
 ## Features
+- Supports both classsification and regression tasks
+- Accepts both temporal and non-temporal inputs
+- Custom models with [Prithvi_100M](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M) backbone
+- Training, Validation and Inference runs
+- Sliding window inference for inference on expansive HLS tiles, which measure 3660 x 3660 pixels
+- Reproducible training pipeline
+- Command-line flags for easy configuration of training parameters.
 
-- **Custom Dataset Handling:** Integration with `InstaGeoDataset` for handling geospatial datasets.
-- **Data Augmentation:** Support for data augmentation and preprocessing.
-- **Training and Validation:** Configurable training and validation data loaders.
-- **Model Training:** Utilizes the `PrithviSeg` model for segmentation tasks.
-- **Flexible Configuration:** Command-line flags for easy configuration of training parameters.
-
-## Installation
+<!-- ## Installation
 
 Ensure you have the required libraries installed:
 
 ```bash
 # pip install instageo # this will work when we publish to PyPi
 pip install . #run from instageo root
-```
+``` -->
 
 ## Usage
 
@@ -44,11 +45,16 @@ See `configs/config.yaml` for more.
 
 3. **Training the Model:**
 
-    Run training with the necessary flags:
+Run training with the necessary flags:
 
-    ```bash
-    python -m instageo.model.run root_dir=path/to/root valid_filepath=path/to/valdata train_filepath=path/to/traindata learning_rate=0.001 num_epochs=100 batch_size=4
-    ```
+```bash
+python -m instageo.model.run \
+    root_dir=path/to/root valid_filepath=path/to/valdata \
+    train_filepath=path/to/traindata \
+    learning_rate=0.001 \
+    num_epochs=100 \
+    batch_size=4
+```
 
 4. **Prediction using Sliding Window Inference:** For training we create chips from HLS tiles, this is necessary because our model can only process an input of size 224 x 224. For the purpose of inference we have a sliding window inference feature that inputs HLS tile and perform a sliding window inference on patches of size 224 x 224. This is useful because it skips the process of creating chips using the `instageo.data.chip_creator`, we only need to download HLS tiles and directly runs inference on them. We can run inference using the following command:
 
@@ -201,17 +207,17 @@ python -m instageo.model.run --config-name=locust \
 When the saved checkpoint is evaluated on the test set, you should have results comparable to the following
 
 `Class based metrics:`
-| Metric            | Class 0 (Non-Breeding)                 | Class 1 (Breeding)                 |
-|-------------------|-----------------------| -----------------------|
-| Accuracy          | 0.74    | 0.93
-| Intersection over Union (IoU)          | 0.68    | 0.73
+| Metric                         | Class 0 (Non-Breeding)   | Class 1 (Breeding)     |
+|--------------------------------|--------------------------| -----------------------|
+| Accuracy                       | 0.85                     | 0.85                   |
+| Intersection over Union (IoU)  | 0.74                     | 0.74                   |
 
 `Global metrics:`
 | Metric    | Value |
 |-----------|-------|
-| Overall Accuracy | 0.83 |
-| Mean IoU | 0.71 |
-| Cross Entropy Loss | 0.48 |
+| Overall Accuracy | 0.85 |
+| Mean IoU | 0.74 |
+| Cross Entropy Loss | 0.40 |
 
 ## Customization
 
