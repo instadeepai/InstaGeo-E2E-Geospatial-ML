@@ -49,7 +49,7 @@ def add_raster_to_plotly_figure(
     # Reproject to EPSG:3857 CRS
     xarr_dataset = xarr_dataset.rio.write_crs(from_crs).rio.reproject("EPSG:3857")
     xarr_dataset = xarr_dataset.where(xarr_dataset <= 1, 0)
-    xarr_dataset = xarr_dataset.fillna(1)
+    xarr_dataset = xarr_dataset.where(xarr_dataset > 0.8, 0)
     # Get Raster dimension and range
     numpy_data = xarr_dataset[column_name].squeeze().to_numpy()
     plot_height, plot_width = numpy_data.shape

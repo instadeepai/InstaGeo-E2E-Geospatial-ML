@@ -24,13 +24,16 @@ def open_mf_tiff_dataset(
         concat_dim="band",
         combine="nested",
     )
+    mask_paths = list(band_files["fmasks"].values())
+    mask_dataset = xr.open_mfdataset(
+        mask_paths,
+        concat_dim="band",
+        combine="nested",
+    )
+    water_mask = decode_fmask_value(mask_dataset, 5)
+    water_mask = water_mask.band_data.values.any(axis=0).astype(int)
+    bands_dataset = bands_dataset.where(water_mask == 0)
     if mask_cloud:
-        mask_paths = list(band_files["fmasks"].values())
-        mask_dataset = xr.open_mfdataset(
-            mask_paths,
-            concat_dim="band",
-            combine="nested",
-        )
         cloud_mask = decode_fmask_value(mask_dataset, 1)
         cloud_mask = cloud_mask.band_data.values.any(axis=0).astype(int)
         bands_dataset = bands_dataset.where(cloud_mask == 0)

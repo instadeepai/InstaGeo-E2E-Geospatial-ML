@@ -270,9 +270,6 @@ def process_data(
         no_data_value=no_data_value,
         mask_cloud=mask_cloud,
     )
-    if no_data_value:
-        # replace raster NODATA value with 0
-        arr_x = np.where(arr_x == no_data_value, 0, arr_x).astype(np.float32)
     arr_x = arr_x * constant_multiplier
     if mask_fname:
         arr_y = get_raster_data(mask_fname)

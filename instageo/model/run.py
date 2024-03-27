@@ -556,7 +556,7 @@ def main(cfg: DictConfig) -> None:
                 )
             except rasterio.RasterioIOError:
                 continue
-            nan_mask = hls_tile == 0
+            nan_mask = hls_tile == cfg.dataloader.no_data_value
             nan_mask = np.any(nan_mask, axis=0).astype(int)
             hls_tile, _ = process_and_augment(
                 hls_tile,
