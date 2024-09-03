@@ -1,0 +1,37 @@
+# config.yaml
+root_dir: null
+valid_filepath: null
+train_filepath: null
+test_filepath: null
+checkpoint_path: null
+mode: train # train or eval
+
+train:
+  learning_rate: 0.0001
+  num_epochs: 20
+  batch_size: 8
+  class_weights: [1, 1]
+  ignore_index: -1
+  weight_decay: 0.1
+
+model:
+  freeze_backbone: False
+  num_classes: 2
+
+dataloader:
+  # 3*(Blue, Green, Red, Narrow NIR, SWIR 1, SWIR 2)
+  bands: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+  mean: [0.14245495, 0.13921481, 0.12434631, 0.31420089, 0.20743526, 0.12046503]
+  std: [0.04036231, 0.04186983, 0.05267646, 0.0822221, 0.06834774, 0.05294205]
+  img_size: 224
+  temporal_dim: 3
+  replace_label: null
+  reduce_to_zero: False
+  no_data_value: -1
+  constant_multiplier: 1.0
+
+test:
+  img_size: 224
+  crop_size: 224
+  stride: 224
+  mask_cloud: False

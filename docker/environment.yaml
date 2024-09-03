@@ -1,0 +1,12 @@
+name: ml-research-template
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+      - jax==0.3.24
+      - jaxlib==0.3.24
+      - -r ../requirements.txt

@@ -1,0 +1,7 @@
+pytorch_lightning
+torch
+timm==0.4.12
+einops
+tensorboard
+omegaconf
+hydra-core
