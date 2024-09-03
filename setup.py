@@ -57,5 +57,5 @@ setup(
     description="""A modular Python package for geospatial data processing, modeling,
                     and applications using Harmonized Landsat Sentinel (HLS) Data""",
     keywords="geospatial, machine learning, data, model, applications",
-    url="https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML-E2E-Geospatial-ML",
+    url="https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML",
 )

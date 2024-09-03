@@ -1,4 +1,4 @@
-# InstaGeo
+![InstaGeo](assets/logo.png)
 
 ## Overview
 
