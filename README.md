@@ -108,7 +108,7 @@ python -m "instageo.data.chip_creator" \
 
 #### Launch Training
 
-Before launching training, modify the path to chips and segmentation maps in each split
+Before launching training, modify the path to chips and segementation maps in each split
 ```python
 for split in ["train", "val", "test"]:
     root_dir = "locust_breeding"
