@@ -84,6 +84,21 @@ def get_device() -> str:
             logging.info("Neither GPU nor TPU is available. Using CPU...")
     return device
 
+def custom_collate_fn(batch):
+    """Test DataLoader Collate Function.
+
+    This function is a convenient wrapper around the PyTorch DataLoader class,
+    allowing for easy setup of various DataLoader parameters.
+
+    Args:
+        batch (Tuple[Tensor]): A list of tuples containing features and labels.
+
+    Returns:
+        Tuple of (x,y) concatenated into separate tensors
+    """
+    data = torch.cat([a[0] for a in batch], 0)
+    labels = torch.cat([a[1] for a in batch], 0)
+    return data, labels
 
 def eval_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
     """Evaluation DataLoader Collate Function.
