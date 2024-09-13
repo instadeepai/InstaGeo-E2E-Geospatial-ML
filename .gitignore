@@ -141,7 +141,6 @@ outputs/
 __pycache__/
 *lightning_logs
 *prithvi/
-*.ipynb
 nul/
 notebooks/
 !notebooks/*.ipynb
