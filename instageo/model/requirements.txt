@@ -5,3 +5,4 @@ einops
 tensorboard
 omegaconf
 hydra-core
+torchvision
