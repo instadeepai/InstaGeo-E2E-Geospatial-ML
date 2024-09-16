@@ -24,7 +24,6 @@ jobs:
           -r instageo/data/requirements.txt \
           -r instageo/apps/requirements.txt
 
-      - run: git config --system --add safe.directory $GITHUB_WORKSPACE
       - name: Run linters 🖌️
         run: pre-commit run --all-files --verbose
       - name: Set PYTHONPATH
