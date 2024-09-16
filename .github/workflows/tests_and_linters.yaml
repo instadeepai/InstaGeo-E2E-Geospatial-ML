@@ -1,0 +1,37 @@
+name: Tests and Linters 🧪
+
+on: [push, pull_request]
+
+jobs:
+  tests-and-linters:
+    name: "Python 3.10 on Ubuntu Latest"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install dependencies for viewer test
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Checkout your repo 📦
+        uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install python dependencies 🔧
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt \
+          -r instageo/model/requirements.txt \
+          -r instageo/data/requirements.txt \
+          -r instageo/apps/requirements.txt
+
+      - name: Run linters 🖌️
+        run: pre-commit run --all-files --verbose
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
+      - name: Run tests 🧪
+        env:
+          EARTHDATA_USERNAME: ${{ secrets.EARTHDATA_USERNAME }}
+          EARTHDATA_PASSWORD: ${{ secrets.EARTHDATA_PASSWORD }}
+        run: pytest --cov --cov-config=.coveragerc --cov-report=html --cov-report=term-missing --cov-fail-under=50 -m "not auth"
+#      - name: Test build docs 📖
+#        run: mkdocs build --verbose --site-dir docs_public

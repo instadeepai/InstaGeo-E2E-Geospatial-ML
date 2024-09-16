@@ -85,6 +85,23 @@ def get_device() -> str:
     return device
 
 
+def custom_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Test DataLoader Collate Function.
+
+    This function is a convenient wrapper around the PyTorch DataLoader class,
+    allowing for easy setup of various DataLoader parameters.
+
+    Args:
+        batch (Tuple[Tensor]): A list of tuples containing features and labels.
+
+    Returns:
+        Tuple of (x,y) concatenated into separate tensors
+    """
+    data = torch.cat([a[0] for a in batch], 0)
+    labels = torch.cat([a[1] for a in batch], 0)
+    return data, labels
+
+
 def create_dataloader(
     dataset: Dataset,
     batch_size: int,
@@ -522,12 +539,7 @@ def main(cfg: DictConfig) -> None:
             constant_multiplier=cfg.dataloader.constant_multiplier,
         )
         test_loader = create_dataloader(
-            test_dataset,
-            batch_size=batch_size,
-            collate_fn=lambda x: (
-                torch.cat([a[0] for a in x], 0),
-                torch.cat([a[1] for a in x], 0),
-            ),
+            test_dataset, batch_size=batch_size, collate_fn=custom_collate_fn
         )
         model = PrithviSegmentationModule.load_from_checkpoint(
             checkpoint_path,

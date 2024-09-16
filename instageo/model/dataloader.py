@@ -123,9 +123,8 @@ def process_and_augment(
     label = None
     # convert to PIL for easier transforms
     ims = [Image.fromarray(im) for im in ims]
-    if not (y is None):
-        label = y.copy()
-        label = Image.fromarray(label.squeeze())
+    if y is not None:
+        label = Image.fromarray(y.copy().squeeze())
     if train:
         ims, label = random_crop_and_flip(ims, label, im_size)
     ims, label = normalize_and_convert_to_tensor(ims, label, mean, std, temporal_size)
@@ -245,8 +244,8 @@ def get_raster_data(
             data = src.read()
     if (not is_label) and bands:
         data = data[bands, ...]
-    # For some reasons, some few HLS tiles are not scaled. In the following lines,
-    # we find and scale them
+    # For some reasons, some few HLS tiles are not scaled in v2.0.
+    # In the following lines, we find and scale them
     bands = []
     for band in data:
         if band.max() > 10:
@@ -342,7 +341,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         constant_multiplier: float,
         bands: List[int] | None = None,
     ):
-        """Dataset Class for loading and preprocessing Sentinel11Floods dataset.
+        """Dataset Class for loading and preprocessing the dataset.
 
         Args:
             filename (str): Filename of the CSV file containing data paths.
