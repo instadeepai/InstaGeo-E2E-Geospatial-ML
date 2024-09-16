@@ -4,16 +4,17 @@ on: [push, pull_request]
 
 jobs:
   tests-and-linters:
-    name: "Python 3.10 on instadeep-ci"
-    runs-on: instadeep-ci
-    container:
-      image:  python:3.10
+    name: "Python 3.10 on Ubuntu Latest"
+    runs-on: ubuntu-latest
 
     steps:
       - name: Install dependencies for viewer test
         run: apt-get update && apt-get install -y xvfb
       - name: Checkout your repo 📦
         uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
       - name: Install python dependencies 🔧
         run: |
