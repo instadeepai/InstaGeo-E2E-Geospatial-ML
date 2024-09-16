@@ -84,7 +84,8 @@ def get_device() -> str:
             logging.info("Neither GPU nor TPU is available. Using CPU...")
     return device
 
-def custom_collate_fn(batch):
+
+def custom_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
     """Test DataLoader Collate Function.
 
     This function is a convenient wrapper around the PyTorch DataLoader class,
