@@ -68,7 +68,6 @@ def add_raster_to_plotly_figure(
     # Reproject to EPSG:3857 CRS
     xarr_dataset = xarr_dataset.rio.write_crs(from_crs).rio.reproject("EPSG:3857")
     xarr_dataset = xarr_dataset.where(xarr_dataset <= 1, 0)
-    xarr_dataset = xarr_dataset.where(xarr_dataset > 0.8, 0)
     # Get Raster dimension and range
     numpy_data = xarr_dataset[column_name].squeeze().to_numpy()
     plot_height, plot_width = numpy_data.shape
@@ -153,7 +152,7 @@ def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> go.Figure:
         if tile.endswith(".tif") or tile.endswith(".tiff"):
             xarr_dataset, crs = read_geotiff_to_xarray(tile)
             img, coordinates = add_raster_to_plotly_figure(
-                xarr_dataset, crs, "band_data", scale=0.1
+                xarr_dataset, crs, "band_data", scale=1.0
             )
             mapbox_layers.append(
                 {"sourcetype": "image", "source": img, "coordinates": coordinates}
