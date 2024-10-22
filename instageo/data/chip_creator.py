@@ -42,6 +42,7 @@ flags.DEFINE_boolean(
     "download_only", False, "Downloads HLS dataset without creating chips."
 )
 flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
+flags.DEFINE_boolean("water_mask", False, "Perform Water Masking")
 
 
 def check_required_flags() -> None:
@@ -131,6 +132,7 @@ def create_and_save_chips_with_seg_maps(
     no_data_value: int,
     src_crs: int,
     mask_cloud: bool,
+    water_mask: bool,
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -146,11 +148,12 @@ def create_and_save_chips_with_seg_maps(
         no_data_value (int): Value to use for no data areas in the segmentation maps.
         src_crs (int): CRS of points in `df`
         mask_cloud (bool): Perform cloud masking if True.
+        water_mask (bool): Perform water masking if True.
 
     Returns:
         A tuple conatinging the lists of created chips and segmentation maps.
     """
-    ds, crs = open_mf_tiff_dataset(hls_tile_dict, mask_cloud)
+    ds, crs = open_mf_tiff_dataset(hls_tile_dict, mask_cloud, water_mask)
     df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
     df.set_crs(epsg=src_crs, inplace=True)
     df = df.to_crs(crs=crs)
@@ -347,6 +350,7 @@ def main(argv: Any) -> None:
                 no_data_value=FLAGS.no_data_value,
                 src_crs=FLAGS.src_crs,
                 mask_cloud=FLAGS.mask_cloud,
+                water_mask=FLAGS.water_mask,
             )
             all_chips.extend(chips)
             all_seg_maps.extend(seg_maps)

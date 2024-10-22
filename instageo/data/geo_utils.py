@@ -6,13 +6,14 @@ from rasterio.crs import CRS
 
 
 def open_mf_tiff_dataset(
-    band_files: dict[str, dict[str, str]], mask_cloud: bool
+    band_files: dict[str, dict[str, str]], mask_cloud: bool, water_mask: bool
 ) -> tuple[xr.Dataset, CRS]:
     """Open multiple TIFF files as an xarray Dataset.
 
     Args:
         band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
         mask_cloud (bool): Perform cloud masking.
+        water_mask (bool): Perform water masking.
 
     Returns:
         (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
@@ -30,9 +31,10 @@ def open_mf_tiff_dataset(
         concat_dim="band",
         combine="nested",
     )
-    water_mask = decode_fmask_value(mask_dataset, 5)
-    water_mask = water_mask.band_data.values.any(axis=0).astype(int)
-    bands_dataset = bands_dataset.where(water_mask == 0)
+    if water_mask:
+        mask_water = decode_fmask_value(mask_dataset, 5)
+        mask_water = mask_water.band_data.values.any(axis=0).astype(int)
+        bands_dataset = bands_dataset.where(mask_water == 0)
     if mask_cloud:
         cloud_mask = decode_fmask_value(mask_dataset, 1)
         cloud_mask = cloud_mask.band_data.values.any(axis=0).astype(int)

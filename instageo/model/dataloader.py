@@ -204,6 +204,7 @@ def get_raster_data(
     bands: List[int] | None = None,
     no_data_value: int | None = -9999,
     mask_cloud: bool = True,
+    water_mask: bool = False,
 ) -> np.ndarray:
     """Load and process raster data from a file.
 
@@ -213,12 +214,13 @@ def get_raster_data(
         bands (List[int]): Index of bands to select from array.
         no_data_value (int | None): NODATA value in image raster.
         mask_cloud (bool): Perform cloud masking.
+        water_mask (bool): Perform water masking.
 
     Returns:
         np.ndarray: Numpy array representing the processed data.
     """
     if isinstance(fname, dict):
-        data, _ = open_mf_tiff_dataset(fname, mask_cloud)
+        data, _ = open_mf_tiff_dataset(fname, mask_cloud, water_mask)
         data = data.fillna(no_data_value)
         data = data.band_data.values
     else:
@@ -269,6 +271,7 @@ def process_data(
         bands=bands,
         no_data_value=no_data_value,
         mask_cloud=mask_cloud,
+        water_mask=False,
     )
     arr_x = arr_x * constant_multiplier
     if mask_fname:
