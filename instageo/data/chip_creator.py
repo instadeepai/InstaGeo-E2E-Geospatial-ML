@@ -1,3 +1,22 @@
+# ------------------------------------------------------------------------------
+# This code is licensed under the Attribution-NonCommercial-ShareAlike 4.0
+# International (CC BY-NC-SA 4.0) License.
+#
+# You are free to:
+# - Share: Copy and redistribute the material in any medium or format
+# - Adapt: Remix, transform, and build upon the material
+#
+# Under the following terms:
+# - Attribution: You must give appropriate credit, provide a link to the license,
+#   and indicate if changes were made. You may do so in any reasonable manner,
+#   but not in any way that suggests the licensor endorses you or your use.
+# - NonCommercial: You may not use the material for commercial purposes.
+# - ShareAlike: If you remix, transform, or build upon the material, you must
+#   distribute your contributions under the same license as the original.
+#
+# For more details, see https://creativecommons.org/licenses/by-nc-sa/4.0/
+# ------------------------------------------------------------------------------
+
 """InstaGeo Chip Creator Module."""
 
 import bisect
@@ -102,7 +121,7 @@ def get_chip_coords(
 
     Given a list of x,y coordinates tuples of a point and an xarray dataarray, this
     function returns the corresponding x,y indices of the grid where each point will fall
-    when the dataarray is gridded such that each grid has size `chip_size`
+    when the DataArray is gridded such that each grid has size `chip_size`
     indices where it will fall.
 
     Args:
@@ -151,7 +170,7 @@ def create_and_save_chips_with_seg_maps(
         water_mask (bool): Perform water masking if True.
 
     Returns:
-        A tuple conatinging the lists of created chips and segmentation maps.
+        A tuple containing the lists of created chips and segmentation maps.
     """
     ds, crs = open_mf_tiff_dataset(hls_tile_dict, mask_cloud, water_mask)
     df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
@@ -207,14 +226,14 @@ def create_hls_dataset(
 ) -> tuple[dict[str, dict[str, dict[str, str]]], set[str]]:
     """Creates HLS Dataset.
 
-    A HLS dataset is list of dictionary mapping band names to corresponding GeoTiff
+    A HLS dataset is a list of dictionary mapping band names to corresponding GeoTiff
     filepath. It is required for creating chips.
 
     Args:
         data_with_tiles (pd.DataFrame): A dataframe containing observations that fall
             within a dense tile. It also has `hls_tiles` column that contains a temporal
             series of HLS granules.
-        outdir (str): Output directory where tiles dould be downloaded to.
+        outdir (str): Output directory where tiles could be downloaded to.
 
     Returns:
         A tuple containing HLS dataset and a list of tiles that needs to be downloaded.
