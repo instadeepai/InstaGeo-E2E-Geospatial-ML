@@ -1,15 +1,24 @@
-"""Vision Transformer Module."""
-
+# ------------------------------------------------------------------------------
+# This code is adapted from the original code in the following repository:
+#
+# Original Source:
+# https://github.com/NASA-IMPACT/hls-foundation-os/blob/main/geospatial_fm/geospatial_fm.py
+#
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
+#
+# Adapted by: Ibrahim Salihu Yusuf
+# Date of adaptation: 27-10-2023
+#
+# Changes made:
+# - Removed all other modules and functions except TemporalViTEncoder (renamed as ViTEncoder) and
+# its dependencies
+#
 # References:
 # timm: https://github.com/rwightman/pytorch-image-models/tree/master/timm
 # DeiT: https://github.com/facebookresearch/deit
 # --------------------------------------------------------
+"""Vision Transformer Module."""
 
 from typing import Tuple
 
