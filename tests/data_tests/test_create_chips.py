@@ -38,6 +38,7 @@ def test_create_chips(setup_and_teardown_output_dir):
         no_data_value,
         src_crs=4326,
         mask_cloud=False,
+        water_mask=False,
     )
     num_chips = len(chips)
 

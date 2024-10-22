@@ -17,7 +17,7 @@ def test_open_mf_tiff_dataset():
         },
     }
 
-    result, crs = open_mf_tiff_dataset(band_files, mask_cloud=False)
+    result, crs = open_mf_tiff_dataset(band_files, mask_cloud=False, water_mask=False)
     assert isinstance(result, xr.Dataset)
     assert isinstance(crs, CRS)
     assert crs == 32613
@@ -35,9 +35,13 @@ def test_open_mf_tiff_dataset_cloud_mask():
             "band2": "tests/data/fmask.tif",
         },
     }
-    result_no_mask, crs = open_mf_tiff_dataset(band_files, mask_cloud=False)
+    result_no_mask, crs = open_mf_tiff_dataset(
+        band_files, mask_cloud=False, water_mask=False
+    )
     num_points = result_no_mask.band_data.count().values.item()
-    result_with_mask, crs = open_mf_tiff_dataset(band_files, mask_cloud=True)
+    result_with_mask, crs = open_mf_tiff_dataset(
+        band_files, mask_cloud=True, water_mask=False
+    )
     fmask = xr.open_dataset("tests/data/fmask.tif")
     cloud_mask = decode_fmask_value(fmask, 1)
     num_clouds = cloud_mask.where(cloud_mask == 1).band_data.count().values.item()
