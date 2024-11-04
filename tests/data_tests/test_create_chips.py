@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from instageo.data.chip_creator import create_and_save_chips_with_seg_maps
+from instageo.data.hls_pipeline import create_and_save_chips_with_seg_maps_hls
 
 
 @pytest.fixture
