@@ -19,62 +19,81 @@
 
 """Geo Utils Module."""
 
-import rasterio
+import bisect
+from typing import Any
+
+import geopandas as gpd
+import numpy as np
+import pandas as pd
 import xarray as xr
-from rasterio.crs import CRS
 
 
-def open_mf_tiff_dataset(
-    band_files: dict[str, dict[str, str]], mask_cloud: bool, water_mask: bool
-) -> tuple[xr.Dataset, CRS]:
-    """Open multiple TIFF files as an xarray Dataset.
+def create_segmentation_map(
+    chip: Any,
+    df: pd.DataFrame,
+    no_data_value: int,
+) -> np.ndarray:
+    """Create a segmentation map for the chip using the DataFrame.
 
     Args:
-        band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
-        mask_cloud (bool): Perform cloud masking.
-        water_mask (bool): Perform water masking.
+        chip (Any): The chip (subset of the original data) for which the segmentation
+            map is being created.
+        df (pd.DataFrame): DataFrame containing the data to be used in the segmentation
+            map.
+        no_data_value (int): Value to be used for pixels with no data.
 
     Returns:
-        (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
-            provided TIFF files and its CRS
+        np.ndarray: The created segmentation map as a NumPy array.
     """
-    band_paths = list(band_files["tiles"].values())
-    bands_dataset = xr.open_mfdataset(
-        band_paths,
-        concat_dim="band",
-        combine="nested",
+    seg_map = chip.isel(band=0).assign(
+        {
+            "band_data": (
+                ("y", "x"),
+                no_data_value * np.ones((chip.sizes["x"], chip.sizes["y"])),
+            )
+        }
     )
-    mask_paths = list(band_files["fmasks"].values())
-    mask_dataset = xr.open_mfdataset(
-        mask_paths,
-        concat_dim="band",
-        combine="nested",
-    )
-    if water_mask:
-        mask_water = decode_fmask_value(mask_dataset, 5)
-        mask_water = mask_water.band_data.values.any(axis=0).astype(int)
-        bands_dataset = bands_dataset.where(mask_water == 0)
-    if mask_cloud:
-        cloud_mask = decode_fmask_value(mask_dataset, 1)
-        cloud_mask = cloud_mask.band_data.values.any(axis=0).astype(int)
-        bands_dataset = bands_dataset.where(cloud_mask == 0)
-    with rasterio.open(band_paths[0]) as src:
-        crs = src.crs
-    return bands_dataset, crs
+    df = df[
+        (chip["x"].min().item() <= df["geometry"].x)
+        & (df["geometry"].x <= chip["x"].max().item())
+        & (chip["y"].min().item() <= df["geometry"].y)
+        & (df["geometry"].y <= chip["y"].max().item())
+    ]
+    # Use a tolerance of 30 meters
+    for _, row in df.iterrows():
+        nearest_index = seg_map.sel(
+            x=row["geometry"].x, y=row["geometry"].y, method="nearest", tolerance=30
+        )
+        seg_map.loc[
+            dict(x=nearest_index["x"].values.item(), y=nearest_index["y"].values.item())
+        ] = row["label"]
+    return seg_map.band_data.squeeze()
 
 
-def decode_fmask_value(value: xr.Dataset, position: int) -> xr.Dataset:
-    """Decodes HLS v2.0 Fmask.
+def get_chip_coords(
+    df: gpd.GeoDataFrame, tile: xr.DataArray, chip_size: int
+) -> list[tuple[int, int]]:
+    """Get Chip Coordinates.
 
-    The decoding strategy is described in Appendix A of the user manual
-    (https://lpdaac.usgs.gov/documents/1698/HLS_User_Guide_V2.pdf).
+    Given a list of x,y coordinates tuples of a point and an xarray dataarray, this
+    function returns the corresponding x,y indices of the grid where each point will fall
+    when the DataArray is gridded such that each grid has size `chip_size`
+    indices where it will fall.
 
-    Arguments:
-        value: Input xarray Dataset created from Fmask.tif
-        position: Bit position to decode.
+    Args:
+        gdf (gpd.GeoDataFrame): GeoPandas dataframe containing the point.
+        tile (xr.DataArray): Tile DataArray.
+        chip_size (int): Size of each chip.
 
     Returns:
-        Xarray dataset containing decoded bits.
+        List of chip indices.
     """
-    quotient = value // (2**position)
-    return quotient - ((quotient // 2) * 2)
+    coords = []
+    for _, row in df.iterrows():
+        x = bisect.bisect_left(tile["x"].values, row["geometry"].x)
+        y = bisect.bisect_left(tile["y"].values[::-1], row["geometry"].y)
+        y = tile.sizes["y"] - y - 1
+        x = int(x // chip_size)
+        y = int(y // chip_size)
+        coords.append((x, y))
+    return coords
