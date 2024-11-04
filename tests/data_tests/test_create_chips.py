@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from instageo.data.chip_creator import create_and_save_chips_with_seg_maps
+from instageo.data.hls_pipeline import create_and_save_chips_with_seg_maps_hls
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def test_create_chips(setup_and_teardown_output_dir):
     df["date"] = pd.to_datetime("2020-01-01")
     os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
     os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
-    chips, labels = create_and_save_chips_with_seg_maps(
+    chips, labels = create_and_save_chips_with_seg_maps_hls(
         {
             "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
             "fmasks": {"Fmask_0": fmask_path},

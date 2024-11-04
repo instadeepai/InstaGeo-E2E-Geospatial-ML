@@ -11,7 +11,8 @@ from absl import flags
 from shapely.geometry import Point
 
 from instageo.data import chip_creator
-from instageo.data.chip_creator import app, check_required_flags, get_chip_coords
+from instageo.data.chip_creator import app, check_required_flags
+from instageo.data.geo_utils import get_chip_coords
 
 FLAGS = flags.FLAGS
 
