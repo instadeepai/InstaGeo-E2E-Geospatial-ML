@@ -75,7 +75,7 @@ Run this command to test using an example observation record.
 
 ```bash
 python -m "instageo.data.chip_creator" \
-    --dataframe_path=tests/data/test_breeding_data.csv
+    --dataframe_path=tests/data/test_breeding_data.csv \
     --output_directory="." \
     --min_count=4 \
     --chip_size=512 \
