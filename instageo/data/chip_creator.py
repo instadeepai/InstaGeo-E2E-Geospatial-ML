@@ -30,7 +30,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
-import xarray as xr
 from absl import app, flags, logging
 from tqdm import tqdm
 

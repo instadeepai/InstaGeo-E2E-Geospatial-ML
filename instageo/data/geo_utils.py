@@ -27,7 +27,6 @@ import dask.delayed
 import rasterio
 import rioxarray as rxr
 import xarray as xr
-from rasterio.crs import CRS
 
 # Block sizes for the internal tiling of HLS COGs
 BLOCKSIZE_X = 256
@@ -135,15 +134,18 @@ def decode_fmask_value(
 ) -> xr.Dataset | xr.DataArray:
     """Decodes HLS v2.0 Fmask.
 
-    The decoding strategy is described in Appendix A of the user manual
-    (https://lpdaac.usgs.gov/documents/1698/HLS_User_Guide_V2.pdf).
+    Given a list of x,y coordinates tuples of a point and an xarray dataarray, this
+    function returns the corresponding x,y indices of the grid where each point will fall
+    when the DataArray is gridded such that each grid has size `chip_size`
+    indices where it will fall.
 
-    Arguments:
-        value: Input xarray Dataset created from Fmask.tif
-        position: Bit position to decode.
+    Args:
+        gdf (gpd.GeoDataFrame): GeoPandas dataframe containing the point.
+        tile (xr.DataArray): Tile DataArray.
+        chip_size (int): Size of each chip.
 
     Returns:
-        Xarray dataset containing decoded bits.
+        List of chip indices.
     """
     quotient = value // (2**position)
     return quotient - ((quotient // 2) * 2)
