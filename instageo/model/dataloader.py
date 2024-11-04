@@ -32,7 +32,7 @@ from absl import logging
 from PIL import Image
 from torchvision import transforms
 
-from instageo.data.geo_utils import open_mf_tiff_dataset
+from instageo.data.hls_pipeline import open_mf_tiff_dataset
 
 
 def random_crop_and_flip(
