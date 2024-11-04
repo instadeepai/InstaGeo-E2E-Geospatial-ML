@@ -56,7 +56,7 @@ flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
 flags.DEFINE_boolean(
-    "download_only", False, "Downloads HLS dataset without creating chips."
+    "download_only", False, "Downloads dataset without creating chips."
 )
 flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
 flags.DEFINE_boolean("water_mask", False, "Perform Water Masking")
@@ -75,7 +75,7 @@ def main(argv: Any) -> None:
     """CSV Chip Creator.
 
     Given a csv file containing geo-located point observations and labels, the Chip
-    Creator creates small chip from large HLS tiles which is suitable for training
+    Creator creates small chip from larger tiles which is suitable for training
     segmentation models.
     """
     del argv
