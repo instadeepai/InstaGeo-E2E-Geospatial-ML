@@ -213,18 +213,19 @@ def retrieve_hls_metadata(
 
 
 def get_hls_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
-    """Get HLS Tile ID for Each Observation.
+    """Retrieve Harmonized Landsat Sentinel (HLS) Tile IDs for Geospatial Observations.
 
     Observations are usually described by geolocation scattered across the globe. They are
     dense as well as sparse in various locations. In order to optimize resource usage, we
     subset the observations in dense locations.
 
-    We first add the HLS tile ID for each observationa and count the number of
-    observations in each tile. Then we retain the tiles with `min_count` observations.
+    The function assigns an HLS tile ID to each observation, counts the occurrences within
+    each tile, and retains only those tiles with a specified minimum count (`min_count`) of
+    observations.
 
     Args:
-        data: Dataframe containing locust observations
-        min_count: minimum count of locust observations per HLS tile.
+        data: DataFrame containing geospatial observations with location coordinates.
+        min_count: Minimum count of observations required per HLS tile to retain.
 
     Returns:
         Subset of observations where there are at least `min_count` observations per tile
