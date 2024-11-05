@@ -7,7 +7,7 @@ import pytest
 import rasterio
 from rasterio.crs import CRS
 
-from instageo.data.chip_creator import create_hls_dataset
+from instageo.data.hls_pipeline import create_hls_dataset
 from instageo.data.hls_utils import (
     add_hls_granules,
     find_closest_tile,
