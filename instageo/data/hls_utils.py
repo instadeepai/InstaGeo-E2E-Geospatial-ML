@@ -25,7 +25,6 @@ from datetime import datetime, timedelta
 from multiprocessing import cpu_count
 
 import earthaccess
-import mgrs
 import pandas as pd
 from absl import logging
 
@@ -132,39 +131,6 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
         granules = list(granules["meta.native-id"])
         granules_dict[tile_id] = granules
     return granules_dict
-
-
-def get_hls_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
-    """Retrieve Harmonized Landsat Sentinel (HLS) Tile IDs for Geospatial Observations.
-
-    This function associates each geospatial observation with an HLS tile ID based on its
-    geographic location, accommodating datasets with varying density across locations. By
-    focusing on more densely populated areas, it enables more efficient resource usage and
-    refined data analysis.
-
-    The function assigns an HLS tile ID to each observation, counts the occurrences within
-    each tile, and retains only those tiles with a specified minimum count (`min_count`) of
-    observations.
-
-    Args:
-        data: DataFrame containing geospatial observations with location coordinates.
-        min_count: Minimum count of observations required per HLS tile to retain.
-
-    Returns:
-        A subset of observations within HLS tiles that meet or exceed the specified `min_count`.
-    """
-    mgrs_object = mgrs.MGRS()
-    get_mgrs_tile_id = lambda row: mgrs_object.toMGRS(
-        row["y"], row["x"], MGRSPrecision=0
-    )
-    data["mgrs_tile_id"] = data.apply(get_mgrs_tile_id, axis=1)
-    tile_counts = data.groupby("mgrs_tile_id").size().sort_values(ascending=False)
-    data = pd.merge(
-        data, tile_counts.reset_index(name="counts"), how="left", on="mgrs_tile_id"
-    )
-    sub_data = data[data["counts"] >= min_count]
-    assert not sub_data.empty, "No observation records left"
-    return sub_data
 
 
 def get_hls_tile_info(

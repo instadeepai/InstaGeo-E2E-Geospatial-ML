@@ -29,6 +29,7 @@ from absl import app, flags, logging
 from tqdm import tqdm
 
 import instageo.data.hls_utils as hls_utils
+from instageo.data.geo_utils import get_tiles
 from instageo.data.hls_pipeline import (
     create_and_save_chips_with_seg_maps_hls,
     create_hls_dataset,
@@ -60,7 +61,9 @@ flags.DEFINE_boolean(
 )
 flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
 flags.DEFINE_boolean("water_mask", False, "Perform Water Masking")
-flags.DEFINE_string("data_source", "HLS", "Data source to use.")
+flags.DEFINE_string(
+    "data_source", "HLS", "Data source to use. Accepted values are 'HLS' or 'S2'."
+)
 
 
 def check_required_flags() -> None:
@@ -82,10 +85,9 @@ def main(argv: Any) -> None:
     data = pd.read_csv(FLAGS.dataframe_path)
     data["date"] = pd.to_datetime(data["date"]) - pd.offsets.MonthBegin(1)
     data["input_features_date"] = data["date"] - pd.DateOffset(months=1)
+    sub_data = get_tiles(data, min_count=FLAGS.min_count)
 
     if FLAGS.data_source == "HLS":
-        sub_data = hls_utils.get_hls_tiles(data, min_count=FLAGS.min_count)
-
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))
             and os.path.exists(
@@ -163,6 +165,13 @@ def main(argv: Any) -> None:
         logging.info("Saving dataframe of chips and segmentation maps.")
         pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
             os.path.join(FLAGS.output_directory, "hls_chips_dataset.csv")
+        )
+
+    elif FLAGS.data_source == "S2":
+        print("Will use S2 pipeline")
+    else:
+        raise ValueError(
+            "Error: data_source value is not correct. Please enter 'HLS' or 'S2'."
         )
 
 
