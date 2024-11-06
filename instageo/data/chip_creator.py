@@ -498,6 +498,13 @@ def main(argv: Any) -> None:
         os.path.join(FLAGS.output_directory, "hls_chips_dataset.csv")
     )
 
+    elif FLAGS.data_source == "S2":
+        print("Will use S2 pipeline")
+    else:
+        raise ValueError(
+            "Error: data_source value is not correct. Please enter 'HLS' or 'S2'."
+        )
+
 
 if __name__ == "__main__":
     app.run(main)

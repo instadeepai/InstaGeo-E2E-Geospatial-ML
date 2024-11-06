@@ -7,12 +7,12 @@ import pytest
 import rasterio
 from rasterio.crs import CRS
 
+from instageo.data.geo_utils import get_tiles
 from instageo.data.hls_pipeline import create_hls_dataset
 from instageo.data.hls_utils import (
     add_hls_granules,
     find_closest_tile,
     get_hls_tile_info,
-    get_hls_tiles,
     parallel_download,
     parse_date_from_entry,
     retrieve_hls_metadata,
@@ -86,8 +86,8 @@ def observation_data():
     return data
 
 
-def test_get_hls_tiles(observation_data):
-    hls_tiles = get_hls_tiles(data=observation_data, min_count=1)
+def test_get_tiles(observation_data):
+    hls_tiles = get_tiles(data=observation_data, min_count=1)
     assert list(hls_tiles["mgrs_tile_id"]) == [
         "38PMB",
         "38PMB",
@@ -103,7 +103,7 @@ def test_get_hls_tiles(observation_data):
 
 
 def test_get_hls_tile_info(observation_data):
-    hls_tiles = get_hls_tiles(observation_data, min_count=3)
+    hls_tiles = get_tiles(observation_data, min_count=3)
     tiles_info, tile_queries = get_hls_tile_info(
         hls_tiles, num_steps=3, temporal_step=5
     )
@@ -164,7 +164,7 @@ def test_retrieve_hls_metadata():
 
 
 def test_add_hls_granules(observation_data):
-    data = get_hls_tiles(observation_data, min_count=3)
+    data = get_tiles(observation_data, min_count=3)
     result = add_hls_granules(data)
     assert list(result["hls_tiles"]) == [
         [
@@ -347,7 +347,7 @@ def test_find_closest_tile():
 
 
 def test_create_hls_dataset(observation_data):
-    data = get_hls_tiles(observation_data, min_count=3)
+    data = get_tiles(observation_data, min_count=3)
     data_with_tiles = add_hls_granules(
         data, num_steps=3, temporal_step=10, temporal_tolerance=5
     )

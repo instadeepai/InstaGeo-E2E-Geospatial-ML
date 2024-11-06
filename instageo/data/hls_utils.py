@@ -27,7 +27,6 @@ from multiprocessing import cpu_count
 from typing import Any
 
 import earthaccess
-import mgrs
 import pandas as pd
 from absl import logging
 from shapely.geometry import box
