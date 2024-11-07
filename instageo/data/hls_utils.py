@@ -31,6 +31,8 @@ import pandas as pd
 from absl import logging
 from shapely.geometry import box
 
+from instageo.data.geo_utils import get_tile_info
+
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
     """Extracts the date from a HLS Tile Name.
