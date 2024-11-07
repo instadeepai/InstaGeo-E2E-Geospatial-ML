@@ -29,6 +29,50 @@ import pandas as pd
 import xarray as xr
 
 
+def get_tile_info(
+    data: pd.DataFrame, num_steps: int = 3, temporal_step: int = 10
+) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
+    """Get Tile Info.
+
+    Retrieves a summary of all tiles required for a given dataset. The summary contains
+    the desired start and end date for each tile. Also retrieves a list of queries
+    that can be used to retieve the tiles for each observation in `data`.
+
+    Args:
+        data (pd.DataFrame): A dataframe containing observation records.
+        num_steps (int): Number of temporal time steps
+        temporal_step (int): Size of each temporal step.
+
+    Returns:
+        A `tile_info` dataframe and a list of `tile_queries`
+    """
+    data = data[["mgrs_tile_id", "input_features_date", "x", "y"]].reset_index(
+        drop=True
+    )
+    tile_queries = []
+    tile_info = []
+    for _, (tile_id, date, lon, lat) in data.iterrows():
+        history = []
+        for i in range(num_steps):
+            curr_date = date - pd.Timedelta(days=temporal_step * i)
+            history.append(curr_date.strftime("%Y-%m-%d"))
+            tile_info.append([tile_id, curr_date.strftime("%Y-%m-%d"), lon, lat])
+        tile_queries.append((tile_id, history))
+    tile_info = (
+        pd.DataFrame(tile_info, columns=["tile_id", "date", "lon", "lat"])
+        .groupby("tile_id")
+        .agg(
+            min_date=("date", "min"),
+            max_date=("date", "max"),
+            lon_min=("lon", "min"),
+            lon_max=("lon", "max"),
+            lat_min=("lat", "min"),
+            lat_max=("lat", "max"),
+        )
+    ).reset_index()
+    return tile_info, tile_queries
+
+
 def get_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
     """Retrieve Tile IDs for Geospatial Observations from Satellite Data.
 

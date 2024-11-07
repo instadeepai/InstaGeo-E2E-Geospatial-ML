@@ -28,6 +28,8 @@ import earthaccess
 import pandas as pd
 from absl import logging
 
+from instageo.data.geo_utils import get_tile_info
+
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
     """Extracts the date from a HLS Tile Name.
@@ -133,50 +135,6 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
     return granules_dict
 
 
-def get_hls_tile_info(
-    data: pd.DataFrame, num_steps: int = 3, temporal_step: int = 10
-) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
-    """Get HLS Tile Info.
-
-    Retrieves a summary of all tiles required for a given dataset. The summary contains
-    the desired start and end date for each HLS tile. Also retrieves a list of queries
-    that can be used to retieve the tiles for each observation in `data`.
-
-    Args:
-        data (pd.DataFrame): A dataframe containing observation records.
-        num_steps (int): Number of temporal time steps
-        temporal_step (int): Size of each temporal step.
-
-    Returns:
-        A `tile_info` dataframe and a list of `tile_queries`
-    """
-    data = data[["mgrs_tile_id", "input_features_date", "x", "y"]].reset_index(
-        drop=True
-    )
-    tile_queries = []
-    tile_info = []
-    for _, (tile_id, date, lon, lat) in data.iterrows():
-        history = []
-        for i in range(num_steps):
-            curr_date = date - pd.Timedelta(days=temporal_step * i)
-            history.append(curr_date.strftime("%Y-%m-%d"))
-            tile_info.append([tile_id, curr_date.strftime("%Y-%m-%d"), lon, lat])
-        tile_queries.append((tile_id, history))
-    tile_info = (
-        pd.DataFrame(tile_info, columns=["tile_id", "date", "lon", "lat"])
-        .groupby("tile_id")
-        .agg(
-            min_date=("date", "min"),
-            max_date=("date", "max"),
-            lon_min=("lon", "min"),
-            lon_max=("lon", "max"),
-            lat_min=("lat", "min"),
-            lat_max=("lat", "max"),
-        )
-    ).reset_index()
-    return tile_info, tile_queries
-
-
 def add_hls_granules(
     data: pd.DataFrame,
     num_steps: int = 3,
@@ -190,7 +148,7 @@ def add_hls_granules(
     desired date with a tolearance of `temporal_tolerance`.
 
     Args:
-        data (pd.DataFrame): A dattaframe containing observations that fall within a
+        data (pd.DataFrame): A dataframe containing observations that fall within a
             dense tile.
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
@@ -200,7 +158,7 @@ def add_hls_granules(
         A dataframe containing a list of HLS granules. Each granule is a directory
         containing all the bands.
     """
-    tiles_info, tile_queries = get_hls_tile_info(
+    tiles_info, tile_queries = get_tile_info(
         data, num_steps=num_steps, temporal_step=temporal_step
     )
     tile_queries_str = [

@@ -12,7 +12,7 @@ from instageo.data.hls_pipeline import create_hls_dataset
 from instageo.data.hls_utils import (
     add_hls_granules,
     find_closest_tile,
-    get_hls_tile_info,
+    get_tile_info,
     parallel_download,
     parse_date_from_entry,
     retrieve_hls_metadata,
@@ -102,11 +102,9 @@ def test_get_tiles(observation_data):
     ]
 
 
-def test_get_hls_tile_info(observation_data):
+def test_get_tile_info(observation_data):
     hls_tiles = get_tiles(observation_data, min_count=3)
-    tiles_info, tile_queries = get_hls_tile_info(
-        hls_tiles, num_steps=3, temporal_step=5
-    )
+    tiles_info, tile_queries = get_tile_info(hls_tiles, num_steps=3, temporal_step=5)
     pd.testing.assert_frame_equal(
         tiles_info,
         pd.DataFrame(
