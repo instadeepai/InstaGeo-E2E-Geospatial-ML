@@ -35,6 +35,8 @@ from instageo.data.hls_pipeline import (
     create_hls_dataset,
 )
 
+# from instageo.data.s2_utils import retrieve_sentinel2_metadata
+
 logging.set_verbosity(logging.INFO)
 
 FLAGS = flags.FLAGS
@@ -63,6 +65,11 @@ flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
 flags.DEFINE_boolean("water_mask", False, "Perform Water Masking")
 flags.DEFINE_string(
     "data_source", "HLS", "Data source to use. Accepted values are 'HLS' or 'S2'."
+)
+flags.DEFINE_integer(
+    "cloud_coverage",
+    10,
+    "Percentage os cloud cover to use. Accepted values are between 0and 100.",
 )
 
 
@@ -165,13 +172,6 @@ def main(argv: Any) -> None:
         logging.info("Saving dataframe of chips and segmentation maps.")
         pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
             os.path.join(FLAGS.output_directory, "hls_chips_dataset.csv")
-        )
-
-    elif FLAGS.data_source == "S2":
-        print("Will use S2 pipeline")
-    else:
-        raise ValueError(
-            "Error: data_source value is not correct. Please enter 'HLS' or 'S2'."
         )
 
 
