@@ -42,6 +42,8 @@ from instageo.data.geo_utils import (
 )
 from instageo.data.settings import GDALOptions
 
+# from instageo.data.s2_utils import retrieve_sentinel2_metadata
+
 logging.set_verbosity(logging.INFO)
 
 FLAGS = flags.FLAGS
@@ -132,6 +134,11 @@ flags.DEFINE_enum(
     - "each" for timestep-wise masking.
     - "any" to exclude pixels if the mask is present for at least one timestep.
     """,
+)
+flags.DEFINE_integer(
+    "cloud_coverage",
+    10,
+    "Percentage os cloud cover to use. Accepted values are between 0and 100.",
 )
 
 
@@ -497,13 +504,6 @@ def main(argv: Any) -> None:
     pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
         os.path.join(FLAGS.output_directory, "hls_chips_dataset.csv")
     )
-
-    elif FLAGS.data_source == "S2":
-        print("Will use S2 pipeline")
-    else:
-        raise ValueError(
-            "Error: data_source value is not correct. Please enter 'HLS' or 'S2'."
-        )
 
 
 if __name__ == "__main__":
