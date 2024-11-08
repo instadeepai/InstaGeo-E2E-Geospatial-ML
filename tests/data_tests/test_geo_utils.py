@@ -2,7 +2,7 @@ import pytest
 import xarray as xr
 from rasterio.crs import CRS
 
-from instageo.data.hls_pipeline import decode_fmask_value, open_mf_tiff_dataset
+from instageo.data.hls_utils import decode_fmask_value, open_mf_tiff_dataset
 
 
 def test_open_mf_tiff_dataset():

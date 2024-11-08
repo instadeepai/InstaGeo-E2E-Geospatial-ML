@@ -7,13 +7,14 @@ import pytest
 import rasterio
 from rasterio.crs import CRS
 
-from instageo.data.geo_utils import get_tiles
-from instageo.data.hls_pipeline import create_hls_dataset
-from instageo.data.hls_utils import (
+from instageo.data.geo_utils import get_tile_info, get_tiles
+from instageo.data.hls_pipeline import (
     add_hls_granules,
-    find_closest_tile,
-    get_tile_info,
+    create_hls_dataset,
     parallel_download,
+)
+from instageo.data.hls_utils import (
+    find_closest_tile,
     parse_date_from_entry,
     retrieve_hls_metadata,
 )
