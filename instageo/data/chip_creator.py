@@ -28,14 +28,13 @@ import rasterio
 from absl import app, flags, logging
 from tqdm import tqdm
 
-import instageo.data.hls_utils as hls_utils
 from instageo.data.geo_utils import get_tiles
 from instageo.data.hls_pipeline import (
+    add_hls_granules,
     create_and_save_chips_with_seg_maps_hls,
     create_hls_dataset,
+    parallel_download,
 )
-
-# from instageo.data.s2_utils import retrieve_sentinel2_metadata
 
 logging.set_verbosity(logging.INFO)
 
@@ -103,7 +102,7 @@ def main(argv: Any) -> None:
         ):
             logging.info("Creating HLS dataset JSON.")
             logging.info("Retrieving HLS tile ID for each observation.")
-            sub_data_with_tiles = hls_utils.add_hls_granules(
+            sub_data_with_tiles = add_hls_granules(
                 sub_data,
                 num_steps=FLAGS.num_steps,
                 temporal_step=FLAGS.temporal_step,
@@ -131,7 +130,7 @@ def main(argv: Any) -> None:
             )["tiles"].tolist()
         os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
         logging.info("Downloading HLS Tiles")
-        hls_utils.parallel_download(
+        parallel_download(
             granules_to_download,
             outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
         )

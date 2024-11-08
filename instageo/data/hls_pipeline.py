@@ -20,71 +20,65 @@
 """HLS pipeline Module."""
 
 import os
+from multiprocessing import cpu_count
 
+import earthaccess
 import geopandas as gpd
 import pandas as pd
-import rasterio
-import xarray as xr
-from rasterio.crs import CRS
+from absl import logging
 from shapely.geometry import Point
 
-from instageo.data.geo_utils import create_segmentation_map, get_chip_coords
+from instageo.data.geo_utils import (
+    create_segmentation_map,
+    get_chip_coords,
+    get_tile_info,
+)
+from instageo.data.hls_utils import (
+    find_closest_tile,
+    open_mf_tiff_dataset,
+    retrieve_hls_metadata,
+)
 
 
-def open_mf_tiff_dataset(
-    band_files: dict[str, dict[str, str]], mask_cloud: bool, water_mask: bool
-) -> tuple[xr.Dataset, CRS]:
-    """Open multiple TIFF files as an xarray Dataset.
+def add_hls_granules(
+    data: pd.DataFrame,
+    num_steps: int = 3,
+    temporal_step: int = 10,
+    temporal_tolerance: int = 5,
+) -> pd.DataFrame:
+    """Add HLS Granules.
+
+    Data contains tile_id and a series of date for which the tile is desired. This
+    function takes the tile_id and the dates and finds the HLS tiles closest to the
+    desired date with a tolearance of `temporal_tolerance`.
 
     Args:
-        band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
-        mask_cloud (bool): Perform cloud masking.
-        water_mask (bool): Perform water masking.
+        data (pd.DataFrame): A dataframe containing observations that fall within a
+            dense tile.
+        num_steps (int): Number of temporal steps into the past to fetch.
+        temporal_step (int): Step size (in days) for creating temporal steps.
+        temporal_tolerance (int): Tolerance (in days) for finding closest HLS tile.
 
     Returns:
-        (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
-            provided TIFF files and its CRS
+        A dataframe containing a list of HLS granules. Each granule is a directory
+        containing all the bands.
     """
-    band_paths = list(band_files["tiles"].values())
-    bands_dataset = xr.open_mfdataset(
-        band_paths,
-        concat_dim="band",
-        combine="nested",
+    tiles_info, tile_queries = get_tile_info(
+        data, num_steps=num_steps, temporal_step=temporal_step
     )
-    mask_paths = list(band_files["fmasks"].values())
-    mask_dataset = xr.open_mfdataset(
-        mask_paths,
-        concat_dim="band",
-        combine="nested",
+    tile_queries_str = [
+        f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
+    ]
+    data["tile_queries"] = tile_queries_str
+    tile_database = retrieve_hls_metadata(tiles_info)
+    tile_queries_dict = {k: v for k, v in zip(tile_queries_str, tile_queries)}
+    query_result = find_closest_tile(
+        tile_queries=tile_queries_dict,
+        tile_database=tile_database,
+        temporal_tolerance=temporal_tolerance,
     )
-    if water_mask:
-        mask_water = decode_fmask_value(mask_dataset, 5)
-        mask_water = mask_water.band_data.values.any(axis=0).astype(int)
-        bands_dataset = bands_dataset.where(mask_water == 0)
-    if mask_cloud:
-        cloud_mask = decode_fmask_value(mask_dataset, 1)
-        cloud_mask = cloud_mask.band_data.values.any(axis=0).astype(int)
-        bands_dataset = bands_dataset.where(cloud_mask == 0)
-    with rasterio.open(band_paths[0]) as src:
-        crs = src.crs
-    return bands_dataset, crs
-
-
-def decode_fmask_value(value: xr.Dataset, position: int) -> xr.Dataset:
-    """Decodes HLS v2.0 Fmask.
-
-    The decoding strategy is described in Appendix A of the user manual
-    (https://lpdaac.usgs.gov/documents/1698/HLS_User_Guide_V2.pdf).
-
-    Arguments:
-        value: Input xarray Dataset created from Fmask.tif
-        position: Bit position to decode.
-
-    Returns:
-        Xarray dataset containing decoded bits.
-    """
-    quotient = value // (2**position)
-    return quotient - ((quotient // 2) * 2)
+    data = pd.merge(data, query_result, how="left", on="tile_queries")
+    return data
 
 
 def create_hls_dataset(
@@ -158,6 +152,49 @@ def create_hls_dataset(
             "fmasks": {k: v for k, v in zip(mask_id, mask_path)},
         }
     return hls_dataset, set(granules_to_download)
+
+
+def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None:
+    """Parallel Download.
+
+    Wraps `download_tile` with multiprocessing.Pool for downloading multiple tiles in
+    parallel.
+
+    Args:
+        urls: Tile urls to download.
+        outdir: Directory to save downloaded tiles.
+        max_retries: Number of times to retry downloading all tiles.
+
+    Returns:
+        None
+    """
+    num_cpus = cpu_count()
+    earthaccess.login(persist=True)
+    retries = 0
+    complete = False
+    while retries <= max_retries:
+        temp_urls = [
+            url
+            for url in urls
+            if not os.path.exists(os.path.join(outdir, url.split("/")[-1]))
+        ]
+        if not temp_urls:
+            complete = True
+            break
+        earthaccess.download(temp_urls, local_path=outdir, threads=num_cpus)
+        for filename in os.listdir(outdir):
+            file_path = os.path.join(outdir, filename)
+            if os.path.isfile(file_path):
+                file_size = os.path.getsize(file_path)
+                if file_size < 1024:
+                    os.remove(file_path)
+        retries += 1
+    if complete:
+        logging.info("Successfully downloaded all granules")
+    else:
+        logging.warning(
+            f"Couldn't download the following granules after {max_retries} retries:\n{urls}"  # noqa
+        )
 
 
 def create_and_save_chips_with_seg_maps_hls(
