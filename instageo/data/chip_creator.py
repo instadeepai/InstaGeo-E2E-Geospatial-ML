@@ -42,8 +42,6 @@ from instageo.data.geo_utils import (
 )
 from instageo.data.settings import GDALOptions
 
-# from instageo.data.s2_utils import retrieve_sentinel2_metadata
-
 logging.set_verbosity(logging.INFO)
 
 FLAGS = flags.FLAGS
@@ -458,7 +456,7 @@ def main(argv: Any) -> None:
     os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
     if FLAGS.processing_method in ["download", "download-only"]:
         logging.info("Downloading HLS Tiles")
-        hls_utils.parallel_download(
+        parallel_download(
             granules_to_download,
             outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
         )
