@@ -503,6 +503,33 @@ def main(argv: Any) -> None:
         os.path.join(FLAGS.output_directory, "hls_chips_dataset.csv")
     )
 
+    elif FLAGS.data_source == "S2":
+        print("Will use S2 pipeline")
+
+        if not (
+            os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
+            and os.path.exists(
+                os.path.join(FLAGS.output_directory, "granules_to_download.csv")
+            )
+        ):
+            logging.info("Creating S2 dataset JSON.")
+            logging.info("Retrieving tile ID for each observation.")
+
+            granules_dict = retrieve_sentinel2_metadata(
+                sub_data,
+                cloud_coverage=FLAGS.cloud_coverage,
+                num_steps=FLAGS.num_steps,
+                temporal_step=FLAGS.temporal_step,
+                temporal_tolerance=FLAGS.temporal_tolerance,
+            )
+
+            print(json.dumps(granules_dict, indent=4))
+
+    else:
+        raise ValueError(
+            "Error: data_source value is not correct. Please enter 'HLS' or 'S2'."
+        )
+
 
 if __name__ == "__main__":
     app.run(main)
