@@ -9,7 +9,7 @@ The InstaGeo Model component is designed for training, validation and inference 
 See `requirements.txt`
 
 ## Features
-- Supports both classsification and regression tasks
+- Supports both classification and regression tasks
 - Accepts both temporal and non-temporal inputs
 - Custom models with [Prithvi_100M](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M) backbone
 - Training, Validation and Inference runs

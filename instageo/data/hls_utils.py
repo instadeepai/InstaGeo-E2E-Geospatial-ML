@@ -173,7 +173,7 @@ def get_hls_tile_info(
 
     Retrieves a summary of all tiles required for a given dataset. The summary contains
     the desired start and end date for each HLS tile. Also retrieves a list of queries
-    that can be used to retieve the tiles for each observation in `data`.
+    that can be used to retrieve the tiles for each observation in `data`.
 
     Args:
         data (pd.DataFrame): A dataframe containing observation records.

@@ -19,7 +19,7 @@ By providing gelocated observation records containing longitude, latitude, date 
 - For each record, create a corresponding temporal series of HLS granules
 - Create a set of all HLS granules
 - Download the required bands from each granule
-- Create and save chips and segementation maps
+- Create and save chips and segmentation maps
 
 Chip creator is particularly useful for geospatial image segmentation where large satellite images are segmented into smaller chips for training geospatial models (such as [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M)) using image segmentation objective.
 
