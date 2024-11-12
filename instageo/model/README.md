@@ -51,9 +51,9 @@ Run training with the necessary flags:
 python -m instageo.model.run \
     root_dir=path/to/root valid_filepath=path/to/valdata \
     train_filepath=path/to/traindata \
-    learning_rate=0.001 \
-    num_epochs=100 \
-    batch_size=4
+    train.learning_rate=0.001 \
+    train.num_epochs=100 \
+    train.batch_size=4
 ```
 
 4. **Prediction using Sliding Window Inference:** For training we create chips from HLS tiles, this is necessary because our model can only process an input of size 224 x 224. For the purpose of inference we have a sliding window inference feature that inputs HLS tile and perform a sliding window inference on patches of size 224 x 224. This is useful because it skips the process of creating chips using the `instageo.data.chip_creator`, we only need to download HLS tiles and directly runs inference on them. We can run inference using the following command:
@@ -90,7 +90,7 @@ python -m instageo.model.run --config-name=sen1floods11 \
     root_dir=sen1floods11 \
     train_filepath=sen1floods11/flood_train_data.csv \
     valid_filepath=sen1floods11/flood_valid_data.csv \
-    num_epochs=100
+    train.num_epochs=100
 ```
 After training you are expected to have a checkpoint with mIoU of ~ 89%
 
