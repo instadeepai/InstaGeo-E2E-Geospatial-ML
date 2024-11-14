@@ -35,7 +35,7 @@ from instageo.data.hls_pipeline import (
     create_hls_dataset,
     parallel_download,
 )
-from instageo.data.s2_pipeline import retrieve_sentinel2_metadata
+from instageo.data.s2_pipeline import download_tile_data, retrieve_sentinel2_metadata
 
 logging.set_verbosity(logging.INFO)
 
@@ -195,6 +195,27 @@ def main(argv: Any) -> None:
             )
 
             print(json.dumps(granules_dict, indent=4))
+
+            with open(
+                os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w"
+            ) as json_file:
+                json.dump(granules_dict, json_file, indent=4)
+
+        client_id = "your_client_id"  # Replace with your client ID
+        username = "your_username"  # Replace with your username
+        password = "your_password"  # Replace with your password
+
+        logging.info("Processing the tiles and initiating downloads")
+        # Call the function to process the tiles and initiate downloads
+        download_tile_data(
+            granules_dict,
+            FLAGS.output_directory,
+            client_id,
+            username,
+            password,
+            temporal_step=FLAGS.temporal_step,
+            num_steps=FLAGS.num_steps,
+        )
 
     else:
         raise ValueError(
