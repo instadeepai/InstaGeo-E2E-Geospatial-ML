@@ -19,14 +19,16 @@
 
 """HLS pipeline Module."""
 
+import os
 import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 import requests  # type: ignore
 
 from instageo.data.geo_utils import get_tile_info
+from instageo.data.s2_utils import filter_products_by_month, parallel_downloads_s2
 
 
 def retrieve_sentinel2_metadata(
@@ -105,13 +107,6 @@ def retrieve_sentinel2_metadata(
                     )
 
                     acquisition_date = re.search(r"(\d{8})", full_tile_id)
-                    # acquisition_date = (
-                    #     datetime.strptime(acquisition_date.group(1), "%Y%m%d").strftime(
-                    #         "%Y-%m-%d"
-                    #     )
-                    #     if acquisition_date
-                    #     else None
-                    # )
 
                     tile_acquisition_date: str | None = (
                         datetime.strptime(acquisition_date.group(1), "%Y%m%d").strftime(
@@ -139,3 +134,51 @@ def retrieve_sentinel2_metadata(
                         unique_full_tile_ids.add(full_tile_id)
 
     return granules_dict
+
+
+def download_tile_data(
+    tile_database: Dict[str, Any],
+    output_directory: str,
+    client_id: str,
+    username: str,
+    password: str,
+    temporal_step: int,
+    num_steps: int,
+) -> None:
+    """Download Sentinel-2 Tiles .
+
+    Processes the provided tile database to filter products by month, creates necessary
+    directories, and initiates parallel downloads if valid products are found.
+
+    Args:
+        tile_database (Dict[str, Any]): A dictionary where keys are tile names and values
+        are data about each tile.
+        output_directory (str): Path to the directory where tiles should be stored.
+        client_id (str): The client ID for authentication during the download process.
+        username (str): The username for authentication.
+        password (str): The password for authentication.
+
+    Returns:
+        None
+    """
+    download_info_list: List[Tuple[str, str, str]] = []
+
+    for tile_name, tile_data in tile_database.items():
+        os.makedirs(os.path.join(output_directory, tile_name), exist_ok=True)
+
+        filtered_products = filter_products_by_month(
+            tile_data, temporal_step, num_steps
+        )
+
+        if filtered_products:
+            for entry in filtered_products:
+                download_link = entry["download_link"]
+                full_tile_id = entry["full_tile_id"]
+                download_info_list.append((download_link, full_tile_id, tile_name))
+
+    if download_info_list:
+        parallel_downloads_s2(
+            client_id, username, password, download_info_list, output_directory
+        )
+    else:
+        print("No valid products found for download.")
