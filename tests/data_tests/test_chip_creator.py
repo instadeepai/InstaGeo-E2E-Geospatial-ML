@@ -2,17 +2,14 @@ import os
 import pathlib
 import shutil
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 from absl import flags
-from shapely.geometry import Point
 
 from instageo.data import chip_creator
 from instageo.data.chip_creator import app, check_required_flags
-from instageo.data.geo_utils import get_chip_coords
 
 FLAGS = flags.FLAGS
 
@@ -32,28 +29,6 @@ def setup_and_teardown_output_dir():
         os.remove(os.path.join(output_dir, "hls_chips_dataset.csv"))
     except FileNotFoundError:
         pass
-
-
-def test_get_chip_coords():
-    df = pd.read_csv("tests/data/sample_4326.csv")
-    df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
-    df.set_crs(epsg=4326, inplace=True)
-    df = df.to_crs(crs=32613)
-
-    ds = xr.open_dataset("tests/data/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif")
-    chip_coords = get_chip_coords(df, ds, 64)
-    assert chip_coords == [
-        (2, 0),
-        (0, 3),
-        (2, 2),
-        (0, 3),
-        (2, 0),
-        (3, 2),
-        (2, 3),
-        (0, 3),
-        (2, 3),
-        (1, 2),
-    ]
 
 
 @pytest.mark.auth
@@ -77,6 +52,8 @@ def test_chip_creator(setup_and_teardown_output_dir):
         "30",
         "--num_steps",
         "1",
+        "--data_source",
+        "HLS",
     ]
     FLAGS(argv)
     chip_creator.main("None")
@@ -124,6 +101,8 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
         "--num_steps",
         "1",
         "--download_only",
+        "False" "--data_source",
+        "HLS",
     ]
     FLAGS(argv)
     chip_creator.main("None")

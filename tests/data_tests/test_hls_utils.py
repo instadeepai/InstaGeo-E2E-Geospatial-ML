@@ -4,17 +4,13 @@ import shutil
 
 import pandas as pd
 import pytest
-import rasterio
+import xarray as xr
 from rasterio.crs import CRS
 
-from instageo.data.geo_utils import get_tile_info, get_tiles
-from instageo.data.hls_pipeline import (
-    add_hls_granules,
-    create_hls_dataset,
-    parallel_download,
-)
 from instageo.data.hls_utils import (
+    decode_fmask_value,
     find_closest_tile,
+    open_mf_tiff_dataset,
     parse_date_from_entry,
     retrieve_hls_metadata,
 )
@@ -28,105 +24,53 @@ def setup_and_teardown_output_dir():
     shutil.rmtree(output_dir)
 
 
-@pytest.fixture
-def observation_data():
-    data = pd.DataFrame(
-        {
-            "date": {
-                0: "2022-06-08",
-                1: "2022-06-08",
-                2: "2022-06-08",
-                3: "2022-06-08",
-                4: "2022-06-09",
-                5: "2022-06-09",
-                6: "2022-06-09",
-                7: "2022-06-08",
-                8: "2022-06-09",
-                9: "2022-06-09",
-            },
-            "x": {
-                0: 44.48,
-                1: 44.48865,
-                2: 46.437787,
-                3: 49.095545,
-                4: -0.1305,
-                5: 44.6216,
-                6: 49.398908,
-                7: 44.451435,
-                8: 49.435228,
-                9: 44.744167,
-            },
-            "y": {
-                0: 15.115617,
-                1: 15.099767,
-                2: 14.714659,
-                3: 16.066929,
-                4: 28.028967,
-                5: 16.16195,
-                6: 16.139727,
-                7: 15.209633,
-                8: 16.151837,
-                9: 15.287778,
-            },
-            "year": {
-                0: 2022,
-                1: 2022,
-                2: 2022,
-                3: 2022,
-                4: 2022,
-                5: 2022,
-                6: 2022,
-                7: 2022,
-                8: 2022,
-                9: 2022,
-            },
-        }
+def test_open_mf_tiff_dataset():
+    band_files = {
+        "tiles": {
+            "band1": "tests/data/sample.tif",
+            "band2": "tests/data/sample.tif",
+        },
+        "fmasks": {
+            "band1": "tests/data/fmask.tif",
+            "band2": "tests/data/fmask.tif",
+        },
+    }
+
+    result, crs = open_mf_tiff_dataset(band_files, mask_cloud=False, water_mask=False)
+    assert isinstance(result, xr.Dataset)
+    assert isinstance(crs, CRS)
+    assert crs == 32613
+    assert result["band_data"].shape == (2, 224, 224)
+
+
+def test_open_mf_tiff_dataset_cloud_mask():
+    band_files = {
+        "tiles": {
+            "band1": "tests/data/sample.tif",
+            "band2": "tests/data/sample.tif",
+        },
+        "fmasks": {
+            "band1": "tests/data/fmask.tif",
+            "band2": "tests/data/fmask.tif",
+        },
+    }
+    result_no_mask, crs = open_mf_tiff_dataset(
+        band_files, mask_cloud=False, water_mask=False
     )
-    data["date"] = pd.to_datetime(data["date"])
-    data["input_features_date"] = data["date"]
-    return data
-
-
-def test_get_tiles(observation_data):
-    hls_tiles = get_tiles(data=observation_data, min_count=1)
-    assert list(hls_tiles["mgrs_tile_id"]) == [
-        "38PMB",
-        "38PMB",
-        "38PPB",
-        "39QTT",
-        "30RYS",
-        "38QMC",
-        "39QUT",
-        "38PMB",
-        "39QUT",
-        "38PMB",
-    ]
-
-
-def test_get_tile_info(observation_data):
-    hls_tiles = get_tiles(observation_data, min_count=3)
-    tiles_info, tile_queries = get_tile_info(hls_tiles, num_steps=3, temporal_step=5)
-    pd.testing.assert_frame_equal(
-        tiles_info,
-        pd.DataFrame(
-            {
-                "tile_id": ["38PMB"],
-                "min_date": ["2022-05-29"],
-                "max_date": ["2022-06-09"],
-                "lon_min": [44.451435],
-                "lon_max": [44.744167],
-                "lat_min": [15.099767],
-                "lat_max": [15.287778],
-            }
-        ),
-        check_like=True,
+    num_points = result_no_mask.band_data.count().values.item()
+    result_with_mask, crs = open_mf_tiff_dataset(
+        band_files, mask_cloud=True, water_mask=False
     )
-    assert tile_queries == [
-        ("38PMB", ["2022-06-08", "2022-06-03", "2022-05-29"]),
-        ("38PMB", ["2022-06-08", "2022-06-03", "2022-05-29"]),
-        ("38PMB", ["2022-06-08", "2022-06-03", "2022-05-29"]),
-        ("38PMB", ["2022-06-09", "2022-06-04", "2022-05-30"]),
-    ]
+    fmask = xr.open_dataset("tests/data/fmask.tif")
+    cloud_mask = decode_fmask_value(fmask, 1)
+    num_clouds = cloud_mask.where(cloud_mask == 1).band_data.count().values.item()
+    assert (
+        result_with_mask.band_data.count().values.item() == num_points - 2 * num_clouds
+    )
+    assert isinstance(result_with_mask, xr.Dataset)
+    assert isinstance(crs, CRS)
+    assert crs == 32613
+    assert result_with_mask["band_data"].shape == (2, 224, 224)
 
 
 def test_retrieve_hls_metadata():
@@ -155,31 +99,21 @@ def test_retrieve_hls_metadata():
     }
 
 
-def test_add_hls_granules(observation_data):
-    data = get_tiles(observation_data, min_count=3)
-    result = add_hls_granules(data)
-    assert list(result["hls_tiles"]) == [
-        [
-            "HLS.L30.T38PMB.2022154T072604.v2.0",
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
-            "HLS.L30.T38PMB.2022139T071922.v2.0",
-        ],
-        [
-            "HLS.L30.T38PMB.2022154T072604.v2.0",
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
-            "HLS.L30.T38PMB.2022139T071922.v2.0",
-        ],
-        [
-            "HLS.L30.T38PMB.2022154T072604.v2.0",
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
-            "HLS.L30.T38PMB.2022139T071922.v2.0",
-        ],
-        [
-            "HLS.L30.T38PMB.2022155T071923.v2.0",
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
-            "HLS.L30.T38PMB.2022139T071922.v2.0",
-        ],
-    ]
+@pytest.mark.parametrize(
+    "value, position, result",
+    [
+        (100, 0, 0),
+        (100, 1, 0),
+        (100, 2, 1),
+        (100, 3, 0),
+        (100, 4, 0),
+        (100, 5, 1),
+        (100, 6, 1),
+        (100, 7, 0),
+    ],
+)
+def test_decode_fmask_value(value, position, result):
+    assert decode_fmask_value(value, position) == result
 
 
 def test_find_closest_tile():
@@ -319,71 +253,6 @@ def test_find_closest_tile():
             "HLS.L30.T38PMB.2022139T071922.v2.0.",
         ],
     ]
-
-
-def test_create_hls_dataset(observation_data):
-    data = get_tiles(observation_data, min_count=3)
-    data_with_tiles = add_hls_granules(
-        data, num_steps=3, temporal_step=10, temporal_tolerance=5
-    )
-    hls_dataset, tiles_to_download = create_hls_dataset(data_with_tiles, outdir="")
-    assert len(tiles_to_download) == 28
-    assert len(hls_dataset) == 2
-    assert len(hls_dataset["2022-06-08_T38PMB"]["tiles"]) == 18
-    assert len(hls_dataset["2022-06-08_T38PMB"]["fmasks"]) == 3
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_0"]
-        == "hls_tiles/HLS.L30.T38PMB.2022154T072604.v2.0.B02.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_0"]
-        == "hls_tiles/HLS.L30.T38PMB.2022154T072604.v2.0.Fmask.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_1"]
-        == "hls_tiles/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_1"]
-        == "hls_tiles/HLS.S30.T38PMB.2022145T072619.v2.0.Fmask.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_2"]
-        == "hls_tiles/HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_2"]
-        == "hls_tiles/HLS.L30.T38PMB.2022139T071922.v2.0.Fmask.tif"
-    )
-
-
-@pytest.mark.auth
-def test_download_hls_tile():
-    urls = [
-        "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif"  # noqa
-    ]
-    parallel_download(urls, outdir="/tmp")
-    out_filename = "/tmp/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif"  # noqa
-    assert os.path.exists(out_filename)
-    src = rasterio.open(out_filename)
-    assert isinstance(src.crs, CRS)
-
-
-@pytest.mark.auth
-def test_download_hls_tile_with_retry(setup_and_teardown_output_dir):
-    outdir = "/tmp/test_hls"
-    open(
-        os.path.join(outdir, "HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif"), "w"
-    ).close()
-    urls = {
-        "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B03.tif",  # noqa
-        "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif",  # noqa
-    }
-    parallel_download(urls, outdir=outdir)
-    out_filename = os.path.join(outdir, "HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif")
-    assert os.path.exists(out_filename)
-    src = rasterio.open(out_filename)
-    assert isinstance(src.crs, CRS)
 
 
 @pytest.mark.parametrize(
