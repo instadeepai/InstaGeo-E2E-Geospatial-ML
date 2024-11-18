@@ -1,6 +1,8 @@
+import geopandas as gpd
+import pandas as pd
 import pytest
 import xarray as xr
-from rasterio.crs import CRS
+from shapely.geometry import Point
 
 from instageo.data.geo_utils import apply_mask, decode_fmask_value, open_mf_tiff_dataset
 
@@ -60,18 +62,65 @@ def test_open_mf_tiff_dataset_cloud_mask():
     assert result_with_mask["band_data"].shape == (2, 224, 224)
 
 
-@pytest.mark.parametrize(
-    "value, position, result",
-    [
-        (100, 0, 0),
-        (100, 1, 0),
-        (100, 2, 1),
-        (100, 3, 0),
-        (100, 4, 0),
-        (100, 5, 1),
-        (100, 6, 1),
-        (100, 7, 0),
-    ],
-)
-def test_decode_fmask_value(value, position, result):
-    assert decode_fmask_value(value, position) == result
+def test_get_tiles(observation_data):
+    hls_tiles = get_tiles(data=observation_data, min_count=1)
+    assert list(hls_tiles["mgrs_tile_id"]) == [
+        "38PMB",
+        "38PMB",
+        "38PPB",
+        "39QTT",
+        "30RYS",
+        "38QMC",
+        "39QUT",
+        "38PMB",
+        "39QUT",
+        "38PMB",
+    ]
+
+
+def test_get_chip_coords():
+    df = pd.read_csv("tests/data/sample_4326.csv")
+    df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
+    df.set_crs(epsg=4326, inplace=True)
+    df = df.to_crs(crs=32613)
+
+    ds = xr.open_dataset("tests/data/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif")
+    chip_coords = get_chip_coords(df, ds, 64)
+    assert chip_coords == [
+        (2, 0),
+        (0, 3),
+        (2, 2),
+        (0, 3),
+        (2, 0),
+        (3, 2),
+        (2, 3),
+        (0, 3),
+        (2, 3),
+        (1, 2),
+    ]
+
+
+def test_get_tile_info(observation_data):
+    hls_tiles = get_tiles(observation_data, min_count=3)
+    tiles_info, tile_queries = get_tile_info(hls_tiles, num_steps=3, temporal_step=5)
+    pd.testing.assert_frame_equal(
+        tiles_info,
+        pd.DataFrame(
+            {
+                "tile_id": ["38PMB"],
+                "min_date": ["2022-05-29"],
+                "max_date": ["2022-06-09"],
+                "lon_min": [44.451435],
+                "lon_max": [44.744167],
+                "lat_min": [15.099767],
+                "lat_max": [15.287778],
+            }
+        ),
+        check_like=True,
+    )
+    assert tile_queries == [
+        ("38PMB", ["2022-06-08", "2022-06-03", "2022-05-29"]),
+        ("38PMB", ["2022-06-08", "2022-06-03", "2022-05-29"]),
+        ("38PMB", ["2022-06-08", "2022-06-03", "2022-05-29"]),
+        ("38PMB", ["2022-06-09", "2022-06-04", "2022-05-30"]),
+    ]
