@@ -28,14 +28,21 @@ import rasterio
 from absl import app, flags, logging
 from tqdm import tqdm
 
-from instageo.data.geo_utils import get_tiles
+from instageo.data.geo_utils import get_tile_info, get_tiles
 from instageo.data.hls_pipeline import (
     add_hls_granules,
     create_and_save_chips_with_seg_maps_hls,
     create_hls_dataset,
     parallel_download,
 )
-from instageo.data.s2_pipeline import download_tile_data, retrieve_sentinel2_metadata
+from instageo.data.s2_pipeline import (
+    create_and_save_chips_with_seg_maps_s2,
+    download_tile_data,
+    filter_best_product_in_folder,
+    process_tile_bands,
+    retrieve_sentinel2_metadata,
+    unzip_all,
+)
 
 logging.set_verbosity(logging.INFO)
 
@@ -175,7 +182,11 @@ def main(argv: Any) -> None:
         )
 
     elif FLAGS.data_source == "S2":
-        print("Will use S2 pipeline")
+        logging.info("Will use S2 pipeline")
+
+        tile_df, history_dates = get_tile_info(
+            sub_data, num_steps=FLAGS.num_steps, temporal_step=FLAGS.temporal_step
+        )
 
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
@@ -183,31 +194,34 @@ def main(argv: Any) -> None:
                 os.path.join(FLAGS.output_directory, "granules_to_download.csv")
             )
         ):
-            logging.info("Creating S2 dataset JSON.")
-            logging.info("Retrieving tile ID for each observation.")
-
+            logging.info("Retrieving S2 tiles that will be downloaded.")
             granules_dict = retrieve_sentinel2_metadata(
-                sub_data,
+                tile_df,
                 cloud_coverage=FLAGS.cloud_coverage,
-                num_steps=FLAGS.num_steps,
-                temporal_step=FLAGS.temporal_step,
                 temporal_tolerance=FLAGS.temporal_tolerance,
+                history_dates=history_dates,
             )
-
-            print(json.dumps(granules_dict, indent=4))
-
+            logging.info("Creating S2 dataset JSON.")
             with open(
                 os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w"
             ) as json_file:
                 json.dump(granules_dict, json_file, indent=4)
+            pd.DataFrame({"tiles": list(granules_dict)}).to_csv(
+                os.path.join(FLAGS.output_directory, "granules_to_download.csv")
+            )
+        else:
+            logging.info("S2 dataset JSON already created")
+            with open(
+                os.path.join(FLAGS.output_directory, "s2_dataset.json")
+            ) as json_file:
+                granules_dict = json.load(json_file)
 
         client_id = "your_client_id"  # Replace with your client ID
         username = "your_username"  # Replace with your username
         password = "your_password"  # Replace with your password
 
-        logging.info("Processing the tiles and initiating downloads")
-        # Call the function to process the tiles and initiate downloads
-        download_tile_data(
+        logging.info("Downloading S2 Tiles")
+        download_info_list = download_tile_data(
             granules_dict,
             FLAGS.output_directory,
             client_id,
@@ -215,6 +229,54 @@ def main(argv: Any) -> None:
             password,
             temporal_step=FLAGS.temporal_step,
             num_steps=FLAGS.num_steps,
+        )
+
+        if FLAGS.download_only:
+            return
+
+        logging.info("Unzipping S2 products")
+        unzip_all(download_info_list, output_directory=FLAGS.output_directory)
+
+        logging.info("Processing S2 products")
+        process_tile_bands(granules_dict, output_directory=FLAGS.output_directory)
+
+        for tile_name, tile_data in granules_dict.items():
+            filter_best_product_in_folder(
+                tile_name,
+                tile_data,
+                output_directory=FLAGS.output_directory,
+                history_dates=history_dates,
+                temporal_tolerance=FLAGS.temporal_tolerance,
+            )
+
+        logging.info("Creating Chips and Segmentation Maps")
+
+        os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
+        os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
+
+        try:
+            all_chips, all_seg_maps = create_and_save_chips_with_seg_maps_s2(
+                granules_dict=granules_dict,
+                sub_data=sub_data,
+                chip_size=FLAGS.chip_size,
+                output_directory=FLAGS.output_directory,
+                no_data_value=FLAGS.no_data_value,
+                src_crs=FLAGS.src_crs,
+                mask_cloud=FLAGS.mask_cloud,
+                water_mask=FLAGS.water_mask,
+                temporal_tolerance=FLAGS.temporal_tolerance,
+                history_dates=history_dates,
+            )
+
+            print(
+                f"Generated {len(all_chips)} chips and {len(all_seg_maps)} segmentation maps."
+            )
+        except Exception as e:
+            logging.error(f"Unexpected error: {e}")
+
+        logging.info("Saving dataframe of chips and segmentation maps.")
+        pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
+            os.path.join(FLAGS.output_directory, "s2_chips_dataset.csv")
         )
 
     else:

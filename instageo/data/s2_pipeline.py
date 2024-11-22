@@ -26,7 +26,9 @@ from typing import Any, Dict, List, Tuple
 
 import geopandas as gpd
 import pandas as pd
+import rasterio
 import requests  # type: ignore
+from absl import logging
 from shapely.geometry import Point
 
 from instageo.data.geo_utils import create_segmentation_map, get_chip_coords
@@ -45,12 +47,13 @@ def retrieve_sentinel2_metadata(
     tile_df: pd.DataFrame,
     cloud_coverage: float,
     temporal_tolerance: int,
-    history_dates: dict,
+    history_dates: list[tuple[str, list[str]]],
 ) -> Dict[str, List[Dict[str, Any]]]:
     """Retrieve Sentinel-2 Tiles Metadata.
 
     Given a tile_id, start_date, and a time window, this function fetches all
-    Sentinel-2 granules available for this tile_id in this time window.
+    Sentinel-2 granules available for this tile_id in this time window, but only
+    keeps tiles that match the `history_dates` or `tile_df["mgrs_tile"]`.
 
     Args:
         tile_df (pd.DataFrame): A dataframe containing tile_id, start_date, and geographical
@@ -58,14 +61,17 @@ def retrieve_sentinel2_metadata(
         cloud_coverage (float): Maximum acceptable cloud coverage for each granule.
         temporal_tolerance (int): Number of days before and after each historical date for
         the time window.
-        history_dates (dict): A dictionary of history dates for each tile.
-
+        history_dates (List[Tuple[str, List[str]]]): List of time windows for each
+        tile, with acquisition dates.
 
     Returns:
         A dictionary mapping tile_id to a list of available Sentinel-2 granules.
     """
     granules_dict: Dict[str, List[Dict[str, Any]]] = {}
     unique_full_tile_ids = set()
+
+    valid_tile_ids = set(tile_df["tile_id"].unique())
+    valid_tile_ids.update([tile for tile, _ in history_dates])
 
     for _, row in tile_df.iterrows():
         lon_min, lon_max, lat_min, lat_max = (
@@ -75,7 +81,7 @@ def retrieve_sentinel2_metadata(
             row["lat_max"],
         )
 
-        for _, date_list in history_dates:
+        for tile_id, date_list in history_dates:
             for date_str in date_list:
                 center_date = pd.to_datetime(date_str)
                 start_date_window = (
@@ -123,18 +129,19 @@ def retrieve_sentinel2_metadata(
                         else None
                     )
 
-                    granule_info = {
-                        "full_tile_id": full_tile_id,
-                        "tile_id": tile_id_extracted,
-                        "cloudCover": feature["properties"]["cloudCover"],
-                        "download_link": feature["properties"]["services"]["download"][
-                            "url"
-                        ],
-                        "thumbnail": feature["properties"]["thumbnail"],
-                        "acquisition_date": tile_acquisition_date,
-                    }
+                    # Check if tile ID is valid before adding
+                    if tile_id_extracted and tile_id_extracted in valid_tile_ids:
+                        granule_info = {
+                            "full_tile_id": full_tile_id,
+                            "tile_id": tile_id_extracted,
+                            "cloudCover": feature["properties"]["cloudCover"],
+                            "download_link": feature["properties"]["services"][
+                                "download"
+                            ]["url"],
+                            "thumbnail": feature["properties"]["thumbnail"],
+                            "acquisition_date": tile_acquisition_date,
+                        }
 
-                    if tile_id_extracted:
                         granules_dict.setdefault(tile_id_extracted, []).append(
                             granule_info
                         )
@@ -249,7 +256,8 @@ def filter_best_product_in_folder(
     tile_name: str,
     tile_products: List[Dict[str, str]],
     output_directory: str,
-    time_windows: List[Tuple[str, List[str]]],
+    history_dates: List[Tuple[str, List[str]]],
+    temporal_tolerance: int,
 ) -> None:
     """Filter best product.
 
@@ -260,159 +268,210 @@ def filter_best_product_in_folder(
         tile_name (str): Name of the tile.
         tile_products (list): List of product dictionaries for the tile.
         output_directory (str): The folder where all the tile folders are stored.
-        time_windows (List[Tuple[str, List[str]]]): List of time windows for each
+        history_dates (List[Tuple[str, List[str]]]): List of time windows for each
         tile, with acquisition dates.
+        temporal_tolerance (int): Number of days before and after each historical date for
+        the time window.
 
     Returns:
-    None
+        None
     """
     folder_path = os.path.join(output_directory, tile_name)
 
-    tile_time_window = [dates for name, dates in time_windows if name == tile_name]
+    for tile, dates in history_dates:
+        if tile == tile_name:
+            sorted_dates = sorted(
+                dates, key=lambda date: datetime.strptime(date, "%Y-%m-%d")
+            )
 
-    if tile_time_window:
-        sorted_dates = sorted(
-            tile_time_window[0], key=lambda date: datetime.strptime(date, "%Y-%m-%d")
-        )
+            for current_date in sorted_dates:
+                center_date = datetime.strptime(current_date, "%Y-%m-%d")
+                start_date = center_date - timedelta(days=temporal_tolerance)
+                end_date = center_date + timedelta(days=temporal_tolerance)
 
-        for i in range(len(sorted_dates) - 1):
-            start_date = datetime.strptime(sorted_dates[i], "%Y-%m-%d")
-            end_date = datetime.strptime(sorted_dates[i + 1], "%Y-%m-%d")
-
-            best_product = None
-            best_valid_pixel_count = -1
-
-            for product in tile_products:
-                acquisition_date = datetime.strptime(
-                    product["acquisition_date"], "%Y-%m-%d"
+                print(
+                    f"Processing date: {current_date} (window: {start_date} to {end_date})"
                 )
 
-                if start_date <= acquisition_date <= end_date:
-                    scl_band_path = find_scl_file(
-                        folder_path, tile_name, acquisition_date
+                window_products = []
+                for product in tile_products:
+                    acquisition_date = datetime.strptime(
+                        product["acquisition_date"], "%Y-%m-%d"
                     )
 
-                    if scl_band_path:
-                        valid_pixel_count = count_valid_pixels(scl_band_path)
+                    if start_date <= acquisition_date <= end_date:
+                        scl_band_path = find_scl_file(
+                            folder_path, tile_name, acquisition_date
+                        )
+                        if scl_band_path:
+                            try:
+                                valid_pixel_count = count_valid_pixels(scl_band_path)
+                                if valid_pixel_count > 0:
+                                    window_products.append((product, valid_pixel_count))
+                            except Exception as e:
+                                print(
+                                    f"ERROR: Could not count valid pixels for {scl_band_path}: {e}"
+                                )
+                        else:
+                            print(
+                                f"WARNING: No SCL file found for {product['acquisition_date']}"
+                            )
 
-                        if valid_pixel_count > best_valid_pixel_count:
-                            best_product = product
-                            best_valid_pixel_count = valid_pixel_count
-                    else:
-                        print(f"SCL band not found for {product['full_tile_id']}")
+                if window_products:
+                    window_products.sort(key=lambda x: x[1], reverse=True)
+                    best_product = window_products[0][0]
+                    best_product_acquisition_date = datetime.strptime(
+                        best_product["acquisition_date"], "%Y-%m-%d"
+                    ).strftime("%Y%m%d")
 
-            if best_product:
-                print(
-                    f"Best product for {tile_name} between {start_date.date()} and "
-                    f"{end_date.date()} is {best_product['full_tile_id']} with "
-                    f"{best_valid_pixel_count} valid pixels."
-                )
+                    print(
+                        f"Best product found for {current_date}: {best_product_acquisition_date}"
+                    )
 
-                best_product_acquisition_date = datetime.strptime(
-                    best_product["acquisition_date"], "%Y-%m-%d"
-                ).strftime("%Y%m%d")
+                    for folder_item in os.listdir(folder_path):
+                        item_path = os.path.join(folder_path, folder_item)
 
-                for folder_item in os.listdir(folder_path):
-                    item_path = os.path.join(folder_path, folder_item)
-
-                    if tile_name in folder_item:
-                        file_date_str = folder_item.split("_")[1][:8]
-                        file_date = datetime.strptime(file_date_str, "%Y%m%d")
-                        if start_date <= file_date <= end_date:
-                            if (
-                                best_product_acquisition_date not in folder_item
-                                and os.path.isfile(item_path)
-                            ):
-                                os.remove(item_path)
-                                print(f"Removed file: {item_path}")
-            else:
-                print(
-                    f"No valid product found for {tile_name} between {start_date.date()} "
-                    f"and {end_date.date()}."
-                )
+                        if tile_name in folder_item:
+                            file_date_str = folder_item.split("_")[1][:8]
+                            file_date = datetime.strptime(file_date_str, "%Y%m%d")
+                            if start_date <= file_date <= end_date:
+                                if (
+                                    best_product_acquisition_date not in folder_item
+                                    and os.path.isfile(item_path)
+                                ):
+                                    os.remove(item_path)
+                                    print(f"{item_path} removed")
+                else:
+                    print(
+                        f"No valid product found for date {current_date} in time window."
+                    )
 
 
 def create_and_save_chips_with_seg_maps_s2(
-    band_folder: str,
-    df: pd.DataFrame,
+    granules_dict: dict,
+    sub_data: pd.DataFrame,
     chip_size: int,
     output_directory: str,
     no_data_value: int,
     src_crs: int,
-    num_steps: int,
     mask_cloud: bool,
     water_mask: bool,
+    temporal_tolerance: int,
+    history_dates: list[tuple[str, list[str]]],
 ) -> tuple[list[str], list[str | None]]:
-    """Chip Creator.
+    """Chip Creator with Loop Inside.
 
-    Create chips and corresponding segmentation maps from a HLS tile and save them to
-    an output directory.
+    Processes multiple `band_folder`s directly, handling chips and segmentation map creation.
 
     Args:
-        band_folder (str): S2 tile filepath.
-        df (pd.DataFrame): DataFrame containing the data for segmentation maps.
+        granules_dict (dict): Dictionary containing granule IDs and metadata.
+        sub_data (pd.DataFrame): DataFrame containing the data for segmentation maps.
         chip_size (int): Size of each chip.
-        output_directory (str): Directory where the chips and segmentation maps will be
-            saved.
+        output_directory (str): Directory where the chips and segmentation maps will be saved.
         no_data_value (int): Value to use for no data areas in the segmentation maps.
-        src_crs (int): CRS of points in `df`
+        src_crs (int): CRS of points in `sub_data`.
         mask_cloud (bool): Perform cloud masking if True.
         water_mask (bool): Perform water masking if True.
+        temporal_tolerance (int): Number of days before and after each historical date for
+        the time window.
+        history_dates (list[tuple[str, list[str]]]): List of time windows for each
+        tile, with acquisition dates.
 
     Returns:
         A tuple containing the lists of created chips and segmentation maps.
     """
-    ds, crs = open_mf_jp2_dataset(band_folder, num_steps, mask_cloud, water_mask)
-    if ds is None:
-        raise ValueError("The band folder could not be loaded.")
+    all_chips = []
+    all_seg_maps: list[str | None] = []
 
-    df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
-    df.set_crs(epsg=src_crs, inplace=True)
-    df = df.to_crs(crs=crs)
+    for tile_id in granules_dict.keys():
+        band_folder = os.path.join(output_directory, str(tile_id))
+        print(f"Processing folder: {band_folder}")
 
-    df = df[
-        (ds["x"].min().item() <= df["geometry"].x)
-        & (df["geometry"].x <= ds["x"].max().item())
-        & (ds["y"].min().item() <= df["geometry"].y)
-        & (df["geometry"].y <= ds["y"].max().item())
-    ]
-    os.makedirs(output_directory, exist_ok=True)
+        try:
+            datasets, crs = open_mf_jp2_dataset(
+                band_folder, history_dates, mask_cloud, water_mask, temporal_tolerance
+            )
 
-    # tile_name_splits = hls_tile_dict["tiles"]["B02_0"].split(".")
-    # tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
+            if datasets is None or crs is None:
+                print(f"No datasets or CRS for folder: {band_folder}")
+                continue
 
-    tile_id = os.path.basename(band_folder)
+            df = gpd.GeoDataFrame(
+                sub_data,
+                geometry=[Point(xy) for xy in zip(sub_data.x, sub_data.y)],
+            )
+            df.set_crs(epsg=src_crs, inplace=True)
+            df = df.to_crs(crs=crs)
 
-    date_id = df.iloc[0]["date"].strftime("%Y%m%d")
-    chips = []
-    seg_maps: list[str | None] = []
-    n_chips_x = ds.sizes["x"] // chip_size
-    n_chips_y = ds.sizes["y"] // chip_size
-    chip_coords = list(set(get_chip_coords(df, ds, chip_size)))
-    for x, y in chip_coords:
-        if (x >= n_chips_x) or (y >= n_chips_y):
-            continue
-        chip_id = f"{date_id}_{tile_id}_{x}_{y}"
-        chip_name = f"chip_{chip_id}.tif"
-        seg_map_name = f"seg_map_{chip_id}.tif"
+            for group_id, dataset in zip([g[0] for g in history_dates], datasets):
+                if dataset is None:
+                    print(f"Skipping group ID '{group_id}' - Dataset is None.")
+                    continue
 
-        chip_filename = os.path.join(output_directory, "chips", chip_name)
-        seg_map_filename = os.path.join(output_directory, "seg_maps", seg_map_name)
-        if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
-            continue
+                df_filtered = df[
+                    (dataset["x"].min().item() <= df["geometry"].x)
+                    & (df["geometry"].x <= dataset["x"].max().item())
+                    & (dataset["y"].min().item() <= df["geometry"].y)
+                    & (df["geometry"].y <= dataset["y"].max().item())
+                ]
 
-        chip = ds.isel(
-            x=slice(x * chip_size, (x + 1) * chip_size),
-            y=slice(y * chip_size, (y + 1) * chip_size),
-        )
-        if chip.count().values == 0:
-            continue
-        seg_map = create_segmentation_map(chip, df, no_data_value)
-        if seg_map.where(seg_map != -1).count().values == 0:
-            continue
-        seg_maps.append(seg_map_name)
-        seg_map.rio.to_raster(seg_map_filename)
-        chip = chip.fillna(no_data_value)
-        chips.append(chip_name)
-        chip.band_data.rio.to_raster(chip_filename)
-    return chips, seg_maps
+                if df_filtered.empty:
+                    print(
+                        f"No valid points for group ID '{group_id}' in dataset bounds."
+                    )
+                    continue
+
+                chips = []
+                seg_maps = []
+                date_id = group_id
+
+                n_chips_x = dataset.sizes["x"] // chip_size
+                n_chips_y = dataset.sizes["y"] // chip_size
+                chip_coords = list(
+                    set(get_chip_coords(df_filtered, dataset, chip_size))
+                )
+
+                for x, y in chip_coords:
+                    if (x >= n_chips_x) or (y >= n_chips_y):
+                        continue
+
+                    chip_id = f"{date_id}_{tile_id}_{x}_{y}"
+                    chip_name = f"chip_{chip_id}.tif"
+                    seg_map_name = f"seg_map_{chip_id}.tif"
+
+                    chip_filename = os.path.join(output_directory, "chips", chip_name)
+                    seg_map_filename = os.path.join(
+                        output_directory, "seg_maps", seg_map_name
+                    )
+
+                    if os.path.exists(chip_filename) or os.path.exists(
+                        seg_map_filename
+                    ):
+                        continue
+
+                    chip = dataset.isel(
+                        x=slice(x * chip_size, (x + 1) * chip_size),
+                        y=slice(y * chip_size, (y + 1) * chip_size),
+                    )
+                    if chip.count().values == 0:
+                        continue
+
+                    seg_map = create_segmentation_map(chip, df_filtered, no_data_value)
+                    if seg_map.where(seg_map != -1).count().values == 0:
+                        continue
+
+                    chip.fillna(no_data_value).rio.to_raster(chip_filename)
+                    seg_map.rio.to_raster(seg_map_filename)
+
+                    chips.append(chip_name)
+                    seg_maps.append(seg_map_name)
+
+                all_chips.extend(chips)
+                all_seg_maps.extend(seg_maps)
+
+        except rasterio.errors.RasterioIOError as e:
+            logging.error(f"Error {e} when reading dataset containing: {band_folder}")
+        except IndexError as e:
+            logging.error(f"Error {e} when processing {tile_id}")
+
+    return all_chips, all_seg_maps
