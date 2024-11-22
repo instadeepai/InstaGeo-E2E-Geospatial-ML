@@ -25,10 +25,11 @@ import shutil
 import subprocess
 import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import rasterio
 import requests  # type: ignore
 import rioxarray
@@ -385,6 +386,7 @@ def count_valid_pixels(scl_band_path: str) -> int:
     Returns:
     int: The number of valid pixels.
     """
+    valid_pixels = 0
     with rasterio.open(scl_band_path) as src:
         scl_data = src.read(1)  # Read the SCL band data as a 2D numpy array
         valid_pixels = np.count_nonzero(scl_data != 0)
@@ -410,100 +412,148 @@ def find_scl_file(
     acquisition_date_str = acquisition_date.strftime("%Y%m%d")
 
     for file_name in os.listdir(output_path):
-        if file_name.endswith("_SCL_20m.jp2") and tile_name in file_name:
-            if acquisition_date_str in file_name:
-                return os.path.join(output_path, file_name)
+        if (
+            file_name.endswith("_SCL_20m.jp2")
+            and tile_name in file_name
+            and acquisition_date_str in file_name
+        ):
+            return os.path.join(output_path, file_name)
 
     return None
 
 
 def open_mf_jp2_dataset(
-    band_folder: str, num_steps: int, mask_cloud: bool, water_mask: bool
-) -> tuple[xr.Dataset | None, CRS | None]:
-    """Handle JP2 data.
+    band_folder: str,
+    history_dates: list[tuple[str, list[str]]],
+    mask_cloud: bool,
+    water_mask: bool,
+    temporal_tolerance: int,
+) -> tuple[list[xr.Dataset | None], CRS | None]:
+    """Handle JP2 data grouped by timestamps with temporal tolerance.
 
-    Open multiple JP2 files as an xarray Dataset and optionally apply filtering for water
-      and clouds.
+    Open multiple JP2 files as xarray Datasets for each date group and optionally apply filtering
+    for water and clouds, with a date tolerance window.
 
     Args:
         band_folder (str): Path to the folder where the bands and SCL band are stored.
-        num_steps (int): Number of timestamps or steps, indicating how many sets of bands
-        are expected.
+        history_dates (list): A list of tuples where each tuple has an ID and a list of dates.
         mask_cloud (bool): Whether to apply cloud filtering (classes 8 and 9).
         water_mask (bool): Whether to apply water filtering (class 6).
+        temporal_tolerance (int): Tolerance in days to expand the search window for closest tiles.
 
     Returns:
-        (xr.Dataset | None, CRS | None): A tuple of xarray Dataset combining data from all the
-            provided JP2 files and its CRS, or (None, None) if the folder is invalid.
+        tuple[list[xr.Dataset | None], CRS | None]:
+        A tuple containing:
+        - A list of xarray Datasets for each group or None if invalid.
+        - A single CRS value if all datasets share the same CRS, otherwise None.
     """
+    num_bands_per_timestamp = 6
+    datasets: list[xr.Dataset | None] = []
+    crs_set = set()
+
     if not os.path.exists(band_folder):
-        print(f"Folder '{band_folder}' does not exist. Skipping...")
-        return None, None
+        print(f"Folder '{band_folder}' does not exist.")
+        return [None] * len(history_dates), None
 
-    band_crs = None
-
-    band_files = [
+    all_files = [
         os.path.join(band_folder, f)
         for f in os.listdir(band_folder)
-        if f.endswith(".jp2") and "SCL" not in f
+        if f.endswith(".jp2")
     ]
-    scl_band_files = [
-        os.path.join(band_folder, f)
-        for f in os.listdir(band_folder)
-        if "SCL" in f and f.endswith(".jp2")
+    file_dates = [
+        pd.to_datetime(f.split("_")[1][:8], format="%Y%m%d") for f in all_files
     ]
+    file_map = dict(zip(all_files, file_dates))
 
-    if len(band_files) % 6 != 0:
-        print(f"Unexpected number of band files in '{band_folder}': {len(band_files)}")
-        return None, band_crs
+    for group_id, dates in history_dates:
+        print(f"Processing group ID '{group_id}' with dates: {dates}")
 
-    expected_band_count = num_steps * 6  # Assuming 6 bands per timestamp
-    if len(band_files) < expected_band_count:
-        print(
-            f"Not enough band files in '{band_folder}'. Expected at least {expected_band_count}, "
-            f"found {len(band_files)}."
-        )
-        return None, band_crs
+        expanded_dates = []
+        for date_str in dates:
+            center_date = pd.to_datetime(date_str)
+            start_date = center_date - timedelta(days=temporal_tolerance)
+            end_date = center_date + timedelta(days=temporal_tolerance)
+            expanded_dates.append((start_date, end_date))
 
-    if len(scl_band_files) != num_steps:
-        print(f"Skipping folder '{band_folder}' - missing SCL bands for each timestamp")
-        return None, band_crs
+        band_files = [
+            file
+            for file, file_date in file_map.items()
+            if any(start <= file_date <= end for start, end in expanded_dates)
+            and "SCL" not in file
+        ]
+        scl_band_files = [
+            file
+            for file, file_date in file_map.items()
+            if any(start <= file_date <= end for start, end in expanded_dates)
+            and "SCL" in file
+        ]
 
-    band_files.sort()
-    bands_list = []
+        if len(band_files) % num_bands_per_timestamp != 0:
+            print(
+                f"Unexpected number of band files for group '{group_id}': {len(band_files)}. "
+                f"Skipping group..."
+            )
+            datasets.append(None)
+            continue
 
-    for band_file in band_files:
-        if os.path.getsize(band_file) > 0:
-            band_data = rioxarray.open_rasterio(band_file)
-            bands_list.append(band_data)
-            if band_crs is None:
-                band_crs = band_data.rio.crs
-        else:
-            print(f"Skipping empty band file: {band_file}")
+        if len(scl_band_files) != len(dates):
+            print(
+                f"Skipping group '{group_id}' - missing SCL bands for each timestamp. "
+                f"Expected {len(dates)}, found {len(scl_band_files)}"
+            )
+            print(scl_band_files)
+            datasets.append(None)
+            continue
 
-    if not bands_list:
-        print(f"Skipping folder '{band_folder}' - no valid band files found")
-        return None, band_crs
+        band_files.sort()
+        scl_band_files.sort()
 
-    bands_dataset = xr.concat(bands_list, dim="band")
+        bands_list = []
+        band_crs = None
 
-    scl_band_files.sort()
-    scl_data = []
+        for band_file in band_files:
+            if os.path.getsize(band_file) > 0:
+                band_data = rioxarray.open_rasterio(band_file)
+                bands_list.append(band_data)
+                if band_crs is None:
+                    band_crs = band_data.rio.crs
+                crs_set.add(band_data.rio.crs)
+            else:
+                print(f"Skipping empty band file: {band_file}")
 
-    for scl_path in scl_band_files:
-        with rasterio.open(scl_path) as scl_src:
-            scl_data.append(scl_src.read(1))
+        if not bands_list:
+            print(f"Skipping group '{group_id}' - no valid band files found")
+            datasets.append(None)
+            continue
 
-    scl_data = np.stack(scl_data, axis=0)
+        bands_dataset = xr.concat(bands_list, dim="band")
 
-    if water_mask:
-        water_mask_array = np.isin(scl_data, [6]).astype(np.uint8)  # Class 6 for water
-        bands_dataset = bands_dataset.where(water_mask_array == 0)
+        scl_data = []
+        for scl_path in scl_band_files:
+            with rasterio.open(scl_path) as scl_src:
+                scl_data.append(scl_src.read(1))
 
-    if mask_cloud:
-        cloud_mask_array = np.isin(scl_data, [8, 9]).astype(
-            np.uint8
-        )  # Classes 8 and 9 for clouds
-        bands_dataset = bands_dataset.where(cloud_mask_array == 0)
+        scl_data = np.stack(scl_data, axis=0)
 
-    return bands_dataset, band_crs
+        if water_mask:
+            water_mask_array = np.isin(scl_data, [6]).astype(
+                np.uint8
+            )  # Class 6 for water
+            bands_dataset = bands_dataset.where(water_mask_array == 0)
+
+        if mask_cloud:
+            cloud_mask_array = np.isin(scl_data, [8, 9]).astype(
+                np.uint8
+            )  # Classes 8 and 9 for clouds
+            bands_dataset = bands_dataset.where(cloud_mask_array == 0)
+
+        datasets.append(bands_dataset)
+
+    # Ensure all CRS values are the same
+    if len(crs_set) == 1:
+        final_crs = crs_set.pop()
+    else:
+        print(f"CRS mismatch detected: {crs_set}. Returning None for CRS.")
+        final_crs = None
+
+    return datasets, final_crs
