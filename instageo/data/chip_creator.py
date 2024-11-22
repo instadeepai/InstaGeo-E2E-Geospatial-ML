@@ -509,7 +509,7 @@ def main(argv: Any) -> None:
         tile_df, history_dates = get_tile_info(
             sub_data, num_steps=FLAGS.num_steps, temporal_step=FLAGS.temporal_step
         )
-
+        print("History_dates : ", history_dates)
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
             and os.path.exists(

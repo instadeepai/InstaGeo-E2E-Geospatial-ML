@@ -317,9 +317,7 @@ def unzip_file(zip_file: str, output_dir: str) -> None:
     try:
         with zipfile.ZipFile(zip_file, "r") as zip_ref:
             zip_ref.extractall(output_dir)
-            print(f"Extracted: {zip_file} to {output_dir}")
         os.remove(zip_file)
-        print(f"Deleted zip file: {zip_file}")
     except zipfile.BadZipFile:
         print(f"Error: {zip_file} is not a valid zip file")
     except FileNotFoundError:
@@ -344,10 +342,7 @@ def get_band_files(tile_name: str, full_tile_id: str, output_directory: str) -> 
     """
     bands_needed = ["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"]
     tile_folder = os.path.join(output_directory, tile_name)
-    print(f"Main directory: {tile_folder}")
-
     base_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
-    print(f"Base directory: {base_dir}")
 
     if os.path.isdir(base_dir):
         granule_folders = os.listdir(base_dir)
@@ -363,10 +358,8 @@ def get_band_files(tile_name: str, full_tile_id: str, output_directory: str) -> 
                             target_file_path = os.path.join(tile_folder, file_name)
 
                             shutil.move(full_file_path, target_file_path)
-                            print(f"Moved {file_name} to {tile_folder}")
 
                 shutil.rmtree(os.path.join(tile_folder, full_tile_id))
-                print(f"Deleted unneeded directories for {full_tile_id}")
             else:
                 print(f"R20m folder not found in {granule_folder}")
         else:
@@ -552,6 +545,7 @@ def open_mf_jp2_dataset(
     # Ensure all CRS values are the same
     if len(crs_set) == 1:
         final_crs = crs_set.pop()
+        print("Valid crs :", final_crs)
     else:
         print(f"CRS mismatch detected: {crs_set}. Returning None for CRS.")
         final_crs = None
