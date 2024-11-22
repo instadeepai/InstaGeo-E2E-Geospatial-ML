@@ -289,10 +289,6 @@ def filter_best_product_in_folder(
                 start_date = center_date - timedelta(days=temporal_tolerance)
                 end_date = center_date + timedelta(days=temporal_tolerance)
 
-                print(
-                    f"Processing date: {current_date} (window: {start_date} to {end_date})"
-                )
-
                 window_products = []
                 for product in tile_products:
                     acquisition_date = datetime.strptime(
@@ -324,10 +320,6 @@ def filter_best_product_in_folder(
                         best_product["acquisition_date"], "%Y-%m-%d"
                     ).strftime("%Y%m%d")
 
-                    print(
-                        f"Best product found for {current_date}: {best_product_acquisition_date}"
-                    )
-
                     for folder_item in os.listdir(folder_path):
                         item_path = os.path.join(folder_path, folder_item)
 
@@ -341,10 +333,6 @@ def filter_best_product_in_folder(
                                 ):
                                     os.remove(item_path)
                                     print(f"{item_path} removed")
-                else:
-                    print(
-                        f"No valid product found for date {current_date} in time window."
-                    )
 
 
 def create_and_save_chips_with_seg_maps_s2(
@@ -385,8 +373,6 @@ def create_and_save_chips_with_seg_maps_s2(
 
     for tile_id in granules_dict.keys():
         band_folder = os.path.join(output_directory, str(tile_id))
-        print(f"Processing folder: {band_folder}")
-
         try:
             datasets, crs = open_mf_jp2_dataset(
                 band_folder, history_dates, mask_cloud, water_mask, temporal_tolerance
@@ -412,7 +398,7 @@ def create_and_save_chips_with_seg_maps_s2(
                     (dataset["x"].min().item() <= df["geometry"].x)
                     & (df["geometry"].x <= dataset["x"].max().item())
                     & (dataset["y"].min().item() <= df["geometry"].y)
-                    & (df["geometry"].y <= dataset["y"].max().item())
+                    & (dataset["geometry"].y <= dataset["y"].max().item())
                 ]
 
                 if df_filtered.empty:
