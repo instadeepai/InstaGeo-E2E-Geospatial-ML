@@ -330,7 +330,6 @@ def filter_best_product_in_folder(
                                     and os.path.isfile(item_path)
                                 ):
                                     os.remove(item_path)
-                                    print(f"{item_path} removed")
 
 
 def create_and_save_chips_with_seg_maps_s2(

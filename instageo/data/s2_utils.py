@@ -383,7 +383,6 @@ def count_valid_pixels(scl_band_path: str) -> int:
     with rasterio.open(scl_band_path) as src:
         scl_data = src.read(1)  # Read the SCL band data as a 2D numpy array
         valid_pixels = np.count_nonzero(scl_data != 0)
-        print("valid_pixels for ", scl_band_path, valid_pixels)
     return valid_pixels
 
 
