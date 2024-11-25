@@ -2,13 +2,20 @@ import os
 import tempfile
 import zipfile
 from datetime import datetime
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
 import rasterio
 from rasterio.io import MemoryFile
 
-from instageo.data.s2_utils import count_valid_pixels, find_scl_file, unzip_file
+from instageo.data.s2_utils import (
+    count_valid_pixels,
+    find_scl_file,
+    get_access_and_refresh_token,
+    refresh_access_token,
+    unzip_file,
+)
 
 
 def create_mock_scl_band(data: np.ndarray):
@@ -49,11 +56,9 @@ def mock_scl_directory(tmp_path):
     tile_name = "30UXB"
     acquisition_date = datetime(2024, 11, 19)
 
-    # Create mock directory
     mock_dir = tmp_path / "mock_data"
     mock_dir.mkdir()
 
-    # Create some mock SCL files
     valid_file = f"{tile_name}_{acquisition_date.strftime('%Y%m%d')}_SCL_20m.jp2"
     invalid_file_1 = f"{tile_name}_20240101_SCL_20m.jp2"
     invalid_file_2 = f"31UXB_{acquisition_date.strftime('%Y%m%d')}_SCL_20m.jp2"
@@ -92,3 +97,143 @@ def test_unzip_file():
             assert os.path.exists(
                 os.path.join(extract_dir, "nested_dir/test_file2.txt")
             )
+
+
+@pytest.fixture
+def mock_success_response():
+    """Fixture to mock a successful authentication response."""
+    return {
+        "access_token": "mock_access_token",
+        "refresh_token": "mock_refresh_token",
+        "expires_in": 3600,
+    }
+
+
+@pytest.fixture
+def mock_failure_response():
+    """Fixture to mock a failed authentication response."""
+    return {"error": "invalid_grant", "error_description": "Invalid user credentials"}
+
+
+@patch("instageo.data.s2_utils.requests.post")
+def test_get_access_and_refresh_token_success(mock_post, mock_success_response):
+    """Test successful authentication."""
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = mock_success_response
+
+    client_id = "mock_client_id"
+    username = "mock_username"
+    password = "mock_password"
+
+    access_token, refresh_token, expires_in = get_access_and_refresh_token(
+        client_id, username, password
+    )
+
+    assert access_token == mock_success_response["access_token"]
+    assert refresh_token == mock_success_response["refresh_token"]
+    assert expires_in == mock_success_response["expires_in"]
+    mock_post.assert_called_once_with(
+        "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
+        data={
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+            "grant_type": "password",
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+
+@patch("instageo.data.s2_utils.requests.post")
+def test_get_access_and_refresh_token_failure(mock_post, mock_failure_response):
+    """Test authentication failure with invalid credentials."""
+    mock_post.return_value.status_code = 400
+    mock_post.return_value.text = "Invalid user credentials"
+
+    client_id = "mock_client_id"
+    username = "wrong_username"
+    password = "wrong_password"
+
+    access_token, refresh_token, expires_in = get_access_and_refresh_token(
+        client_id, username, password
+    )
+
+    assert access_token is None
+    assert refresh_token is None
+    assert expires_in is None
+    mock_post.assert_called_once_with(
+        "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
+        data={
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+            "grant_type": "password",
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+
+@patch("instageo.data.s2_utils.requests.post")
+def test_get_access_and_refresh_token_server_error(mock_post):
+    """Test server error response."""
+    mock_post.return_value.status_code = 500
+    mock_post.return_value.text = "Internal server error"
+
+    client_id = "mock_client_id"
+    username = "mock_username"
+    password = "mock_password"
+
+    access_token, refresh_token, expires_in = get_access_and_refresh_token(
+        client_id, username, password
+    )
+
+    assert access_token is None
+    assert refresh_token is None
+    assert expires_in is None
+    mock_post.assert_called_once_with(
+        "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
+        data={
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+            "grant_type": "password",
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+
+@patch("requests.post")
+def test_refresh_access_token_success(mock_post):
+    """Test successful token refresh."""
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "access_token": "new_access_token",
+        "expires_in": 3600,
+    }
+    mock_post.return_value = mock_response
+
+    client_id = "test_client_id"
+    refresh_token = "test_refresh_token"
+
+    access_token, expires_in = refresh_access_token(client_id, refresh_token)
+
+    assert access_token == "new_access_token"
+    assert expires_in == 3600
+
+
+@patch("requests.post")
+def test_refresh_access_token_failure(mock_post):
+    """Test failed token refresh."""
+    mock_response = Mock()
+    mock_response.status_code = 400
+    mock_response.text = "Invalid request"
+    mock_post.return_value = mock_response
+
+    client_id = "test_client_id"
+    refresh_token = "test_refresh_token"
+
+    access_token, expires_in = refresh_access_token(client_id, refresh_token)
+
+    assert access_token is None
+    assert expires_in is None

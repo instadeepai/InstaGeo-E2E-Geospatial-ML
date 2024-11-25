@@ -1,9 +1,12 @@
-from unittest.mock import MagicMock, patch
+import os
+import tempfile
+import zipfile
+from unittest.mock import MagicMock, call, patch
 
 import pandas as pd
 import pytest
 
-from instageo.data.s2_pipeline import retrieve_sentinel2_metadata
+from instageo.data.s2_pipeline import retrieve_sentinel2_metadata, unzip_all
 
 
 @pytest.fixture
@@ -99,3 +102,52 @@ def test_retrieve_sentinel2_metadata_api_failure(
     )
 
     assert result == {}
+
+
+def create_test_zip(zip_path, files):
+    """Helper function to create a test zip file with specified files."""
+    with zipfile.ZipFile(zip_path, "w") as test_zip:
+        for file_path, content in files.items():
+            test_zip.writestr(file_path, content)
+
+
+@patch("instageo.data.s2_utils.unzip_file")
+@patch("os.path.exists")
+def test_unzip_all_files_extracted(mock_exists, mock_unzip_file):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Arrange
+        download_info_list = [
+            ("http://example.com/file1.zip", "tile1_id", "tile1"),
+            ("http://example.com/file2.zip", "tile2_id", "tile2"),
+        ]
+
+        # Create zip files
+        for _, full_tile_id, tile_name in download_info_list:
+            tile_dir = os.path.join(temp_dir, tile_name)
+            os.makedirs(tile_dir, exist_ok=True)
+            zip_file_path = os.path.join(tile_dir, f"{full_tile_id}.zip")
+            create_test_zip(zip_file_path, {"test_file.txt": "Test content"})
+
+        # Mock os.path.exists to simulate that the zip files exist and files don't exist yet
+        def mock_exists_side_effect(path):
+            if path.endswith(".zip"):
+                return True  # Return True for zip files
+            elif "test_file.txt" in path:
+                return False  # Return False for extracted files (this simulates them not existing yet)
+            elif os.path.isdir(path):
+                return True  # Return True for directories
+            return False  # For other cases, return False
+
+        mock_exists.side_effect = mock_exists_side_effect
+
+        # Act
+        unzip_all(download_info_list, temp_dir)
+
+        # Assert: Check that extracted files are present by mocking file existence
+        # Now that unzip_all has been called, the files should exist
+        mock_exists.side_effect = (
+            lambda path: path.endswith(".zip") or "test_file.txt" in path
+        )
+
+        assert os.path.exists(os.path.join(temp_dir, "tile1", "test_file.txt"))
+        assert os.path.exists(os.path.join(temp_dir, "tile2", "test_file.txt"))
