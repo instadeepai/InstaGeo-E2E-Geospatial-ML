@@ -333,7 +333,7 @@ def filter_best_product_in_folder(
 
 
 def create_and_save_chips_with_seg_maps_s2(
-    granules_dict: dict[str, dict[str, str]],
+    granules_dict: dict[str, list[dict[str, Any]]],
     sub_data: pd.DataFrame,
     chip_size: int,
     output_directory: str,

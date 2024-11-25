@@ -78,6 +78,14 @@ flags.DEFINE_integer(
     10,
     "Percentage os cloud cover to use. Accepted values are between 0and 100.",
 )
+flags.DEFINE_string("client_id", "cdse-public", "Replace with your client ID")
+flags.DEFINE_string("username", None, "Replace with your username")
+flags.DEFINE_string(
+    "password",
+    None,
+    "Replace with your password. Ensure the password is enclosed in single quotes "
+    "(') if it contains special characters like $, to prevent issues during shell interpretation.",
+)
 
 
 def check_required_flags() -> None:
@@ -187,7 +195,7 @@ def main(argv: Any) -> None:
         tile_df, history_dates = get_tile_info(
             sub_data, num_steps=FLAGS.num_steps, temporal_step=FLAGS.temporal_step
         )
-        print("History_dates : ", history_dates)
+
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
             and os.path.exists(
@@ -216,17 +224,13 @@ def main(argv: Any) -> None:
             ) as json_file:
                 granules_dict = json.load(json_file)
 
-        client_id = "your_client_id"  # Replace with your client ID
-        username = "your_username"  # Replace with your username
-        password = "your_password"  # Replace with your password
-
         logging.info("Downloading S2 Tiles")
         download_info_list = download_tile_data(
             granules_dict,
             FLAGS.output_directory,
-            client_id,
-            username,
-            password,
+            client_id=FLAGS.client_id,
+            username=FLAGS.username,
+            password=FLAGS.password,
             temporal_step=FLAGS.temporal_step,
             num_steps=FLAGS.num_steps,
         )
