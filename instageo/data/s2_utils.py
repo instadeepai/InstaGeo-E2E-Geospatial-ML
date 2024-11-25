@@ -459,8 +459,6 @@ def open_mf_jp2_dataset(
     file_map = dict(zip(all_files, file_dates))
 
     for group_id, dates in history_dates:
-        print(f"Processing group ID '{group_id}' with dates: {dates}")
-
         expanded_dates = []
         for date_str in dates:
             center_date = pd.to_datetime(date_str)
@@ -491,10 +489,9 @@ def open_mf_jp2_dataset(
 
         if len(scl_band_files) != len(dates):
             print(
-                f"Skipping group '{group_id}' - missing SCL bands for each timestamp. "
+                f"Skipping group '{dates[0]}' - missing SCL bands for each timestamp. "
                 f"Expected {len(dates)}, found {len(scl_band_files)}"
             )
-            print(scl_band_files)
             datasets.append(None)
             continue
 
@@ -519,7 +516,8 @@ def open_mf_jp2_dataset(
             datasets.append(None)
             continue
 
-        bands_dataset = xr.concat(bands_list, dim="band")
+        bands_dataarray = xr.concat(bands_list, dim="band")
+        bands_dataset = bands_dataarray.to_dataset(name="bands")
 
         scl_data = []
         for scl_path in scl_band_files:
@@ -532,20 +530,19 @@ def open_mf_jp2_dataset(
             water_mask_array = np.isin(scl_data, [6]).astype(
                 np.uint8
             )  # Class 6 for water
-            bands_dataset = bands_dataset.where(water_mask_array == 0)
+            bands_dataset["bands"] = bands_dataset["bands"].where(water_mask_array == 0)
 
         if mask_cloud:
             cloud_mask_array = np.isin(scl_data, [8, 9]).astype(
                 np.uint8
             )  # Classes 8 and 9 for clouds
-            bands_dataset = bands_dataset.where(cloud_mask_array == 0)
+            bands_dataset["bands"] = bands_dataset["bands"].where(cloud_mask_array == 0)
 
         datasets.append(bands_dataset)
 
     # Ensure all CRS values are the same
     if len(crs_set) == 1:
         final_crs = crs_set.pop()
-        print("Valid crs :", final_crs)
     else:
         print(f"CRS mismatch detected: {crs_set}. Returning None for CRS.")
         final_crs = None

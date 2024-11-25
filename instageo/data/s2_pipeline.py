@@ -26,9 +26,7 @@ from typing import Any, Dict, List, Tuple
 
 import geopandas as gpd
 import pandas as pd
-import rasterio
 import requests  # type: ignore
-from absl import logging
 from shapely.geometry import Point
 
 from instageo.data.geo_utils import create_segmentation_map, get_chip_coords
@@ -336,7 +334,7 @@ def filter_best_product_in_folder(
 
 
 def create_and_save_chips_with_seg_maps_s2(
-    granules_dict: dict,
+    granules_dict: dict[str, dict[str, str]],
     sub_data: pd.DataFrame,
     chip_size: int,
     output_directory: str,
@@ -347,117 +345,106 @@ def create_and_save_chips_with_seg_maps_s2(
     temporal_tolerance: int,
     history_dates: list[tuple[str, list[str]]],
 ) -> tuple[list[str], list[str | None]]:
-    """Chip Creator with Loop Inside.
+    """Chip Creator.
 
-    Processes multiple `band_folder`s directly, handling chips and segmentation map creation.
+    Create chips and segmentation maps from Sentinel-2 granules and save them to the output
+    directory.
 
     Args:
-        granules_dict (dict): Dictionary containing granule IDs and metadata.
-        sub_data (pd.DataFrame): DataFrame containing the data for segmentation maps.
-        chip_size (int): Size of each chip.
-        output_directory (str): Directory where the chips and segmentation maps will be saved.
-        no_data_value (int): Value to use for no data areas in the segmentation maps.
-        src_crs (int): CRS of points in `sub_data`.
-        mask_cloud (bool): Perform cloud masking if True.
-        water_mask (bool): Perform water masking if True.
-        temporal_tolerance (int): Number of days before and after each historical date for
-        the time window.
-        history_dates (list[tuple[str, list[str]]]): List of time windows for each
-        tile, with acquisition dates.
+        granules_dict (dict): Dictionary mapping granules to file paths.
+        sub_data (pd.DataFrame): DataFrame with the segmentation information.
+        chip_size (int): Size of the chips.
+        output_directory (str): Path to save the chips and segmentation maps.
+        no_data_value (int): Value to use for no-data areas.
+        src_crs (int): Original CRS of sub_data.
+        mask_cloud (bool): If True, apply cloud masking.
+        water_mask (bool): If True, apply water masking.
+        temporal_tolerance (int): Tolerance in days for temporal matching.
+        history_dates (list): List of tuples of group IDs and associated dates.
 
     Returns:
-        A tuple containing the lists of created chips and segmentation maps.
+        tuple: A tuple containing a list of chip file paths and segmentation map file paths.
     """
-    all_chips = []
-    all_seg_maps: list[str | None] = []
+    chips = []
+    seg_maps: list[str | None] = []
 
-    for tile_id in granules_dict.keys():
+    for tile_id, granule_data in granules_dict.items():
         band_folder = os.path.join(output_directory, str(tile_id))
-        try:
-            datasets, crs = open_mf_jp2_dataset(
-                band_folder, history_dates, mask_cloud, water_mask, temporal_tolerance
-            )
 
-            if datasets is None or crs is None:
-                print(f"No datasets or CRS for folder: {band_folder}")
+        datasets, crs = open_mf_jp2_dataset(
+            band_folder, history_dates, mask_cloud, water_mask, temporal_tolerance
+        )
+        if datasets is None or crs is None:
+            print(
+                f"Skipping folder '{band_folder}' due to missing or invalid datasets."
+            )
+            continue
+
+        df = gpd.GeoDataFrame(
+            sub_data,
+            geometry=[Point(xy) for xy in zip(sub_data.x, sub_data.y)],
+        )
+        df.set_crs(epsg=src_crs, inplace=True)
+        df = df.to_crs(crs=crs)
+
+        for dataset, (group_id, dates) in zip(datasets, history_dates):
+            if dataset is None:
                 continue
 
-            df = gpd.GeoDataFrame(
-                sub_data,
-                geometry=[Point(xy) for xy in zip(sub_data.x, sub_data.y)],
-            )
-            df.set_crs(epsg=src_crs, inplace=True)
-            df = df.to_crs(crs=crs)
+            date_id = datetime.strptime(dates[0], "%Y-%m-%d").strftime("%Y%m%d")
 
-            for group_id, dataset in zip([g[0] for g in history_dates], datasets):
-                if dataset is None:
-                    print(f"Skipping group ID '{group_id}' - Dataset is None.")
+            df_filtered = df[
+                (dataset["x"].min().item() <= df["geometry"].x)
+                & (df["geometry"].x <= dataset["x"].max().item())
+                & (dataset["y"].min().item() <= df["geometry"].y)
+                & (df["geometry"].y <= dataset["y"].max().item())
+            ]
+
+            if df_filtered.empty:
+                print(f"No valid points for group ID '{group_id}' in dataset bounds.")
+                continue
+
+            n_chips_x = dataset.sizes["x"] // chip_size
+            n_chips_y = dataset.sizes["y"] // chip_size
+            chip_coords = list(set(get_chip_coords(df_filtered, dataset, chip_size)))
+
+            for x, y in chip_coords:
+                if x >= n_chips_x or y >= n_chips_y:
                     continue
 
-                df_filtered = df[
-                    (dataset["x"].min().item() <= df["geometry"].x)
-                    & (df["geometry"].x <= dataset["x"].max().item())
-                    & (dataset["y"].min().item() <= df["geometry"].y)
-                    & (dataset["geometry"].y <= dataset["y"].max().item())
-                ]
+                chip_id = f"{date_id}_{tile_id}_{x}_{y}"
+                chip_name = f"chip_{chip_id}.tif"
+                seg_map_name = f"seg_map_{chip_id}.tif"
 
-                if df_filtered.empty:
-                    print(
-                        f"No valid points for group ID '{group_id}' in dataset bounds."
-                    )
-                    continue
-
-                chips = []
-                seg_maps = []
-                date_id = group_id
-
-                n_chips_x = dataset.sizes["x"] // chip_size
-                n_chips_y = dataset.sizes["y"] // chip_size
-                chip_coords = list(
-                    set(get_chip_coords(df_filtered, dataset, chip_size))
+                chip_filename = os.path.join(output_directory, "chips", chip_name)
+                seg_map_filename = os.path.join(
+                    output_directory, "seg_maps", seg_map_name
                 )
 
-                for x, y in chip_coords:
-                    if (x >= n_chips_x) or (y >= n_chips_y):
-                        continue
+                if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
+                    continue
 
-                    chip_id = f"{date_id}_{tile_id}_{x}_{y}"
-                    chip_name = f"chip_{chip_id}.tif"
-                    seg_map_name = f"seg_map_{chip_id}.tif"
+                chip_dataset = dataset.isel(
+                    x=slice(x * chip_size, (x + 1) * chip_size),
+                    y=slice(y * chip_size, (y + 1) * chip_size),
+                )
+                if chip_dataset.count().values == 0:
+                    continue
 
-                    chip_filename = os.path.join(output_directory, "chips", chip_name)
-                    seg_map_filename = os.path.join(
-                        output_directory, "seg_maps", seg_map_name
-                    )
+                seg_map = create_segmentation_map(
+                    chip_dataset, df_filtered, no_data_value
+                )
+                if seg_map.where(seg_map != -1).count().values == 0:
+                    continue
 
-                    if os.path.exists(chip_filename) or os.path.exists(
-                        seg_map_filename
-                    ):
-                        continue
+                seg_maps.append(seg_map_name)
+                seg_map.rio.to_raster(seg_map_filename)
 
-                    chip = dataset.isel(
-                        x=slice(x * chip_size, (x + 1) * chip_size),
-                        y=slice(y * chip_size, (y + 1) * chip_size),
-                    )
-                    if chip.count().values == 0:
-                        continue
+                chip_bands = chip_dataset["bands"]
+                chip_bands = chip_bands.fillna(no_data_value)
 
-                    seg_map = create_segmentation_map(chip, df_filtered, no_data_value)
-                    if seg_map.where(seg_map != -1).count().values == 0:
-                        continue
+                chip_bands_da = chip_bands.transpose("band", "y", "x")
+                chip_bands_da.rio.to_raster(chip_filename)
+                chips.append(chip_name)
 
-                    chip.fillna(no_data_value).rio.to_raster(chip_filename)
-                    seg_map.rio.to_raster(seg_map_filename)
-
-                    chips.append(chip_name)
-                    seg_maps.append(seg_map_name)
-
-                all_chips.extend(chips)
-                all_seg_maps.extend(seg_maps)
-
-        except rasterio.errors.RasterioIOError as e:
-            logging.error(f"Error {e} when reading dataset containing: {band_folder}")
-        except IndexError as e:
-            logging.error(f"Error {e} when processing {tile_id}")
-
-    return all_chips, all_seg_maps
+    return chips, seg_maps
