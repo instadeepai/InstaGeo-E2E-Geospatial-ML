@@ -21,6 +21,7 @@
 
 import multiprocessing
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -452,9 +453,16 @@ def open_mf_jp2_dataset(
         for f in os.listdir(band_folder)
         if f.endswith(".jp2")
     ]
-    file_dates = [
-        pd.to_datetime(f.split("_")[1][:8], format="%Y%m%d") for f in all_files
-    ]
+
+    pattern = r"_(\d{8})T"
+    file_dates = []
+    for f in all_files:
+        match = re.search(pattern, f)
+        if match:
+            file_dates.append(pd.to_datetime(match.group(1), format="%Y%m%d"))
+        else:
+            file_dates.append(None)
+
     file_map = dict(zip(all_files, file_dates))
 
     for group_id, dates in history_dates:
