@@ -13,6 +13,7 @@ from instageo.data.s2_utils import (
     count_valid_pixels,
     find_scl_file,
     get_access_and_refresh_token,
+    get_band_files,
     refresh_access_token,
     unzip_file,
 )
@@ -237,3 +238,53 @@ def test_refresh_access_token_failure(mock_post):
 
     assert access_token is None
     assert expires_in is None
+
+
+@patch("os.path.isdir")
+@patch("os.listdir")
+@patch("shutil.move")
+@patch("shutil.rmtree")
+def test_get_band_files(mock_rmtree, mock_move, mock_listdir, mock_isdir):
+    tile_name = "tile1"
+    full_tile_id = "tile1_product1"
+    output_directory = "/mock/output/directory"
+    tile_folder = os.path.join(output_directory, tile_name)
+    base_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
+    img_data_dir = os.path.join(base_dir, "granule_folder", "IMG_DATA", "R20m")
+
+    mock_isdir.side_effect = lambda path: {
+        base_dir: True,
+        img_data_dir: True,
+    }.get(path, False)
+
+    mock_listdir.side_effect = lambda path: {
+        base_dir: ["granule_folder"],
+        img_data_dir: ["B02.jp2", "B03.jp2", "B11.jp2"],  # Files in the R20m folder
+    }.get(path, [])
+
+    get_band_files(tile_name, full_tile_id, output_directory)
+
+    mock_move.assert_any_call(
+        os.path.join(img_data_dir, "B02.jp2"), os.path.join(tile_folder, "B02.jp2")
+    )
+    mock_move.assert_any_call(
+        os.path.join(img_data_dir, "B03.jp2"), os.path.join(tile_folder, "B03.jp2")
+    )
+    mock_move.assert_any_call(
+        os.path.join(img_data_dir, "B11.jp2"), os.path.join(tile_folder, "B11.jp2")
+    )
+    assert mock_move.call_count == 3
+    mock_rmtree.assert_called_once_with(os.path.join(tile_folder, full_tile_id))
+
+
+@patch("os.path.isdir")
+@patch("os.listdir")
+def test_get_band_files_no_granule_folder(mock_listdir, mock_isdir):
+    tile_name = "tile1"
+    full_tile_id = "tile1_product1"
+    output_directory = "/mock/output/directory"
+    mock_isdir.return_value = False
+    with patch("builtins.print") as mock_print:
+        get_band_files(tile_name, full_tile_id, output_directory)
+
+    mock_print.assert_called_once_with(f"GRANULE folder not found in {full_tile_id}")

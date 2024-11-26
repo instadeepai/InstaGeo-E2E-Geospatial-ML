@@ -1,12 +1,16 @@
 import os
 import tempfile
 import zipfile
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
-from instageo.data.s2_pipeline import retrieve_sentinel2_metadata, unzip_all
+from instageo.data.s2_pipeline import (
+    process_tile_bands,
+    retrieve_sentinel2_metadata,
+    unzip_all,
+)
 
 
 @pytest.fixture
@@ -115,13 +119,11 @@ def create_test_zip(zip_path, files):
 @patch("os.path.exists")
 def test_unzip_all_files_extracted(mock_exists, mock_unzip_file):
     with tempfile.TemporaryDirectory() as temp_dir:
-        # Arrange
         download_info_list = [
             ("http://example.com/file1.zip", "tile1_id", "tile1"),
             ("http://example.com/file2.zip", "tile2_id", "tile2"),
         ]
 
-        # Create zip files
         for _, full_tile_id, tile_name in download_info_list:
             tile_dir = os.path.join(temp_dir, tile_name)
             os.makedirs(tile_dir, exist_ok=True)
@@ -131,23 +133,77 @@ def test_unzip_all_files_extracted(mock_exists, mock_unzip_file):
         # Mock os.path.exists to simulate that the zip files exist and files don't exist yet
         def mock_exists_side_effect(path):
             if path.endswith(".zip"):
-                return True  # Return True for zip files
+                return True
             elif "test_file.txt" in path:
-                return False  # Return False for extracted files (this simulates them not existing yet)
+                return False
             elif os.path.isdir(path):
-                return True  # Return True for directories
-            return False  # For other cases, return False
+                return True
+            return False
 
         mock_exists.side_effect = mock_exists_side_effect
-
-        # Act
         unzip_all(download_info_list, temp_dir)
-
-        # Assert: Check that extracted files are present by mocking file existence
-        # Now that unzip_all has been called, the files should exist
         mock_exists.side_effect = (
             lambda path: path.endswith(".zip") or "test_file.txt" in path
         )
 
         assert os.path.exists(os.path.join(temp_dir, "tile1", "test_file.txt"))
         assert os.path.exists(os.path.join(temp_dir, "tile2", "test_file.txt"))
+
+
+@pytest.fixture
+def mock_file_system():
+    mock_os = MagicMock()
+    mock_shutil = MagicMock()
+    return mock_os, mock_shutil
+
+
+@patch("os.path.isdir")
+@patch("os.listdir")
+@patch("shutil.move")
+@patch("shutil.rmtree")
+@patch("instageo.data.s2_utils.get_band_files")
+def test_process_tile_bands(
+    mock_get_band_files,
+    mock_rmtree,
+    mock_move,
+    mock_listdir,
+    mock_isdir,
+    mock_file_system,
+):
+    tile_name = "TILE_NAME_1"
+    full_tile_id = "ID_1"
+    output_directory = "mock_output_directory"
+    tile_folder = os.path.join(output_directory, tile_name)
+    base_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
+    img_data_dir = os.path.join(base_dir, "granule_folder", "IMG_DATA", "R20m")
+
+    mock_get_band_files.return_value = [
+        os.path.join(img_data_dir, "B02.jp2"),
+        os.path.join(img_data_dir, "B03.jp2"),
+        os.path.join(img_data_dir, "B11.jp2"),
+    ]
+
+    mock_isdir.side_effect = lambda path: {
+        base_dir: True,
+        img_data_dir: True,
+    }.get(path, False)
+
+    mock_listdir.side_effect = lambda path: {
+        base_dir: ["granule_folder"],
+        img_data_dir: ["B02.jp2", "B03.jp2", "B11.jp2"],  # Files in the R20m folder
+    }.get(path, [])
+
+    process_tile_bands({"TILE_NAME_1": [{"full_tile_id": "ID_1"}]}, output_directory)
+
+    mock_move.assert_any_call(
+        os.path.join(img_data_dir, "B02.jp2"), os.path.join(tile_folder, "B02.jp2")
+    )
+    mock_move.assert_any_call(
+        os.path.join(img_data_dir, "B03.jp2"), os.path.join(tile_folder, "B03.jp2")
+    )
+    mock_move.assert_any_call(
+        os.path.join(img_data_dir, "B11.jp2"), os.path.join(tile_folder, "B11.jp2")
+    )
+
+    assert mock_move.call_count == 3
+    mock_rmtree.assert_called_once_with(os.path.join(tile_folder, full_tile_id))
