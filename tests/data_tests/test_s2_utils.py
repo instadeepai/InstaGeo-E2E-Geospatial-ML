@@ -2,7 +2,7 @@ import os
 import tempfile
 import zipfile
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 import pytest
@@ -14,6 +14,7 @@ from instageo.data.s2_utils import (
     find_scl_file,
     get_access_and_refresh_token,
     get_band_files,
+    open_mf_jp2_dataset,
     refresh_access_token,
     unzip_file,
 )
@@ -288,3 +289,66 @@ def test_get_band_files_no_granule_folder(mock_listdir, mock_isdir):
         get_band_files(tile_name, full_tile_id, output_directory)
 
     mock_print.assert_called_once_with(f"GRANULE folder not found in {full_tile_id}")
+
+
+@pytest.fixture
+def temp_folder():
+    with tempfile.TemporaryDirectory() as folder:
+        yield folder
+
+
+def test_missing_folder():
+    datasets, crs = open_mf_jp2_dataset(
+        band_folder="non_existent_folder",
+        history_dates=[("id1", ["20240101"])],
+        mask_cloud=False,
+        water_mask=False,
+        temporal_tolerance=5,
+    )
+    assert datasets == [None], "Expected None for datasets when folder is missing."
+    assert crs is None, "Expected None for CRS when folder is missing."
+
+
+def test_empty_band_file(temp_folder):
+    empty_file_path = os.path.join(temp_folder, "empty_band_20240101T.jp2")
+    open(empty_file_path, "w").close()  # Create an empty file
+
+    with patch("os.listdir", return_value=["empty_band_20240101T.jp2"]), patch(
+        "os.path.getsize", return_value=0
+    ):
+        datasets, crs = open_mf_jp2_dataset(
+            band_folder=temp_folder,
+            history_dates=[("id1", ["20240101"])],
+            mask_cloud=False,
+            water_mask=False,
+            temporal_tolerance=5,
+        )
+    assert datasets == [None], "Expected None for datasets when files are empty."
+    assert crs is None, "Expected None for CRS when files are empty."
+
+
+def test_mismatched_band_count(temp_folder):
+    valid_file_path = os.path.join(temp_folder, "band_20240101T.jp2")
+    scl_file_path = os.path.join(temp_folder, "SCL_20240101T.jp2")
+
+    with open(valid_file_path, "wb") as f, open(scl_file_path, "wb") as scl_f:
+        f.write(b"Non-empty band data")
+        scl_f.write(b"Non-empty SCL data")
+
+    with patch(
+        "os.listdir", return_value=["band_20240101T.jp2", "SCL_20240101T.jp2"]
+    ), patch("os.path.getsize", return_value=10), patch(
+        "rioxarray.open_rasterio",
+        return_value=MagicMock(rio=MagicMock(crs="EPSG:4326")),
+    ):
+        datasets, crs = open_mf_jp2_dataset(
+            band_folder=temp_folder,
+            history_dates=[("id1", ["20240101"])],
+            mask_cloud=False,
+            water_mask=False,
+            temporal_tolerance=5,
+        )
+    assert datasets == [
+        None
+    ], "Expected None for datasets when band count is mismatched."
+    assert crs is None, "Expected None for CRS when band count is mismatched."
