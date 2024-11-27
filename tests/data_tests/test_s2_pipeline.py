@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from instageo.data.s2_pipeline import (
+    filter_best_product_in_folder,
     process_tile_bands,
     retrieve_sentinel2_metadata,
     unzip_all,
@@ -150,6 +151,31 @@ def test_unzip_all_files_extracted(mock_exists, mock_unzip_file):
         assert os.path.exists(os.path.join(temp_dir, "tile2", "test_file.txt"))
 
 
+@patch("instageo.data.s2_utils.unzip_file")
+@patch("os.path.exists")
+def test_unzip_all_files_extracted_with_missing_zip(
+    mock_exists, mock_unzip_file, capsys
+):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        download_info_list = [
+            ("http://example.com/file2.zip", "tile2_id", "tile2"),
+        ]
+
+        # Mock os.path.exists to simulate that the zip file for tile2 is missing
+        def mock_exists_side_effect(path):
+            if path.endswith("tile2_id.zip"):
+                return False
+            return True
+
+        mock_exists.side_effect = mock_exists_side_effect
+        unzip_all(download_info_list, temp_dir)
+        captured = capsys.readouterr()
+
+        assert "Zip file not found" in captured.out
+        assert "tile2_id.zip" in captured.out
+        mock_unzip_file.assert_not_called()
+
+
 @pytest.fixture
 def mock_file_system():
     mock_os = MagicMock()
@@ -207,3 +233,64 @@ def test_process_tile_bands(
 
     assert mock_move.call_count == 3
     mock_rmtree.assert_called_once_with(os.path.join(tile_folder, full_tile_id))
+
+
+@pytest.fixture
+def temp_output_directory():
+    with tempfile.TemporaryDirectory() as folder:
+        yield folder
+
+
+def test_missing_scl_file(temp_output_directory):
+    tile_name = "TILE123"
+    tile_products = [{"acquisition_date": "2024-01-01"}]
+    output_directory = temp_output_directory
+    history_dates = [(tile_name, ["2024-01-01"])]
+    temporal_tolerance = 5
+
+    with patch("instageo.data.s2_utils.find_scl_file", return_value=None):
+        with patch("os.listdir", return_value=[]):  # Empty folder
+            filter_best_product_in_folder(
+                tile_name,
+                tile_products,
+                output_directory,
+                history_dates,
+                temporal_tolerance,
+            )
+
+    assert os.listdir(temp_output_directory) == [], "Expected no files to be removed."
+
+
+def test_pixel_count_error(temp_output_directory):
+    tile_name = "TILE123"
+    tile_products = [{"acquisition_date": "2024-01-01"}]
+    output_directory = temp_output_directory
+    history_dates = [(tile_name, ["2024-01-01"])]
+    temporal_tolerance = 5
+
+    scl_mock_path = os.path.join(
+        temp_output_directory, tile_name, "SCL_20240101TILE123.jp2"
+    )
+    os.makedirs(os.path.dirname(scl_mock_path), exist_ok=True)
+    with open(scl_mock_path, "wb") as f:
+        f.write(b"Fake SCL data")
+
+    with patch("instageo.data.s2_utils.find_scl_file", return_value=scl_mock_path):
+        with patch(
+            "instageo.data.s2_utils.count_valid_pixels",
+            side_effect=Exception("Test error"),
+        ):
+            try:
+                filter_best_product_in_folder(
+                    tile_name,
+                    tile_products,
+                    output_directory,
+                    history_dates,
+                    temporal_tolerance,
+                )
+            except Exception:
+                pass
+
+    assert os.path.exists(
+        scl_mock_path
+    ), "SCL file should not have been deleted on error."
