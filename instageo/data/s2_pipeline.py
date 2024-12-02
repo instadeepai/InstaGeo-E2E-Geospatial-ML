@@ -151,9 +151,9 @@ def retrieve_sentinel2_metadata(
 def download_tile_data(
     tile_database: Dict[str, Any],
     output_directory: str,
-    client_id: str,
-    username: str,
-    password: str,
+    client_id: str | None,
+    username: str | None,
+    password: str | None,
     temporal_step: int,
     num_steps: int,
 ) -> List[Tuple[str, str, str]]:
@@ -166,9 +166,9 @@ def download_tile_data(
         tile_database (Dict[str, Any]): A dictionary where keys are tile names and values
         are data about each tile.
         output_directory (str): Path to the directory where tiles should be stored.
-        client_id (str): The client ID for authentication during the download process.
-        username (str): The username for authentication.
-        password (str): The password for authentication.
+        client_id (str | None): The client ID for authentication during the download process.
+        username (str | None): The username for authentication.
+        password (str | None): The password for authentication.
         temporal_step (int): The temporal step for filtering products.
         num_steps (int): The number of steps for filtering products.
 
