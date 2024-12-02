@@ -39,7 +39,7 @@ from rasterio.crs import CRS
 
 
 def get_access_and_refresh_token(
-    client_id: str, username: str, password: str
+    client_id: str | None, username: str | None, password: str | None
 ) -> Tuple[Optional[str], Optional[str], Optional[int]]:
     """Access and refresh token creator.
 
@@ -47,9 +47,9 @@ def get_access_and_refresh_token(
     client ID, username, and password.
 
     Args:
-        client_id (str): The client ID for authentication.
-        username (str): The username for authentication.
-        password (str): The password for authentication.
+        client_id (str | None): The client ID for authentication.
+        username (str | None): The username for authentication.
+        password (str | None): The password for authentication.
 
     Returns:
         Tuple[Optional[str], Optional[str], Optional[int]]: A tuple containing the access token,
@@ -252,9 +252,9 @@ def download_product(
 
 
 def parallel_downloads_s2(
-    client_id: str,
-    username: str,
-    password: str,
+    client_id: str | None,
+    username: str | None,
+    password: str | None,
     download_info_list: List[Tuple[str, str, str]],
     output_directory: str,
 ) -> None:
@@ -264,9 +264,9 @@ def parallel_downloads_s2(
     and refresh.
 
     Args:
-        client_id (str): The client ID for authentication.
-        username (str): The username for authentication.
-        password (str): The password for authentication.
+        client_id (str | None): The client ID for authentication.
+        username (str | None): The username for authentication.
+        password (str | None): The password for authentication.
         download_info_list (List[Tuple[str, str, str]]): A list of download information tuples.
         output_directory (str): The directory path where the downloaded files will be saved.
 

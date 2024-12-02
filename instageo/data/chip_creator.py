@@ -26,6 +26,7 @@ from typing import Any
 import pandas as pd
 import rasterio
 from absl import app, flags, logging
+from dotenv import load_dotenv
 from tqdm import tqdm
 
 from instageo.data.geo_utils import get_tile_info, get_tiles
@@ -43,6 +44,8 @@ from instageo.data.s2_pipeline import (
     retrieve_sentinel2_metadata,
     unzip_all,
 )
+
+load_dotenv(".credentials")
 
 logging.set_verbosity(logging.INFO)
 
@@ -70,21 +73,11 @@ flags.DEFINE_boolean(
 )
 flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
 flags.DEFINE_boolean("water_mask", False, "Perform Water Masking")
-flags.DEFINE_string(
-    "data_source", "HLS", "Data source to use. Accepted values are 'HLS' or 'S2'."
-)
+flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2"], "Data source to use.")
 flags.DEFINE_integer(
     "cloud_coverage",
     10,
     "Percentage os cloud cover to use. Accepted values are between 0and 100.",
-)
-flags.DEFINE_string("client_id", "cdse-public", "Replace with your client ID")
-flags.DEFINE_string("username", None, "Replace with your username")
-flags.DEFINE_string(
-    "password",
-    None,
-    "Replace with your password. Ensure the password is enclosed in single quotes "
-    "(') if it contains special characters like $, to prevent issues during shell interpretation.",
 )
 
 
@@ -110,6 +103,7 @@ def main(argv: Any) -> None:
     sub_data = get_tiles(data, min_count=FLAGS.min_count)
 
     if FLAGS.data_source == "HLS":
+        logging.info("Using Harmonized Landsat Sentinel-2 pipeline")
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))
             and os.path.exists(
@@ -190,7 +184,7 @@ def main(argv: Any) -> None:
         )
 
     elif FLAGS.data_source == "S2":
-        logging.info("Will use S2 pipeline")
+        logging.info("Using Sentinel-2 pipeline")
 
         tile_df, history_dates = get_tile_info(
             sub_data, num_steps=FLAGS.num_steps, temporal_step=FLAGS.temporal_step
@@ -202,14 +196,14 @@ def main(argv: Any) -> None:
                 os.path.join(FLAGS.output_directory, "granules_to_download.csv")
             )
         ):
-            logging.info("Retrieving S2 tiles that will be downloaded.")
+            logging.info("Retrieving Sentinel-2 tiles that will be downloaded.")
             granules_dict = retrieve_sentinel2_metadata(
                 tile_df,
                 cloud_coverage=FLAGS.cloud_coverage,
                 temporal_tolerance=FLAGS.temporal_tolerance,
                 history_dates=history_dates,
             )
-            logging.info("Creating S2 dataset JSON.")
+            logging.info("Creating Sentinel-2 dataset JSON.")
             with open(
                 os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w"
             ) as json_file:
@@ -218,19 +212,19 @@ def main(argv: Any) -> None:
                 os.path.join(FLAGS.output_directory, "granules_to_download.csv")
             )
         else:
-            logging.info("S2 dataset JSON already created")
+            logging.info("Sentinel-2 dataset JSON already created")
             with open(
                 os.path.join(FLAGS.output_directory, "s2_dataset.json")
             ) as json_file:
                 granules_dict = json.load(json_file)
 
-        logging.info("Downloading S2 Tiles")
+        logging.info("Downloading Sentinel-2 Tiles")
         download_info_list = download_tile_data(
             granules_dict,
             FLAGS.output_directory,
-            client_id=FLAGS.client_id,
-            username=FLAGS.username,
-            password=FLAGS.password,
+            client_id=os.getenv("CLIENT_ID"),
+            username=os.getenv("USERNAME"),
+            password=os.getenv("PASSWORD"),
             temporal_step=FLAGS.temporal_step,
             num_steps=FLAGS.num_steps,
         )
@@ -238,10 +232,10 @@ def main(argv: Any) -> None:
         if FLAGS.download_only:
             return
 
-        logging.info("Unzipping S2 products")
+        logging.info("Unzipping Sentinel-2 products")
         unzip_all(download_info_list, output_directory=FLAGS.output_directory)
 
-        logging.info("Processing S2 products")
+        logging.info("Processing Sentinel-2 products")
         process_tile_bands(granules_dict, output_directory=FLAGS.output_directory)
 
         for tile_name, tile_data in granules_dict.items():
