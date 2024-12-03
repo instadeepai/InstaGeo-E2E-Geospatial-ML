@@ -35,6 +35,7 @@ import rasterio
 import requests  # type: ignore
 import rioxarray
 import xarray as xr
+from absl import logging
 from rasterio.crs import CRS
 
 
@@ -150,7 +151,7 @@ def download_with_wget(access_token: str, download_url: str, output_file: str) -
         else:
             print(f"Download failed with exit code {process.returncode}")
     except subprocess.CalledProcessError as e:
-        print(f"Failed to download: {e}")
+        logging.error(f"Failed to download: {e}")
 
 
 def check_and_refresh_token(
@@ -284,14 +285,16 @@ def unzip_file(zip_file: str, output_dir: str) -> None:
             zip_ref.extractall(output_dir)
         os.remove(zip_file)
     except zipfile.BadZipFile:
-        print(f"Error: {zip_file} is not a valid zip file")
+        logging.info(f"Error: {zip_file} is not a valid zip file")
     except FileNotFoundError:
-        print(f"File not found: {zip_file}")
+        logging.info(f"File not found: {zip_file}")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.info(f"An error occurred: {e}")
 
 
-def get_band_files(tile_name: str, full_tile_id: str, output_directory: str) -> None:
+def get_band_files(
+    tile_name: str, full_tile_id: str, output_directory: str, bands_needed: list
+) -> None:
     """Handle band files.
 
     Navigates through the folders to find the bands in the IMG_DATA/R20m folder,
@@ -301,11 +304,11 @@ def get_band_files(tile_name: str, full_tile_id: str, output_directory: str) -> 
         tile_name (str): The tile name.
         full_tile_id (str): The base folder where the unzipped contents are stored.
         output_directory (str): The root directory where the tile folders are located.
+        bands_needed (list): A list of band names to be processed.
 
     Returns:
     None: This function doesn't return any value. It performs file operations and prints messages.
     """
-    bands_needed = ["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"]
     tile_folder = os.path.join(output_directory, tile_name)
     base_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
 
