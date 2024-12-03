@@ -548,8 +548,6 @@ def main(argv: Any) -> None:
             client_id=os.getenv("CLIENT_ID"),
             username=os.getenv("USERNAME"),
             password=os.getenv("PASSWORD"),
-            temporal_step=FLAGS.temporal_step,
-            num_steps=FLAGS.num_steps,
         )
 
         if FLAGS.download_only:

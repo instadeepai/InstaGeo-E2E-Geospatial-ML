@@ -27,7 +27,7 @@ import subprocess
 import time
 import zipfile
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -181,42 +181,6 @@ def check_and_refresh_token(
         access_token = new_access_token
         token_expiry_time = current_time + expires_in
     return access_token, token_expiry_time
-
-
-def filter_products_by_month(
-    tile_products: List[Dict[str, str]], temporal_step: int, num_steps: int
-) -> Optional[List[Dict[str, str]]]:
-    """Filter S2 products.
-
-    Filters products to ensure that they include acquisitions from a specified number of
-    different months if the temporal step condition is met.
-
-    Args:
-        tile_products (List[Dict[str, str]]): A list of product dictionaries, each containing an
-        'acquisition_date' key with the date formatted as a string ('%Y-%m-%d').
-        temporal_step (int): The temporal step in days used to decide whether to apply the
-        filtering condition.
-        num_steps (int): The required number of distinct months that products should span.
-
-    Returns:
-        Optional[List[Dict[str, str]]]: The list of filtered products if they span at least
-        `num_steps` distinct months; otherwise, returns None.
-    """
-    # Only proceed with filtering if the temporal step is 30 or more
-    if temporal_step < 30:
-        return tile_products
-
-    filtered_products = []
-    months_seen = set()
-
-    for product in tile_products:
-        acquisition_date = datetime.strptime(product["acquisition_date"], "%Y-%m-%d")
-        month_key = (acquisition_date.year, acquisition_date.month)
-        months_seen.add(month_key)
-        filtered_products.append(product)
-
-    # Ensure there are products from at least "num_steps" distinct months
-    return filtered_products if len(months_seen) >= num_steps else None
 
 
 def download_product(
