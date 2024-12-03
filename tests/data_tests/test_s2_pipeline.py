@@ -219,7 +219,11 @@ def test_process_tile_bands(
         img_data_dir: ["B02.jp2", "B03.jp2", "B11.jp2"],  # Files in the R20m folder
     }.get(path, [])
 
-    process_tile_bands({"TILE_NAME_1": [{"full_tile_id": "ID_1"}]}, output_directory)
+    process_tile_bands(
+        {"TILE_NAME_1": [{"full_tile_id": "ID_1"}]},
+        output_directory,
+        bands_needed=["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
+    )
 
     mock_move.assert_any_call(
         os.path.join(img_data_dir, "B02.jp2"), os.path.join(tile_folder, "B02.jp2")
