@@ -310,36 +310,43 @@ def get_band_files(
     None: This function doesn't return any value. It performs file operations and prints messages.
     """
     tile_folder = os.path.join(output_directory, tile_name)
-    base_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
+    # Define the path to the granule folder and check if it exists
+    granule_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
+    if not os.path.isdir(granule_dir):
+        logging.info(f"GRANULE folder not found in {full_tile_id}")
+        return
 
-    if os.path.isdir(base_dir):
-        granule_folders = os.listdir(base_dir)
-        if granule_folders:
-            granule_folder = granule_folders[0]
-            img_data_dir = os.path.join(base_dir, granule_folder, "IMG_DATA", "R20m")
+    granule_folders = os.listdir(granule_dir)
+    if not granule_folders:
+        logging.info(f"No subfolder found in GRANULE for {full_tile_id}")
+        return
 
-            if os.path.isdir(img_data_dir):
-                for file_name in os.listdir(img_data_dir):
-                    for band in bands_needed:
-                        if band in file_name:
-                            full_file_path = os.path.join(img_data_dir, file_name)
-                            target_file_path = os.path.join(tile_folder, file_name)
+    granule_folder = granule_folders[0]
+    # Define the path to the R20m folder where the band images are stored and check if it exists
+    img_data_dir = os.path.join(granule_dir, granule_folder, "IMG_DATA", "R20m")
+    if not os.path.isdir(img_data_dir):
+        logging.info(f"R20m folder not found in {granule_folder}")
+        return
 
-                            shutil.move(full_file_path, target_file_path)
+    # Iterate over all files in the R20m folder and move needed bands
+    for file_name in os.listdir(img_data_dir):
+        if any(band in file_name for band in bands_needed):
+            full_file_path = os.path.join(img_data_dir, file_name)
+            target_file_path = os.path.join(tile_folder, file_name)
+            shutil.move(full_file_path, target_file_path)
 
-                shutil.rmtree(os.path.join(tile_folder, full_tile_id))
-            else:
-                print(f"R20m folder not found in {granule_folder}")
-        else:
-            print(f"No subfolder found in GRANULE for {full_tile_id}")
-    else:
-        print(f"GRANULE folder not found in {full_tile_id}")
+    # After processing, remove the original folder structure to clean up
+    shutil.rmtree(os.path.join(tile_folder, full_tile_id))
 
 
 def count_valid_pixels(scl_band_path: str) -> int:
     """Valid pixels count.
 
-    Count valid pixels in the SCL band, ignoring pixels with class 0 (No Data).
+    The SCL band (Scene Classification Layer) is a raster data product that classifies each pixel
+    in the image into specific categories, enabling further analysis and processing. The
+    classification is represented as an integer value per pixel, where each value corresponds
+    to a specific class.
+    This function counts valid pixels in the SCL band, ignoring pixels with class 0 (No Data).
 
     Args:
         scl_band_path (str): The file path to the SCL band.
@@ -350,7 +357,7 @@ def count_valid_pixels(scl_band_path: str) -> int:
     valid_pixels = 0
     with rasterio.open(scl_band_path) as src:
         scl_data = src.read(1)  # Read the SCL band data as a 2D numpy array
-        valid_pixels = np.count_nonzero(scl_data != 0)
+        valid_pixels = np.count_nonzero(scl_data)
     return valid_pixels
 
 
@@ -359,7 +366,10 @@ def find_scl_file(
 ) -> Optional[str]:
     """SCL file finder.
 
-    Find the SCL file matching the acquisition date.
+    The SCL band (Scene Classification Layer) is a raster data product typically generated from
+    Sentinel-2 satellite imagery as part of Level-2A processing that classifies each pixel in
+    the image into specific categories, enabling further analysis and processing.
+    This function finds the SCL file matching the acquisition date.
 
     Args:
         output_path (str): Path to the tile's folder.
@@ -391,8 +401,9 @@ def open_mf_jp2_dataset(
 ) -> tuple[list[xr.Dataset | None], CRS | None]:
     """Handle JP2 data grouped by timestamps with temporal tolerance.
 
-    Open multiple JP2 files as xarray Datasets for each date group and optionally apply filtering
-    for water and clouds, with a date tolerance window.
+    Open multiple JP2 (JPEG 2000 which is an image compression standard and coding system) files as
+    xarray Datasets for each date group and optionally apply filtering for water and clouds, with a
+    date tolerance window.
 
     Args:
         band_folder (str): Path to the folder where the bands and SCL band are stored.
