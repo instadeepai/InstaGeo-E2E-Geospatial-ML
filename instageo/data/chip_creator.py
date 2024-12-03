@@ -234,7 +234,11 @@ def main(argv: Any) -> None:
         unzip_all(download_info_list, output_directory=FLAGS.output_directory)
 
         logging.info("Processing Sentinel-2 products")
-        process_tile_bands(granules_dict, output_directory=FLAGS.output_directory)
+        process_tile_bands(
+            granules_dict,
+            output_directory=FLAGS.output_directory,
+            bands_needed=["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
+        )
 
         for tile_name, tile_data in granules_dict.items():
             filter_best_product_in_folder(

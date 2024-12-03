@@ -221,7 +221,9 @@ def unzip_all(
 
 
 def process_tile_bands(
-    tile_database: Dict[str, List[Dict[str, Any]]], output_directory: str
+    tile_database: Dict[str, List[Dict[str, Any]]],
+    output_directory: str,
+    bands_needed: list,
 ) -> None:
     """Processes each tile in the provided tile database to retrieve specified band files.
 
@@ -230,6 +232,7 @@ def process_tile_bands(
         and values are lists of products with data about each tile.
         output_directory (str): The path to the directory where tile data will be processed
         and stored.
+        bands_needed (list): A list of band names to be processed.
 
     Returns:
         None
@@ -237,7 +240,7 @@ def process_tile_bands(
     for tile_name, tile_data in tile_database.items():
         for product in tile_data:
             full_tile_id = product["full_tile_id"]
-            get_band_files(tile_name, full_tile_id, output_directory)
+            get_band_files(tile_name, full_tile_id, output_directory, bands_needed)
 
 
 def filter_best_product_in_folder(
