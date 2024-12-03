@@ -32,7 +32,6 @@ from shapely.geometry import Point
 from instageo.data.geo_utils import create_segmentation_map, get_chip_coords
 from instageo.data.s2_utils import (
     count_valid_pixels,
-    filter_products_by_month,
     find_scl_file,
     get_band_files,
     open_mf_jp2_dataset,
@@ -154,8 +153,6 @@ def download_tile_data(
     client_id: str | None,
     username: str | None,
     password: str | None,
-    temporal_step: int,
-    num_steps: int,
 ) -> List[Tuple[str, str, str]]:
     """Download Sentinel-2 Tiles .
 
@@ -169,8 +166,6 @@ def download_tile_data(
         client_id (str | None): The client ID for authentication during the download process.
         username (str | None): The username for authentication.
         password (str | None): The password for authentication.
-        temporal_step (int): The temporal step for filtering products.
-        num_steps (int): The number of steps for filtering products.
 
     Returns:
         List[Tuple[str, str, str]]: A list of download information tuples containing
@@ -181,15 +176,10 @@ def download_tile_data(
     for tile_name, tile_data in tile_database.items():
         os.makedirs(os.path.join(output_directory, tile_name), exist_ok=True)
 
-        filtered_products = filter_products_by_month(
-            tile_data, temporal_step, num_steps
-        )
-
-        if filtered_products:
-            for entry in filtered_products:
-                download_link = entry["download_link"]
-                full_tile_id = entry["full_tile_id"]
-                download_info_list.append((download_link, full_tile_id, tile_name))
+    for entry in tile_data:
+        download_link = entry["download_link"]
+        full_tile_id = entry["full_tile_id"]
+        download_info_list.append((download_link, full_tile_id, tile_name))
 
     if download_info_list:
         parallel_downloads_s2(
