@@ -263,7 +263,12 @@ def test_get_band_files(mock_rmtree, mock_move, mock_listdir, mock_isdir):
         img_data_dir: ["B02.jp2", "B03.jp2", "B11.jp2"],  # Files in the R20m folder
     }.get(path, [])
 
-    get_band_files(tile_name, full_tile_id, output_directory)
+    get_band_files(
+        tile_name,
+        full_tile_id,
+        output_directory,
+        bands_needed=["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
+    )
 
     mock_move.assert_any_call(
         os.path.join(img_data_dir, "B02.jp2"), os.path.join(tile_folder, "B02.jp2")
@@ -286,7 +291,12 @@ def test_get_band_files_no_granule_folder(mock_listdir, mock_isdir):
     output_directory = "/mock/output/directory"
     mock_isdir.return_value = False
     with patch("builtins.print") as mock_print:
-        get_band_files(tile_name, full_tile_id, output_directory)
+        get_band_files(
+            tile_name,
+            full_tile_id,
+            output_directory,
+            bands_needed=["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
+        )
 
     mock_print.assert_called_once_with(f"GRANULE folder not found in {full_tile_id}")
 
