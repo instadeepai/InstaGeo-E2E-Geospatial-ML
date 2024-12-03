@@ -101,7 +101,8 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
         "--num_steps",
         "1",
         "--download_only",
-        "False" "--data_source",
+        "True",
+        "--data_source",
         "HLS",
     ]
     FLAGS(argv)
