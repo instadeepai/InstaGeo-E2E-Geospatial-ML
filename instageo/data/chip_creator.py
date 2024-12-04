@@ -589,6 +589,7 @@ def main(argv: Any) -> None:
                 water_mask=FLAGS.water_mask,
                 temporal_tolerance=FLAGS.temporal_tolerance,
                 history_dates=history_dates,
+                num_bands_per_timestamp=6,
             )
 
             print(
