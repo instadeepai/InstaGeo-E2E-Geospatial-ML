@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 import zipfile
@@ -285,12 +286,16 @@ def test_get_band_files(mock_rmtree, mock_move, mock_listdir, mock_isdir):
 
 @patch("os.path.isdir")
 @patch("os.listdir")
-def test_get_band_files_no_granule_folder(mock_listdir, mock_isdir):
+@patch("shutil.rmtree")
+@patch("shutil.move")
+def test_get_band_files_no_granule_folder(
+    mock_move, mock_rmtree, mock_listdir, mock_isdir, caplog
+):
     tile_name = "tile1"
     full_tile_id = "tile1_product1"
     output_directory = "/mock/output/directory"
     mock_isdir.return_value = False
-    with patch("builtins.print") as mock_print:
+    with caplog.at_level(logging.INFO):
         get_band_files(
             tile_name,
             full_tile_id,
@@ -298,7 +303,9 @@ def test_get_band_files_no_granule_folder(mock_listdir, mock_isdir):
             bands_needed=["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
         )
 
-    mock_print.assert_called_once_with(f"GRANULE folder not found in {full_tile_id}")
+    assert f"GRANULE folder not found in {full_tile_id}" in caplog.text
+    mock_move.assert_not_called()
+    mock_rmtree.assert_not_called()
 
 
 @pytest.fixture
