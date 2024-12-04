@@ -450,12 +450,13 @@ def open_mf_jp2_dataset(
     file_map = dict(zip(all_files, file_dates))
 
     for group_id, dates in history_dates:
-        expanded_dates = []
-        for date_str in dates:
-            center_date = pd.to_datetime(date_str)
-            start_date = center_date - timedelta(days=temporal_tolerance)
-            end_date = center_date + timedelta(days=temporal_tolerance)
-            expanded_dates.append((start_date, end_date))
+        expanded_dates = [
+            (
+                pd.to_datetime(date_str) - timedelta(days=temporal_tolerance),
+                pd.to_datetime(date_str) + timedelta(days=temporal_tolerance),
+            )
+            for date_str in dates
+        ]
 
         band_files, scl_band_files = create_band_files(
             file_map, expanded_dates, dates, num_bands_per_timestamp, group_id
