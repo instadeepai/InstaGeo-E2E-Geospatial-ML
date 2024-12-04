@@ -486,12 +486,7 @@ def open_mf_jp2_dataset(
         bands_dataarray = xr.concat(bands_list, dim="band")
         bands_dataset = bands_dataarray.to_dataset(name="bands")
 
-        scl_data = []
-        for scl_path in scl_band_files:
-            with rasterio.open(scl_path) as scl_src:
-                scl_data.append(scl_src.read(1))
-
-        scl_data = np.stack(scl_data, axis=0)
+        scl_data = create_scl_data(scl_band_files)
 
         # Apply masking
         if water_mask:
@@ -589,3 +584,26 @@ def create_band_files(
     scl_band_files.sort()
 
     return band_files, scl_band_files
+
+
+def create_scl_data(scl_band_files: List[str]) -> np.ndarray:
+    """Create SCL data.
+
+    Load and stack SCL (Scene Classification Layer) data from a list of file paths.
+
+    Args:
+        scl_band_files (List[str]): A list of file paths to SCL band files.
+
+    Returns:
+        np.ndarray: A stacked NumPy array of SCL data.
+    """
+    scl_data = []
+    for scl_path in scl_band_files:
+        with rasterio.open(scl_path) as scl_src:
+            scl_data.append(scl_src.read(1))
+
+    if not scl_data:
+        logging.info("No SCL files could be loaded. The input file list may be empty.")
+        return np.array([])
+
+    return np.stack(scl_data, axis=0)
