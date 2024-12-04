@@ -336,6 +336,7 @@ def create_and_save_chips_with_seg_maps_s2(
     water_mask: bool,
     temporal_tolerance: int,
     history_dates: list[tuple[str, list[str]]],
+    num_bands_per_timestamp: int,
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -353,6 +354,7 @@ def create_and_save_chips_with_seg_maps_s2(
         water_mask (bool): If True, apply water masking.
         temporal_tolerance (int): Tolerance in days for temporal matching.
         history_dates (list): List of tuples of group IDs and associated dates.
+        num_bands_per_timestamp (int): Number of bands for each timestamp.
 
     Returns:
         tuple: A tuple containing a list of chip file paths and segmentation map file paths.
@@ -364,7 +366,12 @@ def create_and_save_chips_with_seg_maps_s2(
         band_folder = os.path.join(output_directory, str(tile_id))
 
         datasets, crs = open_mf_jp2_dataset(
-            band_folder, history_dates, mask_cloud, water_mask, temporal_tolerance
+            band_folder,
+            history_dates,
+            mask_cloud,
+            water_mask,
+            temporal_tolerance,
+            num_bands_per_timestamp,
         )
         if datasets is None or crs is None:
             print(

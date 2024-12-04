@@ -310,7 +310,7 @@ def get_band_files(
     None: This function doesn't return any value. It performs file operations and prints messages.
     """
     tile_folder = os.path.join(output_directory, tile_name)
-    # Define the path to the granule folder and check if it exists
+
     granule_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
     if not os.path.isdir(granule_dir):
         logging.info(f"GRANULE folder not found in {full_tile_id}")
@@ -320,9 +320,14 @@ def get_band_files(
     if not granule_folders:
         logging.info(f"No subfolder found in GRANULE for {full_tile_id}")
         return
-
+    # checks the length of granule_folders
+    if len(granule_folders) > 1:
+        logging.warning(
+            f"Unexpected multiple subfolders in GRANULE for {full_tile_id}: {granule_folders}"
+        )
+        raise ValueError(f"Multiple subfolders found in GRANULE: {granule_folders}")
     granule_folder = granule_folders[0]
-    # Define the path to the R20m folder where the band images are stored and check if it exists
+
     img_data_dir = os.path.join(granule_dir, granule_folder, "IMG_DATA", "R20m")
     if not os.path.isdir(img_data_dir):
         logging.info(f"R20m folder not found in {granule_folder}")
@@ -398,6 +403,7 @@ def open_mf_jp2_dataset(
     mask_cloud: bool,
     water_mask: bool,
     temporal_tolerance: int,
+    num_bands_per_timestamp: int,
 ) -> tuple[list[xr.Dataset | None], CRS | None]:
     """Handle JP2 data grouped by timestamps with temporal tolerance.
 
@@ -411,6 +417,7 @@ def open_mf_jp2_dataset(
         mask_cloud (bool): Whether to apply cloud filtering (classes 8 and 9).
         water_mask (bool): Whether to apply water filtering (class 6).
         temporal_tolerance (int): Tolerance in days to expand the search window for closest tiles.
+        num_bands_per_timestamp (int): Number of bands for each timestamp.
 
     Returns:
         tuple[list[xr.Dataset | None], CRS | None]:
@@ -418,7 +425,6 @@ def open_mf_jp2_dataset(
         - A list of xarray Datasets for each group or None if invalid.
         - A single CRS value if all datasets share the same CRS, otherwise None.
     """
-    num_bands_per_timestamp = 6
     datasets: list[xr.Dataset | None] = []
     crs_set = set()
 
