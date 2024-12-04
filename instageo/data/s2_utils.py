@@ -429,7 +429,7 @@ def open_mf_jp2_dataset(
     crs_set = set()
 
     if not os.path.exists(band_folder):
-        print(f"Folder '{band_folder}' does not exist.")
+        logging.info(f"Folder '{band_folder}' does not exist.")
         return [None] * len(history_dates), None
 
     all_files = [
@@ -457,37 +457,13 @@ def open_mf_jp2_dataset(
             end_date = center_date + timedelta(days=temporal_tolerance)
             expanded_dates.append((start_date, end_date))
 
-        band_files = [
-            file
-            for file, file_date in file_map.items()
-            if any(start <= file_date <= end for start, end in expanded_dates)
-            and "SCL" not in file
-        ]
-        scl_band_files = [
-            file
-            for file, file_date in file_map.items()
-            if any(start <= file_date <= end for start, end in expanded_dates)
-            and "SCL" in file
-        ]
+        band_files, scl_band_files = create_band_files(
+            file_map, expanded_dates, dates, num_bands_per_timestamp, group_id
+        )
 
-        if len(band_files) % num_bands_per_timestamp != 0:
-            print(
-                f"Unexpected number of band files for group '{group_id}': {len(band_files)}. "
-                f"Skipping group..."
-            )
+        if not band_files or not scl_band_files:
             datasets.append(None)
             continue
-
-        if len(scl_band_files) != len(dates):
-            print(
-                f"Skipping group '{dates[0]}' - missing SCL bands for each timestamp. "
-                f"Expected {len(dates)}, found {len(scl_band_files)}"
-            )
-            datasets.append(None)
-            continue
-
-        band_files.sort()
-        scl_band_files.sort()
 
         bands_list = []
         band_crs = None
@@ -500,10 +476,10 @@ def open_mf_jp2_dataset(
                     band_crs = band_data.rio.crs
                 crs_set.add(band_data.rio.crs)
             else:
-                print(f"Skipping empty band file: {band_file}")
+                logging.info(f"Skipping empty band file: {band_file}")
 
         if not bands_list:
-            print(f"Skipping group '{group_id}' - no valid band files found")
+            logging.info(f"Skipping group '{group_id}' - no valid band files found")
             datasets.append(None)
             continue
 
@@ -517,17 +493,15 @@ def open_mf_jp2_dataset(
 
         scl_data = np.stack(scl_data, axis=0)
 
+        # Apply masking
         if water_mask:
-            water_mask_array = np.isin(scl_data, [6]).astype(
-                np.uint8
+            bands_dataset = apply_class_mask(
+                bands_dataset, scl_data, [6]
             )  # Class 6 for water
-            bands_dataset["bands"] = bands_dataset["bands"].where(water_mask_array == 0)
-
         if mask_cloud:
-            cloud_mask_array = np.isin(scl_data, [8, 9]).astype(
-                np.uint8
+            bands_dataset = apply_class_mask(
+                bands_dataset, scl_data, [8, 9]
             )  # Classes 8 and 9 for clouds
-            bands_dataset["bands"] = bands_dataset["bands"].where(cloud_mask_array == 0)
 
         datasets.append(bands_dataset)
 
@@ -535,7 +509,83 @@ def open_mf_jp2_dataset(
     if len(crs_set) == 1:
         final_crs = crs_set.pop()
     else:
-        print(f"CRS mismatch detected: {crs_set}. Returning None for CRS.")
+        logging.info(f"CRS mismatch detected: {crs_set}. Returning None for CRS.")
         final_crs = None
 
     return datasets, final_crs
+
+
+def apply_class_mask(
+    dataset: xr.Dataset, scl_data: np.ndarray, class_ids: list[int]
+) -> xr.Dataset:
+    """Mask a specific class within SCL file.
+
+    Apply a mask to the dataset based on specified SCL class IDs.
+    Args:
+        dataset (xr.Dataset): The dataset to which the mask will be applied.
+        scl_data (np.ndarray): The SCL data used for masking.
+        class_ids (list[int]): The class IDs to mask out (set to NaN).
+
+    Returns:
+        xr.Dataset: The masked dataset.
+    """
+    mask_array = np.isin(scl_data, class_ids).astype(np.uint8)
+    dataset["bands"] = dataset["bands"].where(mask_array == 0)
+    return dataset
+
+
+def create_band_files(
+    file_map: dict,
+    expanded_dates: list,
+    dates: list,
+    num_bands_per_timestamp: int,
+    group_id: str,
+) -> Tuple[List[str], List[str]]:
+    """Create band files.
+
+    Create band and SCL files based on expanded date ranges and temporal tolerance for each group.
+
+    Args:
+        file_map (dict): A mapping of file paths to their corresponding datetime objects.
+        expanded_dates (list): A list of tuples containing the start and end date for each
+        timestamp.
+        dates (list): A list of original timestamps (for which bands are being created).
+        num_bands_per_timestamp (int): Number of bands for each timestamp (used for validation).
+        group_id (str): The ID of the group being processed (used for logging and debugging).
+
+    Returns:
+        tuple: A tuple containing two lists:
+            - band_files: A list of band file paths.
+            - scl_band_files: A list of SCL band file paths.
+    """
+    band_files = [
+        file
+        for file, file_date in file_map.items()
+        if any(start <= file_date <= end for start, end in expanded_dates)
+        and "SCL" not in file
+    ]
+    scl_band_files = [
+        file
+        for file, file_date in file_map.items()
+        if any(start <= file_date <= end for start, end in expanded_dates)
+        and "SCL" in file
+    ]
+
+    if len(band_files) % num_bands_per_timestamp != 0:
+        logging.info(
+            f"Unexpected number of band files for group '{group_id}': {len(band_files)}. "
+            f"Skipping group..."
+        )
+        return [], []
+
+    if len(scl_band_files) != len(dates):
+        logging.info(
+            f"Skipping group '{dates[0]}' - missing SCL bands for each timestamp. "
+            f"Expected {len(dates)}, found {len(scl_band_files)}"
+        )
+        return [], []
+
+    band_files.sort()
+    scl_band_files.sort()
+
+    return band_files, scl_band_files
