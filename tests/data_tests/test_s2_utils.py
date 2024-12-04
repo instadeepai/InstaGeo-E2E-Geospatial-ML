@@ -321,6 +321,7 @@ def test_missing_folder():
         mask_cloud=False,
         water_mask=False,
         temporal_tolerance=5,
+        num_bands_per_timestamp=6,
     )
     assert datasets == [None], "Expected None for datasets when folder is missing."
     assert crs is None, "Expected None for CRS when folder is missing."
@@ -339,6 +340,7 @@ def test_empty_band_file(temp_folder):
             mask_cloud=False,
             water_mask=False,
             temporal_tolerance=5,
+            num_bands_per_timestamp=6,
         )
     assert datasets == [None], "Expected None for datasets when files are empty."
     assert crs is None, "Expected None for CRS when files are empty."
@@ -364,6 +366,7 @@ def test_mismatched_band_count(temp_folder):
             mask_cloud=False,
             water_mask=False,
             temporal_tolerance=5,
+            num_bands_per_timestamp=6,
         )
     assert datasets == [
         None
