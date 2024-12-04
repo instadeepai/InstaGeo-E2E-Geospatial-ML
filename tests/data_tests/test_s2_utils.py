@@ -8,10 +8,13 @@ from unittest.mock import MagicMock, Mock, patch
 import numpy as np
 import pytest
 import rasterio
+import xarray as xr
 from rasterio.io import MemoryFile
 
 from instageo.data.s2_utils import (
+    apply_class_mask,
     count_valid_pixels,
+    create_scl_data,
     find_scl_file,
     get_access_and_refresh_token,
     get_band_files,
@@ -372,3 +375,75 @@ def test_mismatched_band_count(temp_folder):
         None
     ], "Expected None for datasets when band count is mismatched."
     assert crs is None, "Expected None for CRS when band count is mismatched."
+
+
+@pytest.fixture
+def mock_rasterio_open():
+    """Fixture to mock rasterio.open."""
+    with patch("rasterio.open") as mock_open:
+        yield mock_open
+
+
+def test_create_scl_data_valid_files(mock_rasterio_open):
+    mock_rasterio_open.return_value.__enter__.return_value.read.side_effect = [
+        np.array([[1, 2], [3, 4]]),
+        np.array([[5, 6], [7, 8]]),
+    ]
+    scl_band_files = ["file1.tif", "file2.tif"]
+    result = create_scl_data(scl_band_files)
+
+    expected = np.array(
+        [
+            [[1, 2], [3, 4]],
+            [[5, 6], [7, 8]],
+        ]
+    )
+
+    assert result.shape == expected.shape
+    assert np.array_equal(result, expected)
+
+
+def test_create_scl_data_empty_file_list():
+    scl_band_files = []
+    result = create_scl_data(scl_band_files)
+
+    assert result.size == 0
+    assert isinstance(result, np.ndarray)
+
+
+@pytest.fixture
+def sample_dataset():
+    data = np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])  # 2 bands, 2x2 each
+    coords = {"x": [0, 1], "y": [0, 1], "band": [1, 2]}
+    return xr.Dataset({"bands": (["band", "y", "x"], data)}, coords=coords)
+
+
+@pytest.fixture
+def sample_scl_data():
+    return np.array([[1, 2], [3, 4]])  # 2x2 SCL mask
+
+
+def test_apply_class_mask_valid_mask(sample_dataset, sample_scl_data):
+    class_ids = [2, 3]
+    result = apply_class_mask(sample_dataset, sample_scl_data, class_ids)
+
+    expected_data = np.array(
+        [
+            [[1, np.nan], [np.nan, 4]],
+            [[5, np.nan], [np.nan, 8]],
+        ]
+    )
+
+    assert "bands" in result
+    assert result["bands"].shape == sample_dataset["bands"].shape
+    np.testing.assert_array_equal(result["bands"].isnull(), np.isnan(expected_data))
+    np.testing.assert_array_almost_equal(
+        result["bands"].values, expected_data, decimal=6
+    )
+
+
+def test_apply_class_mask_no_classes_to_mask(sample_dataset, sample_scl_data):
+    class_ids = []
+    result = apply_class_mask(sample_dataset, sample_scl_data, class_ids)
+
+    xr.testing.assert_equal(result, sample_dataset)
