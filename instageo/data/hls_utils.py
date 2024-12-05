@@ -28,6 +28,7 @@ import earthaccess
 import mgrs
 import pandas as pd
 from absl import logging
+from shapely.geometry import box
 
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
@@ -112,6 +113,35 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
     Returns:
         A dictionary mapping tile_id to a list of available HLS granules.
     """
+
+    def _make_valid_bbox(
+        lon_min: float, lat_min: float, lon_max: float, lat_max: float
+    ):
+        """
+        The purpose of this function is to still be able to extract data through
+        earthaccess even given just a single observation in a tile (min_count = 1).
+        When the number of observations in a tile is 1, or if
+        we have 2 aligned observations, the lon_min, lat_min, lon_max, lat_max
+        extracted from those won't produce a valid bounding box. Thus, we attempt
+        to create a small buffer around the observation(s) to produce a
+        valid bounding box.
+
+        Args:
+            lon_min (float): Minimum longitude
+            lat_min (float): Minimum latitude
+            lon_max (float): Maximum longitude
+            lat_max (float): Maximum latitude
+
+        Returns:
+            A tuple of coordinates to use for a bounding box
+
+        """
+        epsilon = 5e-5
+        if box(lon_min, lat_min, lon_max, lat_max).is_valid:
+            return lon_min, lat_min, lon_max, lat_max
+        else:
+            return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
+
     granules_dict = {}
     for _, (
         tile_id,
@@ -124,10 +154,11 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
     ) in tile_info_df.iterrows():
         results = earthaccess.search_data(
             short_name=["HLSL30", "HLSS30"],
-            bounding_box=(lon_min, lat_min, lon_max, lat_max),
+            bounding_box=(_make_valid_bbox(lon_min, lat_min, lon_max, lat_max)),
             temporal=(f"{start_date}T00:00:00", f"{end_date}T23:59:59"),
         )
         granules = pd.json_normalize(results)
+        assert not granules.empty, "No granules found"
         granules = granules[granules["meta.native-id"].str.contains(tile_id)]
         granules = list(granules["meta.native-id"])
         granules_dict[tile_id] = granules
@@ -167,18 +198,23 @@ def get_hls_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
 
 
 def get_hls_tile_info(
-    data: pd.DataFrame, num_steps: int = 3, temporal_step: int = 10
+    data: pd.DataFrame,
+    num_steps: int = 3,
+    temporal_step: int = 10,
+    temporal_tolerance: int = 5,
 ) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
     """Get HLS Tile Info.
 
     Retrieves a summary of all tiles required for a given dataset. The summary contains
     the desired start and end date for each HLS tile. Also retrieves a list of queries
-    that can be used to retieve the tiles for each observation in `data`.
+    that can be used to retrieve the tiles for each observation in `data`.
 
     Args:
         data (pd.DataFrame): A dataframe containing observation records.
         num_steps (int): Number of temporal time steps
         temporal_step (int): Size of each temporal step.
+        temporal_tolerance (int): Number of days used as offset for the
+        start and end dates to search for each HLS tile.
 
     Returns:
         A `tile_info` dataframe and a list of `tile_queries`
@@ -193,7 +229,7 @@ def get_hls_tile_info(
         for i in range(num_steps):
             curr_date = date - pd.Timedelta(days=temporal_step * i)
             history.append(curr_date.strftime("%Y-%m-%d"))
-            tile_info.append([tile_id, curr_date.strftime("%Y-%m-%d"), lon, lat])
+            tile_info.append([tile_id, curr_date, lon, lat])
         tile_queries.append((tile_id, history))
     tile_info = (
         pd.DataFrame(tile_info, columns=["tile_id", "date", "lon", "lat"])
@@ -207,6 +243,10 @@ def get_hls_tile_info(
             lat_max=("lat", "max"),
         )
     ).reset_index()
+    tile_info.min_date -= pd.Timedelta(days=temporal_tolerance)
+    tile_info.max_date += pd.Timedelta(days=temporal_tolerance)
+    tile_info.min_date = tile_info.min_date.dt.strftime("%Y-%m-%d")
+    tile_info.max_date = tile_info.max_date.dt.strftime("%Y-%m-%d")
     return tile_info, tile_queries
 
 
@@ -234,7 +274,10 @@ def add_hls_granules(
         containing all the bands.
     """
     tiles_info, tile_queries = get_hls_tile_info(
-        data, num_steps=num_steps, temporal_step=temporal_step
+        data,
+        num_steps=num_steps,
+        temporal_step=temporal_step,
+        temporal_tolerance=temporal_tolerance,
     )
     tile_queries_str = [
         f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
