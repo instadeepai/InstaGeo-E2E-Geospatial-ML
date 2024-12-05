@@ -51,7 +51,9 @@ flags.DEFINE_string(
 flags.DEFINE_integer(
     "no_data_value", -1, "Value to use for no data areas in the segmentation maps."
 )
-flags.DEFINE_integer("min_count", 100, "Minimum observation counts per tile")
+flags.DEFINE_integer(
+    "min_count", 100, "Minimum observation counts per tile", lower_bound=1
+)
 flags.DEFINE_boolean(
     "shift_to_month_start",
     False,
