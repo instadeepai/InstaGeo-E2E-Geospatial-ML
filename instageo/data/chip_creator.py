@@ -234,7 +234,7 @@ def create_and_save_chips_with_seg_maps(
         if chip.count().values == 0:
             continue
         seg_map = create_segmentation_map(chip, df, no_data_value)
-        if seg_map.where(seg_map != -1).count().values == 0:
+        if seg_map.where(seg_map != no_data_value).count().values == 0:
             continue
         seg_maps.append(seg_map_name)
         seg_map.rio.to_raster(seg_map_filename)
