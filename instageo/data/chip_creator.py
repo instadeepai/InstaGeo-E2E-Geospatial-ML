@@ -68,6 +68,7 @@ flags.DEFINE_integer(
     3,
     """Number of temporal steps. When `is_time_series_task` is set to True, an attempt 
     will be made to retrieve `num_steps` satellite images prior to the observation date. 
+    Otherwise, the value of `num_steps` will default to 1.
     """,
     lower_bound=1,
 )
