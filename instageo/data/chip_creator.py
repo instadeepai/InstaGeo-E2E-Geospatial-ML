@@ -67,8 +67,9 @@ flags.DEFINE_integer(
     "num_steps",
     3,
     """Number of temporal steps. When `is_time_series_task` is set to True, an attempt 
-    will be made to retrieve `num_steps` satellite images prior to the observation date. 
-    Otherwise, the value of `num_steps` will default to 1.
+    will be made to retrieve `num_steps` HLS chips prior to the observation date. 
+    Otherwise, the value of `num_steps` will default to 1 and an attempt will be made to retrieve 
+    the HLS chip corresponding to the observation date.
     """,
     lower_bound=1,
 )
