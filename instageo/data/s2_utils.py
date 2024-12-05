@@ -39,77 +39,156 @@ from absl import logging
 from rasterio.crs import CRS
 
 
-def get_access_and_refresh_token(
-    client_id: str | None, username: str | None, password: str | None
-) -> Tuple[Optional[str], Optional[str], Optional[int]]:
-    """Access and refresh token creator.
+class S2AuthState:
+    """Authentication class.
 
-    Obtains an access token and a refresh token by authenticating with the provided
-    client ID, username, and password.
+    S2AuthState manages the authentication state for accessing Sentinel-2 resources.
+    This class handles token acquisition and refreshing, ensuring that the authentication
+    tokens remain valid for API requests or downloads.
 
-    Args:
-        client_id (str | None): The client ID for authentication.
+    Attributes:
+        client_id (str | None): The client ID used for authentication.
         username (str | None): The username for authentication.
         password (str | None): The password for authentication.
+        access_token (Optional[str]): The current access token used for API requests.
+            Initially None and updated after authentication.
+        refresh_token (Optional[str]): The refresh token used for obtaining a new access token.
+            Initially None and updated after authentication.
+        token_expiry_time (Optional[float]): The timestamp (in seconds since epoch) indicating
+            when the current access token will expire. Initially None.
 
-    Returns:
-        Tuple[Optional[str], Optional[str], Optional[int]]: A tuple containing the access token,
-        refresh token, and the token expiration time in seconds. Returns (None, None, None)
-        if the authentication fails.
     """
-    url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
-    payload = {
-        "client_id": client_id,
-        "username": username,
-        "password": password,
-        "grant_type": "password",
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    response = requests.post(url, data=payload, headers=headers)
 
-    if response.status_code == 200:
-        token_data = response.json()
-        access_token = token_data["access_token"]
-        refresh_token = token_data["refresh_token"]
-        expires_in = token_data["expires_in"]
-        return access_token, refresh_token, expires_in
-    else:
-        print("Failed to get access token:", response.text)
-        return None, None, None
+    def __init__(
+        self, client_id: str | None, username: str | None, password: str | None
+    ):
+        """Initializes the S2AuthState instance with user credentials.
 
+        Args:
+            client_id (str | None): The client ID for authentication.
+            username (str | None): The username for authentication.
+            password (str | None): The password for authentication.
+        """
+        self.client_id = client_id
+        self.username = username
+        self.password = password
+        self.access_token: Optional[str] = None
+        self.refresh_token: Optional[str] = None
+        self.token_expiry_time: Optional[float] = None
 
-def refresh_access_token(
-    client_id: str, refresh_token: str
-) -> Tuple[Optional[str], Optional[int]]:
-    """Access token refresher.
+    def authenticate(self) -> None:
+        """Authenticates the user and initializes the access and refresh tokens.
 
-    Refreshes an access token using the provided client ID and refresh token.
+        Raises:
+            ValueError: If authentication fails.
+        """
+        access_token, refresh_token, expires_in = self._get_access_and_refresh_token()
+        if access_token is None or refresh_token is None or expires_in is None:
+            raise ValueError("Failed to authenticate and obtain tokens.")
 
-    Args:
-        client_id (str): The client ID for authentication.
-        refresh_token (str): The refresh token used to request a new access token.
+        self.access_token = access_token
+        self.refresh_token = refresh_token
+        self.token_expiry_time = time.time() + expires_in
 
-    Returns:
-        Tuple[Optional[str], Optional[int]]: A tuple containing the new access token
-        and its expiration time in seconds, or (None, None) if the refresh attempt fails.
-    """
-    url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
-    payload = {
-        "client_id": client_id,
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token",
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    response = requests.post(url, data=payload, headers=headers)
+    def _get_access_and_refresh_token(
+        self,
+    ) -> Tuple[Optional[str], Optional[str], Optional[int]]:
+        """Access and refresh token creator.
 
-    if response.status_code == 200:
-        token_data = response.json()
-        access_token = token_data["access_token"]
-        expires_in = token_data["expires_in"]
-        return access_token, expires_in
-    else:
-        print("Failed to refresh access token:", response.text)
-        return None, None
+        Obtains an access token and a refresh token by authenticating with the provided
+        client ID, username, and password.
+
+        Args:
+            client_id (str | None): The client ID for authentication.
+            username (str | None): The username for authentication.
+            password (str | None): The password for authentication.
+
+        Returns:
+            Tuple[Optional[str], Optional[str], Optional[int]]: A tuple containing the access token,
+            refresh token, and the token expiration time in seconds. Returns (None, None, None)
+            if the authentication fails.
+        """
+        url = (
+            "https://identity.dataspace.copernicus.eu/auth/realms/"
+            "CDSE/protocol/openid-connect/token"
+        )
+        payload = {
+            "client_id": self.client_id,
+            "username": self.username,
+            "password": self.password,
+            "grant_type": "password",
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        response = requests.post(url, data=payload, headers=headers)
+
+        if response.status_code == 200:
+            token_data = response.json()
+            return (
+                token_data.get("access_token"),
+                token_data.get("refresh_token"),
+                token_data.get("expires_in"),
+            )
+        else:
+            print("Failed to get access token:", response.text)
+            return None, None, None
+
+    def _refresh_access_token(self) -> Tuple[Optional[str], Optional[int]]:
+        """Access token refresher.
+
+        Refreshes an access token using the provided client ID and refresh token.
+
+        Args:
+            client_id (str): The client ID for authentication.
+            refresh_token (str): The refresh token used to request a new access token.
+
+        Returns:
+            Tuple[Optional[str], Optional[int]]: A tuple containing the new access token
+            and its expiration time in seconds, or (None, None) if the refresh attempt fails.
+        """
+        url = (
+            "https://identity.dataspace.copernicus.eu/auth/realms/"
+            "CDSE/protocol/openid-connect/token"
+        )
+        payload = {
+            "client_id": self.client_id,
+            "refresh_token": self.refresh_token,
+            "grant_type": "refresh_token",
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        response = requests.post(url, data=payload, headers=headers)
+
+        if response.status_code == 200:
+            token_data = response.json()
+            return token_data.get("access_token"), token_data.get("expires_in")
+        else:
+            print("Failed to refresh access token:", response.text)
+            return None, None
+
+    def refresh_access_token_if_needed(self) -> str:
+        """Refreshes the access token if it has expired.
+
+        Returns:
+            str: The current (refreshed) access token.
+
+        Raises:
+            ValueError: If token refresh fails.
+        """
+        current_time = time.time()
+        if self.access_token is None or self.refresh_token is None:
+            raise ValueError(
+                "Authentication state is invalid. Please authenticate first."
+            )
+
+        if self.token_expiry_time is None or current_time >= self.token_expiry_time:
+            print("Access token expired or not initialized, refreshing...")
+            access_token, expires_in = self._refresh_access_token()
+            if access_token is None or expires_in is None:
+                raise ValueError("Failed to refresh access token.")
+
+            self.access_token = access_token
+            self.token_expiry_time = current_time + expires_in
+
+        return self.access_token
 
 
 def download_with_wget(access_token: str, download_url: str, output_file: str) -> None:
@@ -154,42 +233,9 @@ def download_with_wget(access_token: str, download_url: str, output_file: str) -
         logging.error(f"Failed to download: {e}")
 
 
-def check_and_refresh_token(
-    client_id: str, refresh_token: str, access_token: str, token_expiry_time: float
-) -> Tuple[str, float]:
-    """Token refresh.
-
-    Checks if the current access token has expired and refreshes it if necessary.
-
-    Args:
-        client_id (str): The client ID used for authentication.
-        refresh_token (str): The refresh token used to obtain a new access token.
-        access_token (str): The current access token for authentication.
-        token_expiry_time (float): The timestamp in seconds when the access token
-        will expire.
-
-    Returns:
-        Tuple[str, int]: The updated access token and its new expiry time.
-    """
-    current_time = time.time()
-    if current_time >= token_expiry_time:
-        print("Access token expired, refreshing...")
-        new_access_token, expires_in = refresh_access_token(client_id, refresh_token)
-
-        if new_access_token is None or expires_in is None:
-            raise ValueError("Failed to refresh access token or expiry time.")
-
-        access_token = new_access_token
-        token_expiry_time = current_time + expires_in
-    return access_token, token_expiry_time
-
-
 def download_product(
-    client_id: str,
-    refresh_token: str,
-    access_token: str,
+    auth_state: S2AuthState,
     download_info: Tuple[str, str, str],
-    token_expiry_time: float,
     output_directory: str,
 ) -> None:
     """Download Sentinel-2 product.
@@ -197,12 +243,9 @@ def download_product(
     Downloads a product using the provided download information and handles token refreshing.
 
     Args:
-        client_id (str): The client ID for authentication.
-        refresh_token (str): The refresh token for renewing access.
-        access_token (str): The current access token for download authentication.
+        auth_state (S2AuthState): The authentication state manager to handle token refresh.
         download_info (Tuple[str, str, str]): A tuple containing the download URL, full tile ID,
         and tile name.
-        token_expiry_time (float): The expiry time for the current access token.
         output_directory (str): The directory path where the downloaded files will be saved.
 
     Returns:
@@ -210,9 +253,9 @@ def download_product(
     """
     download_url, full_tile_id, tile_name = download_info
     output_file = os.path.join(output_directory, tile_name, f"{full_tile_id}.zip")
-    access_token, token_expiry_time = check_and_refresh_token(
-        client_id, refresh_token, access_token, token_expiry_time
-    )
+
+    access_token = auth_state.refresh_access_token_if_needed()
+
     download_with_wget(access_token, download_url, output_file)
 
 
@@ -238,25 +281,16 @@ def parallel_downloads_s2(
     Returns:
         None
     """
-    access_token, refresh_token, expires_in = get_access_and_refresh_token(
-        client_id, username, password
-    )
-
-    if expires_in is None:
-        raise ValueError("Failed to obtain a valid token expiry time.")
-
-    token_expiry_time = time.time() + expires_in
+    auth_state = S2AuthState(client_id=client_id, username=username, password=password)
+    auth_state.authenticate()
 
     with multiprocessing.Pool(processes=4) as pool:
         pool.starmap(
             download_product,
             [
                 (
-                    client_id,
-                    refresh_token,
-                    access_token,
+                    auth_state,  # Pass the auth state to each download
                     download_info,
-                    token_expiry_time,
                     output_directory,
                 )
                 for download_info in download_info_list
