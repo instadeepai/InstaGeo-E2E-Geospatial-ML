@@ -57,21 +57,21 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_boolean(
     "shift_to_month_start",
-    False,
+    True,
     "Indicates whether or not to shift the observation date to the beginning of the month",
 )
 flags.DEFINE_boolean(
     "is_time_series_task",
     True,
-    """Indicates whether or not the current task is a time series one. The data will be then 
+    """Indicates whether or not the current task is a time series one. The data will be then
     retrieved before the date of observation""",
 )
 flags.DEFINE_integer(
     "num_steps",
     3,
-    """Number of temporal steps. When `is_time_series_task` is set to True, an attempt 
-    will be made to retrieve `num_steps` HLS chips prior to the observation date. 
-    Otherwise, the value of `num_steps` will default to 1 and an attempt will be made to retrieve 
+    """Number of temporal steps. When `is_time_series_task` is set to True, an attempt
+    will be made to retrieve `num_steps` HLS chips prior to the observation date.
+    Otherwise, the value of `num_steps` will default to 1 and an attempt will be made to retrieve
     the HLS chip corresponding to the observation date.
     """,
     lower_bound=1,
@@ -79,8 +79,8 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "temporal_step",
     30,
-    """Temporal step size. When dealing with a time series task, an attempt will be made to 
-    fetch the data up to `temporal_step` days away from the date of observation. A tolerance might 
+    """Temporal step size. When dealing with a time series task, an attempt will be made to
+    fetch the data up to `temporal_step` days away from the date of observation. A tolerance might
     be applied when fetching the data for the different time steps.""",
 )
 flags.DEFINE_integer(
@@ -93,9 +93,9 @@ flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
 flags.DEFINE_float(
     "point_to_pixel_coverage",
     0.1,
-    """Buffer radius to use around the observations to assign corresponding label values to 
+    """Buffer radius to use around the observations to assign corresponding label values to
     each touching pixel. A higher value typically means that the observation will cover more
-    ground/pixels. Keep the default value/ or use a small value if only interested in the pixel 
+    ground/pixels. Keep the default value/ or use a small value if only interested in the pixel
     in which the observation falls.""",
 )
 
@@ -189,7 +189,7 @@ def create_and_save_chips_with_seg_maps(
     no_data_value: int,
     src_crs: int,
     mask_cloud: bool,
-    point_to_pixel_coverage: float
+    point_to_pixel_coverage: float,
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -419,7 +419,7 @@ def main(argv: Any) -> None:
                 no_data_value=FLAGS.no_data_value,
                 src_crs=FLAGS.src_crs,
                 mask_cloud=FLAGS.mask_cloud,
-                point_to_pixel_coverage=FLAGS.point_to_pixel_coverage
+                point_to_pixel_coverage=FLAGS.point_to_pixel_coverage,
             )
             all_chips.extend(chips)
             all_seg_maps.extend(seg_maps)
