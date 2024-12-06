@@ -28,6 +28,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
+import rasterio.features
 import xarray as xr
 from absl import app, flags, logging
 from shapely.geometry import Point
@@ -89,6 +90,14 @@ flags.DEFINE_boolean(
     "download_only", False, "Downloads HLS dataset without creating chips."
 )
 flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
+flags.DEFINE_float(
+    "point_to_pixel_coverage",
+    0.1,
+    """Buffer radius to use around the observations to assign corresponding label values to 
+    each touching pixel. A higher value typically means that the observation will cover more
+    ground/pixels. Keep the default value/ or use a small value if only interested in the pixel 
+    in which the observation falls.""",
+)
 
 
 def check_required_flags() -> None:
@@ -100,9 +109,7 @@ def check_required_flags() -> None:
 
 
 def create_segmentation_map(
-    chip: Any,
-    df: pd.DataFrame,
-    no_data_value: int,
+    chip: Any, df: pd.DataFrame, no_data_value: int, point_to_pixel_coverage: float
 ) -> np.ndarray:
     """Create a segmentation map for the chip using the DataFrame.
 
@@ -112,6 +119,8 @@ def create_segmentation_map(
         df (pd.DataFrame): DataFrame containing the data to be used in the segmentation
             map.
         no_data_value (int): Value to be used for pixels with no data.
+        point_to_pixel_coverage (float): Radius of the buffer to use around the observation
+        to assign labels to pixels.
 
     Returns:
         np.ndarray: The created segmentation map as a NumPy array.
@@ -130,14 +139,16 @@ def create_segmentation_map(
         & (chip["y"].min().item() <= df["geometry"].y)
         & (df["geometry"].y <= chip["y"].max().item())
     ]
-    # Use a tolerance of 30 meters
-    for _, row in df.iterrows():
-        nearest_index = seg_map.sel(
-            x=row["geometry"].x, y=row["geometry"].y, method="nearest", tolerance=30
-        )
-        seg_map.loc[
-            dict(x=nearest_index["x"].values.item(), y=nearest_index["y"].values.item())
-        ] = row["label"]
+    mask = rasterio.features.rasterize(
+        [*zip(df.geometry.buffer(point_to_pixel_coverage), df.label)],
+        out_shape=seg_map.band_data.shape,
+        fill=np.nan,
+        transform=seg_map.rio.transform(),
+        dtype=seg_map.band_data.dtype,
+        all_touched=True,  # to assign the observation label to all the pixels touched
+    )
+    mask = xr.DataArray(mask, dims=seg_map.dims, coords=seg_map.coords)
+    seg_map = seg_map.where(np.isnan(mask), mask)
     return seg_map.band_data.squeeze()
 
 
@@ -178,6 +189,7 @@ def create_and_save_chips_with_seg_maps(
     no_data_value: int,
     src_crs: int,
     mask_cloud: bool,
+    point_to_pixel_coverage: float
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -193,6 +205,8 @@ def create_and_save_chips_with_seg_maps(
         no_data_value (int): Value to use for no data areas in the segmentation maps.
         src_crs (int): CRS of points in `df`
         mask_cloud (bool): Perform cloud masking if True.
+        point_to_pixel_coverage (float): Radius of the buffer to use around the observation
+        to assign labels to pixels.
 
     Returns:
         A tuple containing the lists of created chips and segmentation maps.
@@ -235,7 +249,9 @@ def create_and_save_chips_with_seg_maps(
         )
         if chip.count().values == 0:
             continue
-        seg_map = create_segmentation_map(chip, df, no_data_value)
+        seg_map = create_segmentation_map(
+            chip, df, no_data_value, point_to_pixel_coverage
+        )
         if seg_map.where(seg_map != no_data_value).count().values == 0:
             continue
         seg_maps.append(seg_map_name)
@@ -403,6 +419,7 @@ def main(argv: Any) -> None:
                 no_data_value=FLAGS.no_data_value,
                 src_crs=FLAGS.src_crs,
                 mask_cloud=FLAGS.mask_cloud,
+                point_to_pixel_coverage=FLAGS.point_to_pixel_coverage
             )
             all_chips.extend(chips)
             all_seg_maps.extend(seg_maps)
