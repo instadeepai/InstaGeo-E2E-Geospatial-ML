@@ -339,7 +339,7 @@ def main(argv: Any) -> None:
     """CSV Chip Creator.
 
     Given a csv file containing geo-located point observations and labels, the Chip
-    Creator creates small chip from large HLS tiles which is suitable for training
+    Creator creates small chips from large HLS tiles which is suitable for training
     segmentation models.
     """
     del argv

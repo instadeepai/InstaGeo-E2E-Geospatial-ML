@@ -56,7 +56,7 @@ def find_closest_tile(
     """Find Closes HLS Tile.
 
     HLS dataset gets updated every 2 or 3 days and each tile is marked by the time of
-    observation. This makes it difficult to derterministically find tiles for a given
+    observation. This makes it difficult to deterministically find tiles for a given
     observation time. Rather we try to find a tile with observation time closest to our
     desired time.
 
@@ -120,11 +120,10 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
         """
         The purpose of this function is to still be able to extract data through
         earthaccess even given just a single observation in a tile (min_count = 1).
-        When the number of observations in a tile is 1, or if
-        we have 2 aligned observations, the lon_min, lat_min, lon_max, lat_max
-        extracted from those won't produce a valid bounding box. Thus, we attempt
-        to create a small buffer around the observation(s) to produce a
-        valid bounding box.
+        When the number of observations in a tile is 1, or if we only have aligned 
+        observations, the lon_min, lat_min, lon_max, lat_max extracted from those 
+        won't produce a valid bounding box. Thus, we attempt to create a small buffer 
+        around the observation(s) to produce a valid bounding box.
 
         Args:
             lon_min (float): Minimum longitude
@@ -168,7 +167,7 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
 def get_hls_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
     """Get HLS Tile ID for Each Observation.
 
-    Locust observations are described by geolocation scattered across the globe. They are
+    Observations are usually described by geolocation scattered across the globe. They are
     dense as well as sparse in various locations. In order to optimize resource usage, we
     subset the observations in dense locations.
 
@@ -180,7 +179,7 @@ def get_hls_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
         min_count: minimum count of locust observations per HLS tile.
 
     Returns:
-        Subset of locust observations where there are `min_count` observations per tile
+        Subset of observations where there are at least `min_count` observations per tile
 
     """
     mgrs_object = mgrs.MGRS()
@@ -260,10 +259,10 @@ def add_hls_granules(
 
     Data contains tile_id and a series of date for which the tile is desired. This
     function takes the tile_id and the dates and finds the HLS tiles closest to the
-    desired date with a tolearance of `temporal_tolerance`.
+    desired date with a tolerance of `temporal_tolerance`.
 
     Args:
-        data (pd.DataFrame): A dattaframe containing observations that fall within a
+        data (pd.DataFrame): A dataframe containing observations that fall within a
             dense tile.
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
