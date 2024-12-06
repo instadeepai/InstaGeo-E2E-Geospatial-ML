@@ -23,6 +23,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from multiprocessing import cpu_count
+from typing import Any
 
 import earthaccess
 import mgrs
@@ -116,13 +117,14 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
 
     def _make_valid_bbox(
         lon_min: float, lat_min: float, lon_max: float, lat_max: float
-    ):
-        """
+    ) -> tuple[float, float, float, float]:
+        """Create a valid bounding box to search for HLS tiles.
+
         The purpose of this function is to still be able to extract data through
         earthaccess even given just a single observation in a tile (min_count = 1).
-        When the number of observations in a tile is 1, or if we only have aligned 
-        observations, the lon_min, lat_min, lon_max, lat_max extracted from those 
-        won't produce a valid bounding box. Thus, we attempt to create a small buffer 
+        When the number of observations in a tile is 1, or if we only have aligned
+        observations, the lon_min, lat_min, lon_max, lat_max extracted from those
+        won't produce a valid bounding box. Thus, we attempt to create a small buffer
         around the observation(s) to produce a valid bounding box.
 
         Args:
@@ -222,7 +224,7 @@ def get_hls_tile_info(
         drop=True
     )
     tile_queries = []
-    tile_info = []
+    tile_info: Any = []
     for _, (tile_id, date, lon, lat) in data.iterrows():
         history = []
         for i in range(num_steps):
@@ -242,10 +244,10 @@ def get_hls_tile_info(
             lat_max=("lat", "max"),
         )
     ).reset_index()
-    tile_info.min_date -= pd.Timedelta(days=temporal_tolerance)
-    tile_info.max_date += pd.Timedelta(days=temporal_tolerance)
-    tile_info.min_date = tile_info.min_date.dt.strftime("%Y-%m-%d")
-    tile_info.max_date = tile_info.max_date.dt.strftime("%Y-%m-%d")
+    tile_info["min_date"] -= pd.Timedelta(days=temporal_tolerance)
+    tile_info["max_date"] += pd.Timedelta(days=temporal_tolerance)
+    tile_info["min_date"] = tile_info["min_date"].dt.strftime("%Y-%m-%d")
+    tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%d")
     return tile_info, tile_queries
 
 
