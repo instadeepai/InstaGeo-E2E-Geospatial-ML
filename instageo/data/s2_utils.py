@@ -129,7 +129,7 @@ class S2AuthState:
                 token_data.get("expires_in"),
             )
         else:
-            logging.info("Failed to get access token:", response.text)
+            logging.info(f"Failed to get access token: {response.text}")
             return None, None, None
 
     def _refresh_access_token(self) -> Tuple[Optional[str], Optional[int]]:
@@ -161,7 +161,7 @@ class S2AuthState:
             token_data = response.json()
             return token_data.get("access_token"), token_data.get("expires_in")
         else:
-            logging.info("Failed to refresh access token:", response.text)
+            logging.info(f"Failed to refresh access toke: {response.text}")
             return None, None
 
     def refresh_access_token_if_needed(self) -> str:
