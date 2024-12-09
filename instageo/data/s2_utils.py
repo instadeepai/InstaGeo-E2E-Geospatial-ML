@@ -129,7 +129,7 @@ class S2AuthState:
                 token_data.get("expires_in"),
             )
         else:
-            print("Failed to get access token:", response.text)
+            logging.info("Failed to get access token:", response.text)
             return None, None, None
 
     def _refresh_access_token(self) -> Tuple[Optional[str], Optional[int]]:
@@ -161,7 +161,7 @@ class S2AuthState:
             token_data = response.json()
             return token_data.get("access_token"), token_data.get("expires_in")
         else:
-            print("Failed to refresh access token:", response.text)
+            logging.info("Failed to refresh access token:", response.text)
             return None, None
 
     def refresh_access_token_if_needed(self) -> str:
@@ -175,18 +175,21 @@ class S2AuthState:
         """
         current_time = time.time()
         if self.access_token is None or self.refresh_token is None:
-            raise ValueError(
-                "Authentication state is invalid. Please authenticate first."
-            )
+            logging.info("Authentication state is invalid, reauthenticating...")
+            self.authenticate()
+            if self.access_token is None:
+                raise ValueError("Failed to refresh or reauthenticate access token.")
+            return self.access_token
 
         if self.token_expiry_time is None or current_time >= self.token_expiry_time:
-            print("Access token expired or not initialized, refreshing...")
+            logging.info("Access token expired or not initialized, refreshing...")
             access_token, expires_in = self._refresh_access_token()
             if access_token is None or expires_in is None:
-                raise ValueError("Failed to refresh access token.")
-
-            self.access_token = access_token
-            self.token_expiry_time = current_time + expires_in
+                logging.info("Refresh token expired or invalid, reauthenticating...")
+                self.authenticate()
+            else:
+                self.access_token = access_token
+                self.token_expiry_time = current_time + expires_in
 
         return self.access_token
 
@@ -258,6 +261,46 @@ def download_product(
 
     download_with_wget(access_token, download_url, output_file)
 
+    while True:
+        try:
+            access_token = auth_state.refresh_access_token_if_needed()
+            download_with_wget(access_token, download_url, output_file)
+            break  # Exit loop if download succeeds
+        except Exception as e:
+            logging.error(f"Error during download: {e}")
+            if "401" in str(e) or "token" in str(e).lower():
+                logging.info("Reauthenticating and retrying download...")
+                auth_state.authenticate()  # Reauthenticate if token-related issue
+            else:
+                raise
+
+
+def download_worker(
+    client_id: str | None,
+    username: str | None,
+    password: str | None,
+    download_info: Tuple[str, str, str],
+    output_directory: str,
+) -> None:
+    """Worker function for downloading a Sentinel-2 product.
+
+    Each process has its own authentication state to avoid inconsistencies. Token refreshing and
+    reauthentication are handled independently in each worker.
+
+    Args:
+        client_id (str | None): The client ID for authentication.
+        username (str | None): The username for authentication.
+        password (str | None): The password for authentication.
+        download_info (Tuple[str, str, str]): Download information tuple.
+        output_directory (str): Directory to save the downloaded file.
+
+    Returns:
+        None
+    """
+    auth_state = S2AuthState(client_id=client_id, username=username, password=password)
+    auth_state.authenticate()
+    download_product(auth_state, download_info, output_directory)
+
 
 def parallel_downloads_s2(
     client_id: str | None,
@@ -286,10 +329,12 @@ def parallel_downloads_s2(
 
     with multiprocessing.Pool(processes=4) as pool:
         pool.starmap(
-            download_product,
+            download_worker,
             [
                 (
-                    auth_state,  # Pass the auth state to each download
+                    client_id,
+                    username,
+                    password,
                     download_info,
                     output_directory,
                 )
