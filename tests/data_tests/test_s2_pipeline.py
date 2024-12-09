@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 import zipfile
@@ -154,7 +155,7 @@ def test_unzip_all_files_extracted(mock_exists, mock_unzip_file):
 @patch("instageo.data.s2_utils.unzip_file")
 @patch("os.path.exists")
 def test_unzip_all_files_extracted_with_missing_zip(
-    mock_exists, mock_unzip_file, capsys
+    mock_exists, mock_unzip_file, caplog
 ):
     with tempfile.TemporaryDirectory() as temp_dir:
         download_info_list = [
@@ -168,11 +169,11 @@ def test_unzip_all_files_extracted_with_missing_zip(
             return True
 
         mock_exists.side_effect = mock_exists_side_effect
-        unzip_all(download_info_list, temp_dir)
-        captured = capsys.readouterr()
+        with caplog.at_level(logging.INFO):
+            unzip_all(download_info_list, temp_dir)
 
-        assert "Zip file not found" in captured.out
-        assert "tile2_id.zip" in captured.out
+        assert "Zip file not found" in caplog.text
+        assert "tile2_id.zip" in caplog.text
         mock_unzip_file.assert_not_called()
 
 
