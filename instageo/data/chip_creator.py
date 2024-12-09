@@ -92,7 +92,7 @@ flags.DEFINE_boolean(
 flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
 flags.DEFINE_float(
     "point_to_pixel_coverage",
-    0.1,
+    0.001,
     """Buffer radius to use around the observations to assign corresponding label values to
     each touching pixel. A higher value typically means that the observation will cover more
     ground/pixels. Keep the default value/ or use a small value if only interested in the pixel
