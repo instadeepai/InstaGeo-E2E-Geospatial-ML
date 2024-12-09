@@ -19,6 +19,7 @@
 
 """Utility Functions for Reading and Processing Harmonized Landsat Sentinel-2 Dataset."""
 
+import bisect
 import os
 import re
 from datetime import datetime, timedelta
@@ -76,24 +77,53 @@ def find_closest_tile(
     Returns:
         DataFrame containing the tile queries to the tile found.
     """
+    # parse dates only once at the beginning for every tile_id
+    parsed_tiles_entries: Any = {}
+    select_parsed_date = lambda item: item[1]
+    for tile_id in tile_database:
+        parsed_tiles_entries[tile_id] = list(
+            filter(
+                select_parsed_date,
+                [
+                    (entry, parse_date_from_entry(entry))
+                    for entry in tile_database[tile_id]
+                ],
+            )
+        )
+    del tile_database
+
     query_results = {}
     for query_str, (tile_id, dates) in tile_queries.items():
         result = []
-        if tile_id in tile_database:
+        if tile_id in parsed_tiles_entries:
             for date_str in dates:
                 date = pd.to_datetime(date_str)
                 year, day_of_year = date.year, date.day_of_year
                 query_date = datetime(year, 1, 1) + timedelta(days=day_of_year - 1)
                 closest_entry = None
-                for entry in tile_database[tile_id]:
-                    entry_date = parse_date_from_entry(entry)
-                    if not entry_date:
-                        continue
-                    diff = abs((entry_date - query_date).days)
-                    if (diff <= temporal_tolerance) and (diff >= 0):
+                min_diff = timedelta.max.days
+
+                index = bisect.bisect_left(
+                    parsed_tiles_entries[tile_id], query_date, key=select_parsed_date
+                )
+
+                if index > 0:
+                    entry, before_date = parsed_tiles_entries[tile_id][index - 1]
+                    diff = abs((before_date - query_date).days)
+                    if diff < min_diff:
                         closest_entry = entry
-                        break
-                result.append(closest_entry)
+                        min_diff = diff
+
+                if index < len(parsed_tiles_entries[tile_id]):
+                    entry, after_date = parsed_tiles_entries[tile_id][index]
+                    diff = abs((after_date - query_date).days)
+                    if diff < min_diff:
+                        closest_entry = entry
+                        min_diff = diff
+
+                if min_diff <= temporal_tolerance:
+                    result.append(closest_entry)
+
         query_results[query_str] = result
     query_results = pd.DataFrame(
         {"tile_queries": query_results.keys(), "hls_tiles": query_results.values()}
