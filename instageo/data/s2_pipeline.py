@@ -19,6 +19,7 @@
 
 """HLS pipeline Module."""
 
+import logging
 import os
 import re
 from datetime import datetime, timedelta
@@ -186,7 +187,7 @@ def download_tile_data(
             client_id, username, password, download_info_list, output_directory
         )
     else:
-        print("No valid products found for download.")
+        logging.info("No valid products found for download.")
 
     return download_info_list
 
@@ -217,7 +218,7 @@ def unzip_all(
         if os.path.exists(zip_file):
             unzip_file(zip_file, output_dir)
         else:
-            print(f"Zip file not found: {zip_file}")
+            logging.info(f"Zip file not found: {zip_file}")
 
 
 def process_tile_bands(
@@ -296,11 +297,11 @@ def filter_best_product_in_folder(
                                 if valid_pixel_count > 0:
                                     window_products.append((product, valid_pixel_count))
                             except Exception as e:
-                                print(
+                                logging.info(
                                     f"ERROR: Could not count valid pixels for {scl_band_path}: {e}"
                                 )
                         else:
-                            print(
+                            logging.info(
                                 f"WARNING: No SCL file found for {product['acquisition_date']}"
                             )
 
@@ -374,7 +375,7 @@ def create_and_save_chips_with_seg_maps_s2(
             num_bands_per_timestamp,
         )
         if datasets is None or crs is None:
-            print(
+            logging.info(
                 f"Skipping folder '{band_folder}' due to missing or invalid datasets."
             )
             continue
@@ -400,7 +401,9 @@ def create_and_save_chips_with_seg_maps_s2(
             ]
 
             if df_filtered.empty:
-                print(f"No valid points for group ID '{group_id}' in dataset bounds.")
+                logging.info(
+                    f"No valid points for group ID '{group_id}' in dataset bounds."
+                )
                 continue
 
             n_chips_x = dataset.sizes["x"] // chip_size
