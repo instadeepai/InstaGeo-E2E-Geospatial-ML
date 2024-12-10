@@ -121,8 +121,7 @@ def find_closest_tile(
                         closest_entry = entry
                         min_diff = diff
 
-                if min_diff <= temporal_tolerance:
-                    result.append(closest_entry)
+                result.append(closest_entry if min_diff <= temporal_tolerance else None)
 
         query_results[query_str] = result
     query_results = pd.DataFrame(
