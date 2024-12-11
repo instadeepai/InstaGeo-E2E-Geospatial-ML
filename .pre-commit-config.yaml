@@ -89,6 +89,6 @@ repos:
       - id: codespell
         name: codespell
         description: Checks for common misspellings in text files.
-        entry: codespell --skip="*.json,*.csv"
+        args: ["--skip=*.json,*.csv", "--ignore-words=.codespell-ignore.txt"]
         language: python
         types: [text]
