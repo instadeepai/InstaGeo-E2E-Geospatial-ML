@@ -82,7 +82,7 @@ def test_chip_creator(setup_and_teardown_output_dir):
     chips = os.listdir(os.path.join(output_directory, "chips"))
     seg_maps = os.listdir(os.path.join(output_directory, "seg_maps"))
     assert len(chips) == len(seg_maps)
-    assert len(chips) == 3
+    assert len(chips) == 4
     chip_path = os.path.join(output_directory, "chips", chips[0])
     seg_map_path = os.path.join(output_directory, "seg_maps", seg_maps[0])
     chip = xr.open_dataset(chip_path)
@@ -97,7 +97,7 @@ def test_chip_creator(setup_and_teardown_output_dir):
                 "tiles"
             ].tolist()
         )
-        == 21
+        == 28
     )
 
 

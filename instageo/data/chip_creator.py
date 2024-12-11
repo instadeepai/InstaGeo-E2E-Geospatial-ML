@@ -28,6 +28,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
+import rasterio.features
 import xarray as xr
 from absl import app, flags, logging
 from shapely.geometry import Point
@@ -51,9 +52,37 @@ flags.DEFINE_string(
 flags.DEFINE_integer(
     "no_data_value", -1, "Value to use for no data areas in the segmentation maps."
 )
-flags.DEFINE_integer("min_count", 100, "Minimum observation counts per tile")
-flags.DEFINE_integer("num_steps", 3, "Number of temporal steps")
-flags.DEFINE_integer("temporal_step", 30, "Temporal step size.")
+flags.DEFINE_integer(
+    "min_count", 100, "Minimum observation counts per tile", lower_bound=1
+)
+flags.DEFINE_boolean(
+    "shift_to_month_start",
+    True,
+    "Indicates whether or not to shift the observation date to the beginning of the month",
+)
+flags.DEFINE_boolean(
+    "is_time_series_task",
+    True,
+    """Indicates whether or not the current task is a time series one. The data will be then
+    retrieved before the date of observation""",
+)
+flags.DEFINE_integer(
+    "num_steps",
+    3,
+    """Number of temporal steps. When `is_time_series_task` is set to True, an attempt
+    will be made to retrieve `num_steps` HLS chips prior to the observation date.
+    Otherwise, the value of `num_steps` will default to 1 and an attempt will be made to retrieve
+    the HLS chip corresponding to the observation date.
+    """,
+    lower_bound=1,
+)
+flags.DEFINE_integer(
+    "temporal_step",
+    30,
+    """Temporal step size. When dealing with a time series task, an attempt will be made to
+    fetch the data up to `temporal_step` days away from the date of observation. A tolerance might
+    be applied when fetching the data for the different time steps.""",
+)
 flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
@@ -61,6 +90,14 @@ flags.DEFINE_boolean(
     "download_only", False, "Downloads HLS dataset without creating chips."
 )
 flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
+flags.DEFINE_float(
+    "point_to_pixel_coverage",
+    0.001,
+    """Buffer radius to use around the observations to assign corresponding label values to
+    each touching pixel. A higher value typically means that the observation will cover more
+    ground/pixels. Keep the default value/ or use a small value if only interested in the pixel
+    in which the observation falls.""",
+)
 
 
 def check_required_flags() -> None:
@@ -72,9 +109,7 @@ def check_required_flags() -> None:
 
 
 def create_segmentation_map(
-    chip: Any,
-    df: pd.DataFrame,
-    no_data_value: int,
+    chip: Any, df: pd.DataFrame, no_data_value: int, point_to_pixel_coverage: float
 ) -> np.ndarray:
     """Create a segmentation map for the chip using the DataFrame.
 
@@ -84,6 +119,8 @@ def create_segmentation_map(
         df (pd.DataFrame): DataFrame containing the data to be used in the segmentation
             map.
         no_data_value (int): Value to be used for pixels with no data.
+        point_to_pixel_coverage (float): Radius of the buffer to use around the observation
+        to assign labels to pixels.
 
     Returns:
         np.ndarray: The created segmentation map as a NumPy array.
@@ -102,14 +139,16 @@ def create_segmentation_map(
         & (chip["y"].min().item() <= df["geometry"].y)
         & (df["geometry"].y <= chip["y"].max().item())
     ]
-    # Use a tolerance of 30 meters
-    for _, row in df.iterrows():
-        nearest_index = seg_map.sel(
-            x=row["geometry"].x, y=row["geometry"].y, method="nearest", tolerance=30
-        )
-        seg_map.loc[
-            dict(x=nearest_index["x"].values.item(), y=nearest_index["y"].values.item())
-        ] = row["label"]
+    mask = rasterio.features.rasterize(
+        [*zip(df.geometry.buffer(point_to_pixel_coverage), df.label)],
+        out_shape=seg_map.band_data.shape,
+        fill=np.nan,
+        transform=seg_map.rio.transform(),
+        dtype=seg_map.band_data.dtype,
+        all_touched=True,  # to assign the observation label to all the pixels touched
+    )
+    mask = xr.DataArray(mask, dims=seg_map.dims, coords=seg_map.coords)
+    seg_map = seg_map.where(np.isnan(mask), mask)
     return seg_map.band_data.squeeze()
 
 
@@ -150,6 +189,7 @@ def create_and_save_chips_with_seg_maps(
     no_data_value: int,
     src_crs: int,
     mask_cloud: bool,
+    point_to_pixel_coverage: float,
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -165,6 +205,8 @@ def create_and_save_chips_with_seg_maps(
         no_data_value (int): Value to use for no data areas in the segmentation maps.
         src_crs (int): CRS of points in `df`
         mask_cloud (bool): Perform cloud masking if True.
+        point_to_pixel_coverage (float): Radius of the buffer to use around the observation
+        to assign labels to pixels.
 
     Returns:
         A tuple containing the lists of created chips and segmentation maps.
@@ -207,8 +249,10 @@ def create_and_save_chips_with_seg_maps(
         )
         if chip.count().values == 0:
             continue
-        seg_map = create_segmentation_map(chip, df, no_data_value)
-        if seg_map.where(seg_map != -1).count().values == 0:
+        seg_map = create_segmentation_map(
+            chip, df, no_data_value, point_to_pixel_coverage
+        )
+        if seg_map.where(seg_map != no_data_value).count().values == 0:
             continue
         seg_maps.append(seg_map_name)
         seg_map.rio.to_raster(seg_map_filename)
@@ -295,13 +339,22 @@ def main(argv: Any) -> None:
     """CSV Chip Creator.
 
     Given a csv file containing geo-located point observations and labels, the Chip
-    Creator creates small chip from large HLS tiles which is suitable for training
+    Creator creates small chips from large HLS tiles which is suitable for training
     segmentation models.
     """
     del argv
     data = pd.read_csv(FLAGS.dataframe_path)
-    data["date"] = pd.to_datetime(data["date"]) - pd.offsets.MonthBegin(1)
-    data["input_features_date"] = data["date"] - pd.DateOffset(months=1)
+    data["date"] = (
+        pd.to_datetime(data["date"]) - pd.offsets.MonthBegin(1)
+        if FLAGS.shift_to_month_start
+        else pd.to_datetime(data["date"])
+    )
+    data["input_features_date"] = (
+        data["date"] - pd.DateOffset(days=FLAGS.temporal_step)
+        if FLAGS.is_time_series_task
+        else data["date"]
+    )
+    FLAGS.num_steps = 1 if not FLAGS.is_time_series_task else FLAGS.num_steps
     sub_data = hls_utils.get_hls_tiles(data, min_count=FLAGS.min_count)
 
     if not (
@@ -366,6 +419,7 @@ def main(argv: Any) -> None:
                 no_data_value=FLAGS.no_data_value,
                 src_crs=FLAGS.src_crs,
                 mask_cloud=FLAGS.mask_cloud,
+                point_to_pixel_coverage=FLAGS.point_to_pixel_coverage,
             )
             all_chips.extend(chips)
             all_seg_maps.extend(seg_maps)
