@@ -139,7 +139,7 @@ flags.DEFINE_enum(
 flags.DEFINE_integer(
     "cloud_coverage",
     10,
-    "Percentage os cloud cover to use. Accepted values are between 0and 100.",
+    "Percentage os cloud cover to use. Accepted values are between 0 and 100.",
 )
 
 
