@@ -10,6 +10,8 @@
 #   conventional-pre-commit: commit format checker.
 #   blacken-docs: Checks docs follow black format standard.
 #   pydocstyle: Checking docstring style.
+#   codespell: Checks for common misspellings.
+
 
 default_stages: ["commit", "commit-msg", "push"]
 default_language_version:
