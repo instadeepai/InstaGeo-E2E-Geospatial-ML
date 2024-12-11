@@ -81,8 +81,14 @@ repos:
     hooks:
       - id: pydocstyle
         name: Checking docstring style.
-        args:
-          [
-            "--convention=google",
-            "--match=^((?!test).)*$",
-          ]
+        args: ["--convention=google", "--match=^((?!test).)*$"]
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.6
+    hooks:
+      - id: codespell
+        name: codespell
+        description: Checks for common misspellings in text files.
+        entry: codespell --skip="*.json,*.csv"
+        language: python
+        types: [text]
