@@ -90,13 +90,17 @@ flags.DEFINE_boolean(
     "download_only", False, "Downloads HLS dataset without creating chips."
 )
 flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
-flags.DEFINE_float(
-    "point_to_pixel_coverage",
-    0.001,
-    """Buffer radius to use around the observations to assign corresponding label values to
-    each touching pixel. A higher value typically means that the observation will cover more
-    ground/pixels. Keep the default value/ or use a small value if only interested in the pixel
-    in which the observation falls.""",
+flags.DEFINE_integer(
+    "window_size",
+    0,
+    """Size of the window defined around the observation pixel. For instance, a value of 1 means
+    that the label of the observation will be assigned to a 3x3 pixels window centered around the
+    pixel of observation. The values are assigned within the bounds of a specific chip, i.e the
+    window will be clipped to the extents of the chip in case it falls outside of the chip. A
+    non-zero value for this parameter typically means that the observation covers more ground or
+    pixels and can, in some cases account for low geolocation precision. Keep the default value
+    if only interested in the pixel in which the observation falls.""",
+    lower_bound=0,
 )
 
 
@@ -109,7 +113,7 @@ def check_required_flags() -> None:
 
 
 def create_segmentation_map(
-    chip: Any, df: pd.DataFrame, no_data_value: int, point_to_pixel_coverage: float
+    chip: Any, df: pd.DataFrame, no_data_value: int, window_size: int
 ) -> np.ndarray:
     """Create a segmentation map for the chip using the DataFrame.
 
@@ -119,8 +123,7 @@ def create_segmentation_map(
         df (pd.DataFrame): DataFrame containing the data to be used in the segmentation
             map.
         no_data_value (int): Value to be used for pixels with no data.
-        point_to_pixel_coverage (float): Radius of the buffer to use around the observation
-        to assign labels to pixels.
+        window_size (int): Window size to use around the observation pixel.
 
     Returns:
         np.ndarray: The created segmentation map as a NumPy array.
@@ -139,16 +142,19 @@ def create_segmentation_map(
         & (chip["y"].min().item() <= df["geometry"].y)
         & (df["geometry"].y <= chip["y"].max().item())
     ]
-    mask = rasterio.features.rasterize(
-        [*zip(df.geometry.buffer(point_to_pixel_coverage), df.label)],
-        out_shape=seg_map.band_data.shape,
-        fill=np.nan,
-        transform=seg_map.rio.transform(),
-        dtype=seg_map.band_data.dtype,
-        all_touched=True,  # to assign the observation label to all the pixels touched
+    cols, rows = np.floor(
+        ~seg_map.rio.transform() * (df.geometry.x.values, df.geometry.y.values)
+    ).astype(int)
+    offsets = np.arange(-window_size, window_size + 1)
+    offset_rows, offset_cols = np.meshgrid(offsets, offsets)
+    window_rows = np.clip(
+        rows[:, np.newaxis, np.newaxis] + offset_rows, 0, chip.sizes["x"] - 1
     )
-    mask = xr.DataArray(mask, dims=seg_map.dims, coords=seg_map.coords)
-    seg_map = seg_map.where(np.isnan(mask), mask)
+    window_cols = np.clip(
+        cols[:, np.newaxis, np.newaxis] + offset_cols, 0, chip.sizes["y"] - 1
+    )
+    window_labels = np.repeat(df.label.values, offset_rows.ravel().shape)
+    seg_map.band_data.values[window_rows.ravel(), window_cols.ravel()] = window_labels
     return seg_map.band_data.squeeze()
 
 
@@ -189,7 +195,7 @@ def create_and_save_chips_with_seg_maps(
     no_data_value: int,
     src_crs: int,
     mask_cloud: bool,
-    point_to_pixel_coverage: float,
+    window_size: int,
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -205,8 +211,7 @@ def create_and_save_chips_with_seg_maps(
         no_data_value (int): Value to use for no data areas in the segmentation maps.
         src_crs (int): CRS of points in `df`
         mask_cloud (bool): Perform cloud masking if True.
-        point_to_pixel_coverage (float): Radius of the buffer to use around the observation
-        to assign labels to pixels.
+        window_size (int): Window size to use around the observation pixel.
 
     Returns:
         A tuple containing the lists of created chips and segmentation maps.
@@ -249,9 +254,7 @@ def create_and_save_chips_with_seg_maps(
         )
         if chip.count().values == 0:
             continue
-        seg_map = create_segmentation_map(
-            chip, df, no_data_value, point_to_pixel_coverage
-        )
+        seg_map = create_segmentation_map(chip, df, no_data_value, window_size)
         if seg_map.where(seg_map != no_data_value).count().values == 0:
             continue
         seg_maps.append(seg_map_name)
@@ -419,7 +422,7 @@ def main(argv: Any) -> None:
                 no_data_value=FLAGS.no_data_value,
                 src_crs=FLAGS.src_crs,
                 mask_cloud=FLAGS.mask_cloud,
-                point_to_pixel_coverage=FLAGS.point_to_pixel_coverage,
+                window_size=FLAGS.window_size,
             )
             all_chips.extend(chips)
             all_seg_maps.extend(seg_maps)
