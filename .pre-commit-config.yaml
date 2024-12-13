@@ -10,6 +10,8 @@
 #   conventional-pre-commit: commit format checker.
 #   blacken-docs: Checks docs follow black format standard.
 #   pydocstyle: Checking docstring style.
+#   codespell: Checks for common misspellings.
+
 
 default_stages: ["commit", "commit-msg", "push"]
 default_language_version:
@@ -81,8 +83,14 @@ repos:
     hooks:
       - id: pydocstyle
         name: Checking docstring style.
-        args:
-          [
-            "--convention=google",
-            "--match=^((?!test).)*$",
-          ]
+        args: ["--convention=google", "--match=^((?!test).)*$"]
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.6
+    hooks:
+      - id: codespell
+        name: codespell
+        description: Checks for common misspellings in text files.
+        args: ["--skip=*.json,*.csv", "--ignore-words=.codespell-ignore.txt"]
+        language: python
+        types: [text]
