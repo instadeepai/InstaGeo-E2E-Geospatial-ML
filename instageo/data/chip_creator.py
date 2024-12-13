@@ -29,23 +29,10 @@ from absl import app, flags, logging
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from instageo.data.geo_utils import get_tile_info, get_tiles
-from instageo.data.hls_pipeline import (
-    add_hls_granules,
-    create_and_save_chips_with_seg_maps_hls,
-    create_hls_dataset,
-    parallel_download,
-)
-from instageo.data.s2_pipeline import (
-    create_and_save_chips_with_seg_maps_s2,
-    download_tile_data,
-    filter_best_product_in_folder,
-    process_tile_bands,
-    retrieve_sentinel2_metadata,
-    unzip_all,
-)
+from instageo.data import hls_utils, s2_utils
+from instageo.data.data_pipeline import create_and_save_chips_with_seg_maps, get_tiles
 
-load_dotenv(".credentials")
+load_dotenv(os.path.expanduser("~/.credentials"))
 
 logging.set_verbosity(logging.INFO)
 
@@ -77,7 +64,7 @@ flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2"], "Data source to use.")
 flags.DEFINE_integer(
     "cloud_coverage",
     10,
-    "Percentage os cloud cover to use. Accepted values are between 0 and 100.",
+    "Percentage of cloud cover to use. Accepted values are between 0 and 100.",
 )
 
 
@@ -107,27 +94,27 @@ def main(argv: Any) -> None:
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))
             and os.path.exists(
-                os.path.join(FLAGS.output_directory, "granules_to_download.csv")
+                os.path.join(FLAGS.output_directory, "hls_granules_to_download.csv")
             )
         ):
             logging.info("Creating HLS dataset JSON.")
             logging.info("Retrieving HLS tile ID for each observation.")
-            sub_data_with_tiles = add_hls_granules(
+            sub_data_with_tiles = hls_utils.add_hls_granules(
                 sub_data,
                 num_steps=FLAGS.num_steps,
                 temporal_step=FLAGS.temporal_step,
                 temporal_tolerance=FLAGS.temporal_tolerance,
             )
             logging.info("Retrieving HLS tiles that will be downloaded.")
-            hls_dataset, granules_to_download = create_hls_dataset(
+            hls_dataset, hls_granules_to_download = hls_utils.create_hls_dataset(
                 sub_data_with_tiles, outdir=FLAGS.output_directory
             )
             with open(
                 os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w"
             ) as json_file:
                 json.dump(hls_dataset, json_file, indent=4)
-            pd.DataFrame({"tiles": list(granules_to_download)}).to_csv(
-                os.path.join(FLAGS.output_directory, "granules_to_download.csv")
+            pd.DataFrame({"tiles": list(hls_granules_to_download)}).to_csv(
+                os.path.join(FLAGS.output_directory, "hls_granules_to_download.csv")
             )
         else:
             logging.info("HLS dataset JSON already created")
@@ -135,13 +122,13 @@ def main(argv: Any) -> None:
                 os.path.join(FLAGS.output_directory, "hls_dataset.json")
             ) as json_file:
                 hls_dataset = json.load(json_file)
-            granules_to_download = pd.read_csv(
-                os.path.join(FLAGS.output_directory, "granules_to_download.csv")
+            hls_granules_to_download = pd.read_csv(
+                os.path.join(FLAGS.output_directory, "hls_granules_to_download.csv")
             )["tiles"].tolist()
         os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
         logging.info("Downloading HLS Tiles")
-        parallel_download(
-            granules_to_download,
+        hls_utils.parallel_download(
+            hls_granules_to_download,
             outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
         )
         if FLAGS.download_only:
@@ -151,17 +138,17 @@ def main(argv: Any) -> None:
         all_seg_maps = []
         os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
         os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-        for key, hls_tile_dict in tqdm(
-            hls_dataset.items(), desc="Processing HLS Dataset"
-        ):
+        for key, tile_dict in tqdm(hls_dataset.items(), desc="Processing HLS Dataset"):
             obsv_date_str, tile_id = key.split("_")
             obsv_data = sub_data[
                 (sub_data["date"] == pd.to_datetime(obsv_date_str))
                 & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
             ]
             try:
-                chips, seg_maps = create_and_save_chips_with_seg_maps_hls(
-                    hls_tile_dict,
+                chips, seg_maps = create_and_save_chips_with_seg_maps(
+                    hls_utils.open_mf_tiff_dataset,
+                    tile_dict,
+                    tile_id,
                     obsv_data,
                     chip_size=FLAGS.chip_size,
                     output_directory=FLAGS.output_directory,
@@ -173,9 +160,7 @@ def main(argv: Any) -> None:
                 all_chips.extend(chips)
                 all_seg_maps.extend(seg_maps)
             except rasterio.errors.RasterioIOError as e:
-                logging.error(
-                    f"Error {e} when reading dataset containing: {hls_tile_dict}"
-                )
+                logging.error(f"Error {e} when reading dataset containing: {tile_dict}")
             except IndexError as e:
                 logging.error(f"Error {e} when processing {key}")
         logging.info("Saving dataframe of chips and segmentation maps.")
@@ -185,43 +170,49 @@ def main(argv: Any) -> None:
 
     elif FLAGS.data_source == "S2":
         logging.info("Using Sentinel-2 pipeline")
-
-        tile_df, history_dates = get_tile_info(
-            sub_data, num_steps=FLAGS.num_steps, temporal_step=FLAGS.temporal_step
-        )
-
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
             and os.path.exists(
-                os.path.join(FLAGS.output_directory, "granules_to_download.csv")
+                os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv")
             )
         ):
-            logging.info("Retrieving Sentinel-2 tiles that will be downloaded.")
-            granules_dict = retrieve_sentinel2_metadata(
-                tile_df,
-                cloud_coverage=FLAGS.cloud_coverage,
+            logging.info("Creating S2 dataset JSON.")
+            logging.info("Retrieving S2 tile ID for each observation.")
+
+            sub_data_with_tiles = s2_utils.add_s2_granules(
+                sub_data,
+                num_steps=FLAGS.num_steps,
+                temporal_step=FLAGS.temporal_step,
                 temporal_tolerance=FLAGS.temporal_tolerance,
-                history_dates=history_dates,
             )
-            logging.info("Creating Sentinel-2 dataset JSON.")
+
+            logging.info("Retrieving S2 tiles that will be downloaded.")
+            s2_dataset, s2_granules_to_download = s2_utils.create_s2_dataset(
+                sub_data_with_tiles, outdir=FLAGS.output_directory
+            )
             with open(
                 os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w"
             ) as json_file:
-                json.dump(granules_dict, json_file, indent=4)
-            pd.DataFrame({"tiles": list(granules_dict)}).to_csv(
-                os.path.join(FLAGS.output_directory, "granules_to_download.csv")
+                json.dump(s2_dataset, json_file, indent=4)
+            s2_granules_to_download.to_csv(
+                os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv")
             )
         else:
-            logging.info("Sentinel-2 dataset JSON already created")
+            logging.info("S2 dataset JSON already created")
             with open(
                 os.path.join(FLAGS.output_directory, "s2_dataset.json")
             ) as json_file:
-                granules_dict = json.load(json_file)
+                s2_dataset = json.load(json_file)
+            s2_granules_to_download = pd.read_csv(
+                os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv")
+            )
+        s2_tiles_dir = os.path.join(FLAGS.output_directory, "s2_tiles")
+        os.makedirs(s2_tiles_dir, exist_ok=True)
 
         logging.info("Downloading Sentinel-2 Tiles")
-        download_info_list = download_tile_data(
-            granules_dict,
-            FLAGS.output_directory,
+        s2_utils.download_tile_data(
+            s2_granules_to_download,
+            s2_tiles_dir,
             client_id=os.getenv("CLIENT_ID"),
             username=os.getenv("USERNAME"),
             password=os.getenv("PASSWORD"),
@@ -231,55 +222,44 @@ def main(argv: Any) -> None:
             return
 
         logging.info("Unzipping Sentinel-2 products")
-        unzip_all(download_info_list, output_directory=FLAGS.output_directory)
-
-        logging.info("Processing Sentinel-2 products")
-        process_tile_bands(
-            granules_dict,
-            output_directory=FLAGS.output_directory,
-            bands_needed=["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
-        )
-
-        for tile_name, tile_data in granules_dict.items():
-            filter_best_product_in_folder(
-                tile_name,
-                tile_data,
-                output_directory=FLAGS.output_directory,
-                history_dates=history_dates,
-                temporal_tolerance=FLAGS.temporal_tolerance,
-            )
+        s2_utils.extract_and_delete_zip_files(s2_tiles_dir)
 
         logging.info("Creating Chips and Segmentation Maps")
-
+        all_chips = []
+        all_seg_maps = []
         os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
         os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-
-        try:
-            all_chips, all_seg_maps = create_and_save_chips_with_seg_maps_s2(
-                granules_dict=granules_dict,
-                sub_data=sub_data,
-                chip_size=FLAGS.chip_size,
-                output_directory=FLAGS.output_directory,
-                no_data_value=FLAGS.no_data_value,
-                src_crs=FLAGS.src_crs,
-                mask_cloud=FLAGS.mask_cloud,
-                water_mask=FLAGS.water_mask,
-                temporal_tolerance=FLAGS.temporal_tolerance,
-                history_dates=history_dates,
-                num_bands_per_timestamp=6,
-            )
-
-            print(
-                f"Generated {len(all_chips)} chips and {len(all_seg_maps)} segmentation maps."
-            )
-        except Exception as e:
-            logging.error(f"Unexpected error: {e}")
-
+        for key, tile_dict in tqdm(
+            s2_dataset.items(), desc="Processing Sentinel-2 Dataset"
+        ):
+            obsv_date_str, tile_id = key.split("_")
+            obsv_data = sub_data[
+                (sub_data["date"] == pd.to_datetime(obsv_date_str))
+                & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
+            ]
+            try:
+                chips, seg_maps = create_and_save_chips_with_seg_maps(
+                    s2_utils.open_mf_jp2_dataset,
+                    tile_dict,
+                    tile_id,
+                    obsv_data,
+                    chip_size=FLAGS.chip_size,
+                    output_directory=FLAGS.output_directory,
+                    no_data_value=FLAGS.no_data_value,
+                    src_crs=FLAGS.src_crs,
+                    mask_cloud=FLAGS.mask_cloud,
+                    water_mask=FLAGS.water_mask,
+                )
+                all_chips.extend(chips)
+                all_seg_maps.extend(seg_maps)
+            except rasterio.errors.RasterioIOError as e:
+                logging.error(f"Error {e} when reading dataset containing: {tile_dict}")
+            except IndexError as e:
+                logging.error(f"Error {e} when processing {key}")
         logging.info("Saving dataframe of chips and segmentation maps.")
         pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
             os.path.join(FLAGS.output_directory, "s2_chips_dataset.csv")
         )
-
     else:
         raise ValueError(
             "Error: data_source value is not correct. Please enter 'HLS' or 'S2'."

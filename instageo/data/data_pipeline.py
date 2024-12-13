@@ -17,16 +17,99 @@
 # For more details, see https://creativecommons.org/licenses/by-nc-sa/4.0/
 # ------------------------------------------------------------------------------
 
-"""Geo Utils Module."""
+"""InstaGeo Data pipeline Module."""
 
 import bisect
-from typing import Any
+import os
+from typing import Any, Callable
 
 import geopandas as gpd
 import mgrs
 import numpy as np
 import pandas as pd
 import xarray as xr
+from shapely.geometry import Point
+
+
+def create_and_save_chips_with_seg_maps(
+    mf_reader: Callable,
+    tile_dict: dict[str, dict[str, str]],
+    tile_id: str,
+    df: pd.DataFrame,
+    chip_size: int,
+    output_directory: str,
+    no_data_value: int,
+    src_crs: int,
+    mask_cloud: bool,
+    water_mask: bool,
+) -> tuple[list[str], list[str | None]]:
+    """Chip Creator.
+
+    Create chips and corresponding segmentation maps from a satellite image tile, read in as Xarray
+    dataset, and save them to an output directory.
+
+    Args:
+        mf_reader (callable[dict[str, dict[str, str]], bool, bool]): A multi-file reader that
+            accepts a dictionary of satellite image tile paths and reads it into an Xarray dataset.
+            Optionally performs water and cloud masking based on the boolean flags passed.
+        tile_dict (Dict): A dict mapping band names to HLS tile filepath.
+        tile_id (str): MGRS ID of the tiles in `tile_dict`.
+        df (pd.DataFrame): DataFrame containing the labelled data for creating segmentation maps.
+        chip_size (int): Size of each chip.
+        output_directory (str): Directory where the chips and segmentation maps will be saved.
+        no_data_value (int): Value to use for no data areas in the segmentation maps.
+        src_crs (int): CRS of points in `df`
+        mask_cloud (bool): Perform cloud masking if True.
+        water_mask (bool): Perform water masking if True.
+
+    Returns:
+        A tuple containing the lists of created chips and segmentation maps.
+    """
+    ds, crs = mf_reader(tile_dict, mask_cloud, water_mask)
+    df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
+    df.set_crs(epsg=src_crs, inplace=True)
+    df = df.to_crs(crs=crs)
+
+    df = df[
+        (ds["x"].min().item() <= df["geometry"].x)
+        & (df["geometry"].x <= ds["x"].max().item())
+        & (ds["y"].min().item() <= df["geometry"].y)
+        & (df["geometry"].y <= ds["y"].max().item())
+    ]
+    os.makedirs(output_directory, exist_ok=True)
+    date_id = df.iloc[0]["date"].strftime("%Y%m%d")
+    chips = []
+    seg_maps: list[str | None] = []
+    n_chips_x = ds.sizes["x"] // chip_size
+    n_chips_y = ds.sizes["y"] // chip_size
+    chip_coords = list(set(get_chip_coords(df, ds, chip_size)))
+    for x, y in chip_coords:
+        if (x >= n_chips_x) or (y >= n_chips_y):
+            continue
+        chip_id = f"{date_id}_{tile_id}_{x}_{y}"
+        chip_name = f"chip_{chip_id}.tif"
+        seg_map_name = f"seg_map_{chip_id}.tif"
+
+        chip_filename = os.path.join(output_directory, "chips", chip_name)
+        seg_map_filename = os.path.join(output_directory, "seg_maps", seg_map_name)
+        if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
+            continue
+
+        chip = ds.isel(
+            x=slice(x * chip_size, (x + 1) * chip_size),
+            y=slice(y * chip_size, (y + 1) * chip_size),
+        )
+        if chip.count().values == 0:
+            continue
+        seg_map = create_segmentation_map(chip, df, no_data_value)
+        if seg_map.where(seg_map != -1).count().values == 0:
+            continue
+        seg_maps.append(seg_map_name)
+        seg_map.rio.to_raster(seg_map_filename)
+        chip = chip.fillna(no_data_value)
+        chips.append(chip_name)
+        chip.band_data.rio.to_raster(chip_filename)
+    return chips, seg_maps
 
 
 def get_tile_info(

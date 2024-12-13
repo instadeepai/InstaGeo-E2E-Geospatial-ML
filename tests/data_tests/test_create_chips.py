@@ -6,7 +6,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from instageo.data.hls_pipeline import create_and_save_chips_with_seg_maps_hls
+from instageo.data.data_pipeline import create_and_save_chips_with_seg_maps
+from instageo.data.hls_utils import open_mf_tiff_dataset
 
 
 @pytest.fixture
@@ -27,11 +28,13 @@ def test_create_chips(setup_and_teardown_output_dir):
     df["date"] = pd.to_datetime("2020-01-01")
     os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
     os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
-    chips, labels = create_and_save_chips_with_seg_maps_hls(
+    chips, labels = create_and_save_chips_with_seg_maps(
+        open_mf_tiff_dataset,
         {
             "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
             "fmasks": {"Fmask_0": fmask_path},
         },
+        "38PLB",
         df,
         chip_size,
         output_directory,
@@ -41,16 +44,15 @@ def test_create_chips(setup_and_teardown_output_dir):
         water_mask=False,
     )
     num_chips = len(chips)
-
     assert num_chips == 3
     for i in range(num_chips):
         chip_path = os.path.join(
-            output_directory, "chips", "chip_20200101_S30_T38PMB_2022145T072619_1_2.tif"
+            output_directory, "chips", "chip_20200101_38PLB_1_2.tif"
         )
         seg_map_path = os.path.join(
             output_directory,
             "seg_maps",
-            "seg_map_20200101_S30_T38PMB_2022145T072619_1_2.tif",
+            "seg_map_20200101_38PLB_1_2.tif",
         )
         chip = xr.open_dataset(chip_path)
         seg_map = xr.open_dataset(seg_map_path)

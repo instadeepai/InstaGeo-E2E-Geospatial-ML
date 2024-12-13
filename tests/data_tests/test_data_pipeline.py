@@ -1,10 +1,13 @@
+import os
+import shutil
+
 import geopandas as gpd
 import pandas as pd
 import pytest
 import xarray as xr
 from shapely.geometry import Point
 
-from instageo.data.geo_utils import get_chip_coords, get_tile_info, get_tiles
+from instageo.data.data_pipeline import get_chip_coords, get_tile_info, get_tiles
 
 
 @pytest.fixture
@@ -64,6 +67,14 @@ def observation_data():
     data["date"] = pd.to_datetime(data["date"])
     data["input_features_date"] = data["date"]
     return data
+
+
+@pytest.fixture
+def setup_and_teardown_output_dir():
+    output_dir = "/tmp/test_hls"
+    os.makedirs(output_dir, exist_ok=True)
+    yield
+    shutil.rmtree(output_dir)
 
 
 def test_get_tiles(observation_data):

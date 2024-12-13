@@ -1,107 +1,23 @@
-import logging
 import os
 import tempfile
 import zipfile
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pandas as pd
 import pytest
-import rasterio
 import xarray as xr
-from rasterio.io import MemoryFile
 
 from instageo.data.s2_utils import (
     S2AuthState,
+    add_s2_granules,
     apply_class_mask,
-    count_valid_pixels,
-    create_scl_data,
-    find_scl_file,
-    get_band_files,
-    open_mf_jp2_dataset,
-    unzip_file,
+    create_s2_dataset,
+    extract_and_delete_zip_files,
+    find_best_tile,
+    process_s2_metadata,
+    retrieve_s2_metadata,
 )
-
-
-def create_mock_scl_band(data: np.ndarray):
-    """Creates a mock SCL band as a raster file in memory."""
-    transform = rasterio.transform.from_origin(1000, 2000, 10, 10)
-    memfile = MemoryFile()
-    with memfile.open(
-        driver="GTiff",
-        height=data.shape[0],
-        width=data.shape[1],
-        count=1,
-        dtype=data.dtype,
-        transform=transform,
-        crs="EPSG:4326",
-    ) as dataset:
-        dataset.write(data, 1)
-    return memfile
-
-
-@pytest.fixture
-def mock_scl_band():
-    """Provides a mock SCL band for testing."""
-    data = np.array([[0, 1, 2], [3, 0, 0], [4, 5, 0]], dtype=np.uint8)
-    return create_mock_scl_band(data)
-
-
-def test_count_valid_pixels(mock_scl_band):
-    """Test the count_valid_pixels function."""
-    with mock_scl_band.open() as mock_file:
-        path = mock_file.name
-        result = count_valid_pixels(path)
-        assert result == 5
-
-
-@pytest.fixture
-def mock_scl_directory(tmp_path):
-    """Creates a mock directory structure with mock SCL files."""
-    tile_name = "30UXB"
-    acquisition_date = datetime(2024, 11, 19)
-
-    mock_dir = tmp_path / "mock_data"
-    mock_dir.mkdir()
-
-    valid_file = f"{tile_name}_{acquisition_date.strftime('%Y%m%d')}_SCL_20m.jp2"
-    invalid_file_1 = f"{tile_name}_20240101_SCL_20m.jp2"
-    invalid_file_2 = f"31UXB_{acquisition_date.strftime('%Y%m%d')}_SCL_20m.jp2"
-
-    (mock_dir / valid_file).write_text("Valid SCL content")
-    (mock_dir / invalid_file_1).write_text("Invalid date content")
-    (mock_dir / invalid_file_2).write_text("Invalid tile content")
-
-    return mock_dir, tile_name, acquisition_date, valid_file
-
-
-def test_find_scl_file(mock_scl_directory):
-    """Test the find_scl_file function."""
-    mock_dir, tile_name, acquisition_date, valid_file = mock_scl_directory
-
-    result = find_scl_file(str(mock_dir), tile_name, acquisition_date)
-    assert result == str(mock_dir / valid_file)
-
-    result = find_scl_file(str(mock_dir), "31XYZ", acquisition_date)
-    assert result is None, "Non-matching file test failed."
-
-
-def test_unzip_file():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        zip_path = os.path.join(temp_dir, "test.zip")
-        with zipfile.ZipFile(zip_path, "w") as test_zip_file:
-            test_zip_file.writestr("test_file.txt", "This is a test file.")
-            test_zip_file.writestr(
-                "nested_dir/test_file2.txt", "This is another test file."
-            )
-
-        with tempfile.TemporaryDirectory() as extract_dir:
-            unzip_file(zip_path, extract_dir)
-
-            assert os.path.exists(os.path.join(extract_dir, "test_file.txt"))
-            assert os.path.exists(
-                os.path.join(extract_dir, "nested_dir/test_file2.txt")
-            )
 
 
 @pytest.fixture
@@ -210,170 +126,10 @@ def test_refresh_access_token_failure(mock_post, auth_state):
     )
 
 
-@patch("os.path.isdir")
-@patch("os.listdir")
-@patch("shutil.move")
-@patch("shutil.rmtree")
-def test_get_band_files(mock_rmtree, mock_move, mock_listdir, mock_isdir):
-    tile_name = "tile1"
-    full_tile_id = "tile1_product1"
-    output_directory = "/mock/output/directory"
-    tile_folder = os.path.join(output_directory, tile_name)
-    base_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
-    img_data_dir = os.path.join(base_dir, "granule_folder", "IMG_DATA", "R20m")
-
-    mock_isdir.side_effect = lambda path: {
-        base_dir: True,
-        img_data_dir: True,
-    }.get(path, False)
-
-    mock_listdir.side_effect = lambda path: {
-        base_dir: ["granule_folder"],
-        img_data_dir: ["B02.jp2", "B03.jp2", "B11.jp2"],  # Files in the R20m folder
-    }.get(path, [])
-
-    get_band_files(
-        tile_name,
-        full_tile_id,
-        output_directory,
-        bands_needed=["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
-    )
-
-    mock_move.assert_any_call(
-        os.path.join(img_data_dir, "B02.jp2"), os.path.join(tile_folder, "B02.jp2")
-    )
-    mock_move.assert_any_call(
-        os.path.join(img_data_dir, "B03.jp2"), os.path.join(tile_folder, "B03.jp2")
-    )
-    mock_move.assert_any_call(
-        os.path.join(img_data_dir, "B11.jp2"), os.path.join(tile_folder, "B11.jp2")
-    )
-    assert mock_move.call_count == 3
-    mock_rmtree.assert_called_once_with(os.path.join(tile_folder, full_tile_id))
-
-
-@patch("os.path.isdir")
-@patch("os.listdir")
-@patch("shutil.rmtree")
-@patch("shutil.move")
-def test_get_band_files_no_granule_folder(
-    mock_move, mock_rmtree, mock_listdir, mock_isdir, caplog
-):
-    tile_name = "tile1"
-    full_tile_id = "tile1_product1"
-    output_directory = "/mock/output/directory"
-    mock_isdir.return_value = False
-    with caplog.at_level(logging.INFO):
-        get_band_files(
-            tile_name,
-            full_tile_id,
-            output_directory,
-            bands_needed=["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
-        )
-
-    assert f"GRANULE folder not found in {full_tile_id}" in caplog.text
-    mock_move.assert_not_called()
-    mock_rmtree.assert_not_called()
-
-
 @pytest.fixture
 def temp_folder():
     with tempfile.TemporaryDirectory() as folder:
         yield folder
-
-
-def test_missing_folder():
-    datasets, crs = open_mf_jp2_dataset(
-        band_folder="non_existent_folder",
-        history_dates=[("id1", ["20240101"])],
-        mask_cloud=False,
-        water_mask=False,
-        temporal_tolerance=5,
-        num_bands_per_timestamp=6,
-    )
-    assert datasets == [None], "Expected None for datasets when folder is missing."
-    assert crs is None, "Expected None for CRS when folder is missing."
-
-
-def test_empty_band_file(temp_folder):
-    empty_file_path = os.path.join(temp_folder, "empty_band_20240101T.jp2")
-    open(empty_file_path, "w").close()  # Create an empty file
-
-    with patch("os.listdir", return_value=["empty_band_20240101T.jp2"]), patch(
-        "os.path.getsize", return_value=0
-    ):
-        datasets, crs = open_mf_jp2_dataset(
-            band_folder=temp_folder,
-            history_dates=[("id1", ["20240101"])],
-            mask_cloud=False,
-            water_mask=False,
-            temporal_tolerance=5,
-            num_bands_per_timestamp=6,
-        )
-    assert datasets == [None], "Expected None for datasets when files are empty."
-    assert crs is None, "Expected None for CRS when files are empty."
-
-
-def test_mismatched_band_count(temp_folder):
-    valid_file_path = os.path.join(temp_folder, "band_20240101T.jp2")
-    scl_file_path = os.path.join(temp_folder, "SCL_20240101T.jp2")
-
-    with open(valid_file_path, "wb") as f, open(scl_file_path, "wb") as scl_f:
-        f.write(b"Non-empty band data")
-        scl_f.write(b"Non-empty SCL data")
-
-    with patch(
-        "os.listdir", return_value=["band_20240101T.jp2", "SCL_20240101T.jp2"]
-    ), patch("os.path.getsize", return_value=10), patch(
-        "rioxarray.open_rasterio",
-        return_value=MagicMock(rio=MagicMock(crs="EPSG:4326")),
-    ):
-        datasets, crs = open_mf_jp2_dataset(
-            band_folder=temp_folder,
-            history_dates=[("id1", ["20240101"])],
-            mask_cloud=False,
-            water_mask=False,
-            temporal_tolerance=5,
-            num_bands_per_timestamp=6,
-        )
-    assert datasets == [
-        None
-    ], "Expected None for datasets when band count is mismatched."
-    assert crs is None, "Expected None for CRS when band count is mismatched."
-
-
-@pytest.fixture
-def mock_rasterio_open():
-    """Fixture to mock rasterio.open."""
-    with patch("rasterio.open") as mock_open:
-        yield mock_open
-
-
-def test_create_scl_data_valid_files(mock_rasterio_open):
-    mock_rasterio_open.return_value.__enter__.return_value.read.side_effect = [
-        np.array([[1, 2], [3, 4]]),
-        np.array([[5, 6], [7, 8]]),
-    ]
-    scl_band_files = ["file1.tif", "file2.tif"]
-    result = create_scl_data(scl_band_files)
-
-    expected = np.array(
-        [
-            [[1, 2], [3, 4]],
-            [[5, 6], [7, 8]],
-        ]
-    )
-
-    assert result.shape == expected.shape
-    assert np.array_equal(result, expected)
-
-
-def test_create_scl_data_empty_file_list():
-    scl_band_files = []
-    result = create_scl_data(scl_band_files)
-
-    assert result.size == 0
-    assert isinstance(result, np.ndarray)
 
 
 @pytest.fixture
@@ -398,13 +154,9 @@ def test_apply_class_mask_valid_mask(sample_dataset, sample_scl_data):
             [[5, np.nan], [np.nan, 8]],
         ]
     )
-
     assert "bands" in result
     assert result["bands"].shape == sample_dataset["bands"].shape
-    np.testing.assert_array_equal(result["bands"].isnull(), np.isnan(expected_data))
-    np.testing.assert_array_almost_equal(
-        result["bands"].values, expected_data, decimal=6
-    )
+    np.testing.assert_almost_equal(result["bands"].values, expected_data)
 
 
 def test_apply_class_mask_no_classes_to_mask(sample_dataset, sample_scl_data):
@@ -412,3 +164,658 @@ def test_apply_class_mask_no_classes_to_mask(sample_dataset, sample_scl_data):
     result = apply_class_mask(sample_dataset, sample_scl_data, class_ids)
 
     xr.testing.assert_equal(result, sample_dataset)
+
+
+@pytest.fixture
+def s2_metadata():
+    return {
+        "features": [
+            {
+                "id": "uuid-1",
+                "properties": {
+                    "title": "S2A_MSIL2A_20201230T100031_N0214_R122_T33UUU_20201230T120024",
+                    "startDate": "2020-12-30T10:00:31Z",
+                    "services": {
+                        "download": {
+                            "url": "https://example.com/granule1",
+                            "size": "100MB",
+                        }
+                    },
+                    "cloudCover": 10.5,
+                    "thumbnail": "https://example.com/thumbnail1",
+                },
+            },
+            {
+                "id": "uuid-2",
+                "properties": {
+                    "title": "S2B_MSIL2A_20201230T100031_N0214_R122_T33UUP_20201230T120024",
+                    "startDate": "2020-12-30T10:00:31Z",
+                    "services": {
+                        "download": {
+                            "url": "https://example.com/granule2",
+                            "size": "120MB",
+                        }
+                    },
+                    "cloudCover": 20.0,
+                    "thumbnail": "https://example.com/thumbnail2",
+                },
+            },
+        ]
+    }
+
+
+def test_process_s2_metadata_valid(s2_metadata):
+    """Test processing valid metadata."""
+    metadata = s2_metadata
+    tile_id = "33UUU"
+    result = process_s2_metadata(metadata, tile_id)
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 1
+    assert (
+        result.iloc[0]["title"]
+        == "S2A_MSIL2A_20201230T100031_N0214_R122_T33UUU_20201230T120024"
+    )
+    assert result.iloc[0]["tile_id"] == "T33UUU"
+    assert result.iloc[0]["cloud_cover"] == 10.5
+
+
+def test_process_s2_metadata_missing_fields():
+    """Test metadata with missing fields."""
+    metadata = {
+        "features": [
+            {
+                "id": "uuid-1",
+                "properties": {
+                    "title": "S2A_MSIL2A_20201230T100031_N0214_R122_T33UUU_20201230T120024",
+                    "cloudCover": 10.5,
+                    "thumbnail": "https://example.com/thumbnail1",
+                },
+            },
+        ]
+    }
+    tile_id = "33UUU"
+
+    with pytest.raises(KeyError):
+        process_s2_metadata(metadata, tile_id)
+
+
+def test_process_s2_metadata_no_matching_tile_id():
+    """Test when no granules match the given tile_id."""
+    metadata = {
+        "features": [
+            {
+                "id": "uuid-1",
+                "properties": {
+                    "title": "S2A_MSIL2A_20201230T100031_N0214_R122_T33UUP_20201230T120024",
+                    "startDate": "2020-12-30T10:00:31Z",
+                    "services": {
+                        "download": {
+                            "url": "https://example.com/granule1",
+                            "size": "100MB",
+                        }
+                    },
+                    "cloudCover": 10.5,
+                    "thumbnail": "https://example.com/thumbnail1",
+                },
+            },
+        ]
+    }
+    tile_id = "33UUU"
+
+    result = process_s2_metadata(metadata, tile_id)
+    assert isinstance(result, pd.DataFrame)
+    assert result.empty
+
+
+def test_retrieve_s2_metadata_success():
+    """Test successful retrieval and processing of metadata."""
+    tile_info_df = pd.DataFrame(
+        {
+            "tile_id": ["33UUU"],
+            "start_date": ["2023-01-01"],
+            "end_date": ["2023-01-31"],
+            "lon_min": [-10.0],
+            "lon_max": [-5.0],
+            "lat_min": [40.0],
+            "lat_max": [45.0],
+        }
+    )
+
+    mock_response_data = {
+        "features": [
+            {
+                "id": "uuid-1",
+                "properties": {
+                    "title": "S2A_MSIL2A_20230101T100031_N0214_R122_T33UUU_20230101T120024",
+                    "startDate": "2023-01-01T10:00:31Z",
+                    "services": {
+                        "download": {
+                            "url": "https://example.com/granule1",
+                            "size": "100MB",
+                        },
+                    },
+                    "cloudCover": 10.0,
+                    "thumbnail": "https://example.com/thumbnail1",
+                },
+            },
+        ]
+    }
+
+    processed_metadata = pd.DataFrame(
+        {
+            "uuid": ["uuid-1"],
+            "title": ["S2A_MSIL2A_20230101T100031_N0214_R122_T33UUU_20230101T120024"],
+            "tile_id": ["33UUU"],
+            "date": ["2023-01-01T10:00:31Z"],
+            "url": ["https://example.com/granule1"],
+            "size": ["100MB"],
+            "cloud_cover": [10.0],
+            "thumbnail": ["https://example.com/thumbnail1"],
+        }
+    )
+
+    with patch("instageo.data.s2_utils.requests.get") as mock_get, patch(
+        "instageo.data.s2_utils.process_s2_metadata"
+    ) as mock_process:
+        mock_get.return_value = MagicMock(
+            status_code=200, json=lambda: mock_response_data
+        )
+        mock_process.return_value = processed_metadata
+
+        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+
+        mock_get.assert_called_once()
+        mock_process.assert_called_once_with(mock_response_data, "33UUU")
+        assert isinstance(result, dict)
+        assert "33UUU" in result
+        assert isinstance(result["33UUU"], pd.DataFrame)
+        assert len(result["33UUU"]) == 1
+
+
+def test_retrieve_s2_metadata_api_error():
+    """Test handling of an API error."""
+    tile_info_df = pd.DataFrame(
+        {
+            "tile_id": ["33UUU"],
+            "start_date": ["2023-01-01"],
+            "end_date": ["2023-01-31"],
+            "lon_min": [-10.0],
+            "lon_max": [-5.0],
+            "lat_min": [40.0],
+            "lat_max": [45.0],
+        }
+    )
+
+    with patch("instageo.data.s2_utils.requests.get") as mock_get:
+        mock_get.return_value = MagicMock(status_code=500)
+
+        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+
+        mock_get.assert_called_once()
+        assert isinstance(result, dict)
+        assert "33UUU" in result
+        assert result["33UUU"] is None
+
+
+def test_retrieve_s2_metadata_no_features():
+    """Test when API response contains no features."""
+    tile_info_df = pd.DataFrame(
+        {
+            "tile_id": ["33UUU"],
+            "start_date": ["2023-01-01"],
+            "end_date": ["2023-01-31"],
+            "lon_min": [-10.0],
+            "lon_max": [-5.0],
+            "lat_min": [40.0],
+            "lat_max": [45.0],
+        }
+    )
+
+    mock_response_data = {"features": []}
+
+    with patch("instageo.data.s2_utils.requests.get") as mock_get, patch(
+        "instageo.data.s2_utils.process_s2_metadata"
+    ) as mock_process:
+        mock_get.return_value = MagicMock(
+            status_code=200, json=lambda: mock_response_data
+        )
+        mock_process.return_value = pd.DataFrame()
+
+        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+
+        mock_get.assert_called_once()
+        mock_process.assert_called_once_with(mock_response_data, "33UUU")
+        assert isinstance(result, dict)
+        assert "33UUU" in result
+        assert isinstance(result["33UUU"], pd.DataFrame)
+        assert result["33UUU"].empty
+
+
+def test_retrieve_s2_metadata_multiple_tiles():
+    """Test processing metadata for multiple tiles."""
+    tile_info_df = pd.DataFrame(
+        {
+            "tile_id": ["33UUU", "33UUP"],
+            "start_date": ["2023-01-01", "2023-01-15"],
+            "end_date": ["2023-01-31", "2023-01-20"],
+            "lon_min": [-10.0, -15.0],
+            "lon_max": [-5.0, -10.0],
+            "lat_min": [40.0, 35.0],
+            "lat_max": [45.0, 40.0],
+        }
+    )
+
+    mock_response_data = {"features": []}
+
+    with patch("instageo.data.s2_utils.requests.get") as mock_get, patch(
+        "instageo.data.s2_utils.process_s2_metadata"
+    ) as mock_process:
+        mock_get.return_value = MagicMock(
+            status_code=200, json=lambda: mock_response_data
+        )
+        mock_process.return_value = pd.DataFrame()
+
+        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+
+        assert isinstance(result, dict)
+        assert "33UUU" in result
+        assert "33UUP" in result
+        assert isinstance(result["33UUU"], pd.DataFrame)
+        assert isinstance(result["33UUP"], pd.DataFrame)
+        assert result["33UUU"].empty
+        assert result["33UUP"].empty
+
+
+def test_find_best_tile_prioritize_size():
+    """Test prioritization of larger size over temporal difference."""
+    tile_queries = {
+        "query1": ("33UUU", ["2023-01-10"]),
+    }
+
+    tile_database = {
+        "33UUU": pd.DataFrame(
+            [
+                {
+                    "title": "S2A_MSIL2A_20230108",
+                    "date": "2023-01-08",
+                    "size": 500,
+                    "url": "https://example.com/tile1",
+                    "thumbnail": "https://example.com/thumb1",
+                },
+                {
+                    "title": "S2A_MSIL2A_20230112",
+                    "date": "2023-01-12",
+                    "size": 700,
+                    "url": "https://example.com/tile2",
+                    "thumbnail": "https://example.com/thumb2",
+                },
+                {
+                    "title": "S2A_MSIL2A_20230109",
+                    "date": "2023-01-09",
+                    "size": 600,
+                    "url": "https://example.com/tile3",
+                    "thumbnail": "https://example.com/thumb3",
+                },
+            ]
+        )
+    }
+
+    result = find_best_tile(tile_queries, tile_database, temporal_tolerance=5)
+
+    expected_result = pd.DataFrame(
+        [
+            {
+                "tile_queries": "query1",
+                "s2_tiles": ["S2A_MSIL2A_20230112"],  # Largest size, within tolerance
+                "thumbnails": ["https://example.com/thumb2"],
+                "urls": ["https://example.com/tile2"],
+            }
+        ]
+    )
+
+    pd.testing.assert_frame_equal(result, expected_result)
+
+
+def test_find_best_tile_temporal_tiebreaker():
+    """Test tiebreaker for tiles with the same size but different temporal differences."""
+    tile_queries = {
+        "query1": ("33UUU", ["2023-01-10"]),
+    }
+
+    tile_database = {
+        "33UUU": pd.DataFrame(
+            [
+                {
+                    "title": "S2A_MSIL2A_20230108",
+                    "date": "2023-01-08",
+                    "size": 700,
+                    "url": "https://example.com/tile1",
+                    "thumbnail": "https://example.com/thumb1",
+                },
+                {
+                    "title": "S2A_MSIL2A_20230109",
+                    "date": "2023-01-09",
+                    "size": 700,
+                    "url": "https://example.com/tile2",
+                    "thumbnail": "https://example.com/thumb2",
+                },
+            ]
+        )
+    }
+
+    result = find_best_tile(tile_queries, tile_database, temporal_tolerance=5)
+
+    expected_result = pd.DataFrame(
+        [
+            {
+                "tile_queries": "query1",
+                "s2_tiles": [
+                    "S2A_MSIL2A_20230109"
+                ],  # Same size, closer temporal difference
+                "thumbnails": ["https://example.com/thumb2"],
+                "urls": ["https://example.com/tile2"],
+            }
+        ]
+    )
+
+    pd.testing.assert_frame_equal(result, expected_result)
+
+
+def test_find_best_tile_no_match():
+    """Test when no tile matches within temporal tolerance."""
+    tile_queries = {
+        "query1": ("33UUU", ["2023-01-10"]),
+    }
+
+    tile_database = {
+        "33UUU": pd.DataFrame(
+            [
+                {
+                    "title": "S2A_MSIL2A_20230101",
+                    "date": "2023-01-01",
+                    "size": 500,
+                    "url": "https://example.com/tile1",
+                    "thumbnail": "https://example.com/thumb1",
+                },
+            ]
+        )
+    }
+
+    result = find_best_tile(tile_queries, tile_database, temporal_tolerance=5)
+
+    expected_result = pd.DataFrame(
+        [
+            {
+                "tile_queries": "query1",
+                "s2_tiles": [None],  # No tile within tolerance
+                "thumbnails": [None],
+                "urls": [None],
+            }
+        ]
+    )
+
+    pd.testing.assert_frame_equal(result, expected_result)
+
+
+def test_find_best_tile_multiple_queries():
+    """Test multiple tile queries."""
+    tile_queries = {
+        "query1": ("33UUU", ["2023-01-10"]),
+        "query2": ("33UUP", ["2023-01-15"]),
+    }
+
+    tile_database = {
+        "33UUU": pd.DataFrame(
+            [
+                {
+                    "title": "S2A_MSIL2A_20230108",
+                    "date": "2023-01-08",
+                    "size": 700,
+                    "url": "https://example.com/tile1",
+                    "thumbnail": "https://example.com/thumb1",
+                },
+                {
+                    "title": "S2A_MSIL2A_20230109",
+                    "date": "2023-01-09",
+                    "size": 600,
+                    "url": "https://example.com/tile2",
+                    "thumbnail": "https://example.com/thumb2",
+                },
+            ]
+        ),
+        "33UUP": pd.DataFrame(
+            [
+                {
+                    "title": "S2B_MSIL2A_20230114",
+                    "date": "2023-01-14",
+                    "size": 800,
+                    "url": "https://example.com/tile3",
+                    "thumbnail": "https://example.com/thumb3",
+                },
+            ]
+        ),
+    }
+
+    result = find_best_tile(tile_queries, tile_database, temporal_tolerance=5)
+
+    expected_result = pd.DataFrame(
+        [
+            {
+                "tile_queries": "query1",
+                "s2_tiles": ["S2A_MSIL2A_20230108"],  # Larger size
+                "thumbnails": ["https://example.com/thumb1"],
+                "urls": ["https://example.com/tile1"],
+            },
+            {
+                "tile_queries": "query2",
+                "s2_tiles": ["S2B_MSIL2A_20230114"],  # Within tolerance
+                "thumbnails": ["https://example.com/thumb3"],
+                "urls": ["https://example.com/tile3"],
+            },
+        ]
+    )
+
+    pd.testing.assert_frame_equal(result, expected_result)
+
+
+def test_create_s2_dataset_valid():
+    """Test creation of S2 dataset with valid data."""
+    data_with_tiles = pd.DataFrame(
+        {
+            "date": [pd.Timestamp("2023-01-10"), pd.Timestamp("2023-01-15")],
+            "mgrs_tile_id": ["33UUU", "33UUP"],
+            "s2_tiles": [
+                ["S2A_MSIL2A_20230110", "S2A_MSIL2A_20230112"],
+                ["S2B_MSIL2A_20230115"],
+            ],
+            "urls": [
+                ["https://example.com/tile1", "https://example.com/tile2"],
+                ["https://example.com/tile3"],
+            ],
+        }
+    )
+    outdir = "/tmp/s2_dataset"
+
+    s2_dataset, granules_to_download = create_s2_dataset(data_with_tiles, outdir)
+
+    expected_s2_dataset = {
+        "2023-01-10_33UUU": {
+            "granules": [
+                os.path.join(outdir, "s2_tiles", "S2A_MSIL2A_20230110"),
+                os.path.join(outdir, "s2_tiles", "S2A_MSIL2A_20230112"),
+            ],
+        },
+        "2023-01-15_33UUP": {
+            "granules": [
+                os.path.join(outdir, "s2_tiles", "S2B_MSIL2A_20230115"),
+            ],
+        },
+    }
+
+    expected_granules_to_download = pd.DataFrame(
+        {
+            "tiles": [
+                "S2A_MSIL2A_20230110",
+                "S2A_MSIL2A_20230112",
+                "S2B_MSIL2A_20230115",
+            ],
+            "urls": [
+                "https://example.com/tile1",
+                "https://example.com/tile2",
+                "https://example.com/tile3",
+            ],
+        }
+    )
+
+    assert s2_dataset == expected_s2_dataset
+    pd.testing.assert_frame_equal(granules_to_download, expected_granules_to_download)
+
+
+def test_create_s2_dataset_no_valid_tiles():
+    """Test creation of S2 dataset with invalid data (no valid Sentinel-2 granules)."""
+    data_with_tiles = pd.DataFrame(
+        {
+            "date": [pd.Timestamp("2023-01-10")],
+            "mgrs_tile_id": ["33UUU"],
+            "s2_tiles": [["invalid_tile_1", "invalid_tile_2"]],
+            "urls": [["https://example.com/tile1", "https://example.com/tile2"]],
+        }
+    )
+    outdir = "/tmp/s2_dataset"
+
+    with pytest.raises(
+        AssertionError, match="No observation record with valid Sentinel-2 granules"
+    ):
+        create_s2_dataset(data_with_tiles, outdir)
+
+
+def test_add_s2_granules_valid():
+    """Test adding S2 granules with valid data."""
+    data = pd.DataFrame(
+        {
+            "mgrs_tile_id": ["33UUU", "33UUP"],
+            "input_features_date": [
+                pd.Timestamp("2023-01-15"),
+                pd.Timestamp("2023-01-20"),
+            ],
+            "observation_date": [
+                pd.Timestamp("2023-01-15"),
+                pd.Timestamp("2023-01-20"),
+            ],
+            "x": [19.0, 17.0],
+            "y": [19.0, 17.0],
+        }
+    )
+
+    mock_tiles_info = pd.DataFrame(
+        {
+            "tile_id": ["33UUU", "33UUP"],
+            "start_date": ["2023-01-10", "2023-01-15"],
+            "end_date": ["2023-01-20", "2023-01-25"],
+        }
+    )
+    mock_tile_queries = [("33UUU", ["2023-01-15"]), ("33UUP", ["2023-01-20"])]
+    mock_tile_database = {
+        "33UUU": pd.DataFrame(
+            [
+                {
+                    "title": "S2A_MSIL2A_20230114",
+                    "date": "2023-01-14",
+                    "size": 500,
+                    "url": "https://example.com/tile1",
+                    "thumbnail": "https://example.com/thumb1",
+                },
+            ]
+        ),
+        "33UUP": pd.DataFrame(
+            [
+                {
+                    "title": "S2B_MSIL2A_20230119",
+                    "date": "2023-01-19",
+                    "size": 700,
+                    "url": "https://example.com/tile2",
+                    "thumbnail": "https://example.com/thumb2",
+                },
+            ]
+        ),
+    }
+    mock_query_result = pd.DataFrame(
+        {
+            "tile_queries": [
+                "33UUU_2023-01-15_2023-01-05_2022-12-26",
+                "33UUP_2023-01-20_2023-01-10_2022-12-31",
+            ],
+            "s2_tiles": [["S2A_MSIL2A_20230114"], ["S2B_MSIL2A_20230119"]],
+            "urls": [["https://example.com/tile1"], ["https://example.com/tile2"]],
+        }
+    )
+
+    with patch(
+        "instageo.data.data_pipeline.get_tile_info",
+        return_value=(mock_tiles_info, mock_tile_queries),
+    ), patch(
+        "instageo.data.s2_utils.retrieve_s2_metadata", return_value=mock_tile_database
+    ), patch(
+        "instageo.data.s2_utils.find_best_tile", return_value=mock_query_result
+    ):
+        result = add_s2_granules(
+            data, num_steps=3, temporal_step=10, temporal_tolerance=5
+        )
+    expected_result = pd.DataFrame(
+        {
+            "mgrs_tile_id": ["33UUU", "33UUP"],
+            "input_features_date": [
+                pd.Timestamp("2023-01-15"),
+                pd.Timestamp("2023-01-20"),
+            ],
+            "observation_date": [
+                pd.Timestamp("2023-01-15"),
+                pd.Timestamp("2023-01-20"),
+            ],
+            "x": [19.0, 17.0],
+            "y": [19.0, 17.0],
+            "tile_queries": [
+                "33UUU_2023-01-15_2023-01-05_2022-12-26",
+                "33UUP_2023-01-20_2023-01-10_2022-12-31",
+            ],
+            "s2_tiles": [["S2A_MSIL2A_20230114"], ["S2B_MSIL2A_20230119"]],
+            "urls": [["https://example.com/tile1"], ["https://example.com/tile2"]],
+        }
+    )
+
+    pd.testing.assert_frame_equal(result, expected_result)
+
+
+def test_extract_and_delete_zip_files():
+    """Test extracting and deleting ZIP files."""
+    with tempfile.TemporaryDirectory() as parent_dir:
+        # Create subdirectories and sample ZIP files
+        sub_dir = os.path.join(parent_dir, "subdir")
+        os.makedirs(sub_dir, exist_ok=True)
+
+        zip_file_path = os.path.join(sub_dir, "test.zip")
+        extracted_file_path = os.path.join(sub_dir, "test_file.txt")
+
+        # Create a ZIP file with a test file
+        with zipfile.ZipFile(zip_file_path, "w") as zipf:
+            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                temp_file.write(b"This is a test file.")
+                temp_file.seek(0)
+                zipf.write(temp_file.name, arcname="test_file.txt")
+                temp_file.close()
+
+        # Ensure the ZIP file exists before extraction
+        assert os.path.exists(zip_file_path)
+
+        # Run the function
+        extract_and_delete_zip_files(parent_dir)
+
+        # Check if the ZIP file is deleted and files are extracted
+        assert not os.path.exists(zip_file_path)
+        assert os.path.exists(extracted_file_path)
+
+        # Validate the content of the extracted file
+        with open(extracted_file_path) as extracted_file:
+            content = extracted_file.read()
+            assert content == "This is a test file."

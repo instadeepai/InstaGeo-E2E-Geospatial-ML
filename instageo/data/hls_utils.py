@@ -20,6 +20,7 @@
 """Utility Functions for Reading and Processing Harmonized Landsat Sentinel-2 Dataset."""
 
 
+import os
 import re
 from datetime import datetime, timedelta
 
@@ -27,7 +28,10 @@ import earthaccess
 import pandas as pd
 import rasterio
 import xarray as xr
+from absl import logging
 from rasterio.crs import CRS
+
+from instageo.data.data_pipeline import get_tile_info
 
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
@@ -188,3 +192,160 @@ def open_mf_tiff_dataset(
     with rasterio.open(band_paths[0]) as src:
         crs = src.crs
     return bands_dataset, crs
+
+
+def add_hls_granules(
+    data: pd.DataFrame,
+    num_steps: int = 3,
+    temporal_step: int = 10,
+    temporal_tolerance: int = 5,
+) -> pd.DataFrame:
+    """Add HLS Granules.
+
+    Data contains tile_id and a series of date for which the tile is desired. This
+    function takes the tile_id and the dates and finds the HLS tiles closest to the
+    desired date with a tolearance of `temporal_tolerance`.
+
+    Args:
+        data (pd.DataFrame): A dataframe containing observations that fall within a
+            dense tile.
+        num_steps (int): Number of temporal steps into the past to fetch.
+        temporal_step (int): Step size (in days) for creating temporal steps.
+        temporal_tolerance (int): Tolerance (in days) for finding closest HLS tile.
+
+    Returns:
+        A dataframe containing a list of HLS granules. Each granule is a directory
+        containing all the bands.
+    """
+    tiles_info, tile_queries = get_tile_info(
+        data, num_steps=num_steps, temporal_step=temporal_step
+    )
+    tile_queries_str = [
+        f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
+    ]
+    data["tile_queries"] = tile_queries_str
+    tile_database = retrieve_hls_metadata(tiles_info)
+    tile_queries_dict = {k: v for k, v in zip(tile_queries_str, tile_queries)}
+    query_result = find_closest_tile(
+        tile_queries=tile_queries_dict,
+        tile_database=tile_database,
+        temporal_tolerance=temporal_tolerance,
+    )
+    data = pd.merge(data, query_result, how="left", on="tile_queries")
+    return data
+
+
+def create_hls_dataset(
+    data_with_tiles: pd.DataFrame, outdir: str
+) -> tuple[dict[str, dict[str, dict[str, str]]], set[str]]:
+    """Creates HLS Dataset.
+
+    A HLS dataset is a list of dictionary mapping band names to corresponding GeoTiff
+    filepath. It is required for creating chips.
+
+    Args:
+        data_with_tiles (pd.DataFrame): A dataframe containing observations that fall
+            within a dense tile. It also has `hls_tiles` column that contains a temporal
+            series of HLS granules.
+        outdir (str): Output directory where tiles could be downloaded to.
+
+    Returns:
+        A tuple containing HLS dataset and a list of tiles that needs to be downloaded.
+    """
+    data_with_tiles = data_with_tiles.drop_duplicates(subset=["hls_tiles"])
+    data_with_tiles = data_with_tiles[
+        data_with_tiles["hls_tiles"].apply(
+            lambda granule_lst: all("HLS" in str(item) for item in granule_lst)
+        )
+    ]
+    assert not data_with_tiles.empty, "No observation record with valid HLS tiles"
+    hls_dataset = {}
+    granules_to_download = []
+    s30_bands = ["B02", "B03", "B04", "B8A", "B11", "B12", "Fmask"]
+    l30_bands = ["B02", "B03", "B04", "B05", "B06", "B07", "Fmask"]
+    for hls_tiles, obsv_date in zip(
+        data_with_tiles["hls_tiles"], data_with_tiles["date"]
+    ):
+        band_id, band_path = [], []
+        mask_id, mask_path = [], []
+        for idx, tile in enumerate(hls_tiles):
+            tile = tile.strip(".")
+            if "HLS.S30" in tile:
+                for band in s30_bands:
+                    if band == "Fmask":
+                        mask_id.append(f"{band}_{idx}")
+                        mask_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    else:
+                        band_id.append(f"{band}_{idx}")
+                        band_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    granules_to_download.append(
+                        f"https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSS30.020/{tile}/{tile}.{band}.tif"  # noqa
+                    )
+            else:
+                for band in l30_bands:
+                    if band == "Fmask":
+                        mask_id.append(f"{band}_{idx}")
+                        mask_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    else:
+                        band_id.append(f"{band}_{idx}")
+                        band_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    granules_to_download.append(
+                        f"https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/{tile}/{tile}.{band}.tif"  # noqa
+                    )
+
+        hls_dataset[f'{obsv_date.strftime("%Y-%m-%d")}_{tile.split(".")[2]}'] = {
+            "tiles": {k: v for k, v in zip(band_id, band_path)},
+            "fmasks": {k: v for k, v in zip(mask_id, mask_path)},
+        }
+    return hls_dataset, set(granules_to_download)
+
+
+def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None:
+    """Parallel Download.
+
+    Wraps `download_tile` with multiprocessing.Pool for downloading multiple tiles in
+    parallel.
+
+    Args:
+        urls: Tile urls to download.
+        outdir: Directory to save downloaded tiles.
+        max_retries: Number of times to retry downloading all tiles.
+
+    Returns:
+        None
+    """
+    num_cpus = os.cpu_count()
+    earthaccess.login(persist=True)
+    retries = 0
+    complete = False
+    while retries <= max_retries:
+        temp_urls = [
+            url
+            for url in urls
+            if not os.path.exists(os.path.join(outdir, url.split("/")[-1]))
+        ]
+        if not temp_urls:
+            complete = True
+            break
+        earthaccess.download(temp_urls, local_path=outdir, threads=num_cpus)
+        for filename in os.listdir(outdir):
+            file_path = os.path.join(outdir, filename)
+            if os.path.isfile(file_path):
+                file_size = os.path.getsize(file_path)
+                if file_size < 1024:
+                    os.remove(file_path)
+        retries += 1
+    if complete:
+        logging.info("Successfully downloaded all granules")
+    else:
+        logging.warning(
+            f"Couldn't download the following granules after {max_retries} retries:\n{urls}"  # noqa
+        )
