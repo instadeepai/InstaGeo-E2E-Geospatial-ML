@@ -52,7 +52,7 @@ def create_and_save_chips_with_seg_maps(
         mf_reader (callable[dict[str, dict[str, str]], bool, bool]): A multi-file reader that
             accepts a dictionary of satellite image tile paths and reads it into an Xarray dataset.
             Optionally performs water and cloud masking based on the boolean flags passed.
-        tile_dict (Dict): A dict mapping band names to HLS tile filepath.
+        tile_dict (Dict): A dict mapping band names to tile filepath.
         tile_id (str): MGRS ID of the tiles in `tile_dict`.
         df (pd.DataFrame): DataFrame containing the labelled data for creating segmentation maps.
         chip_size (int): Size of each chip.

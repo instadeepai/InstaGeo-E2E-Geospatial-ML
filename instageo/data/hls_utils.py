@@ -204,7 +204,7 @@ def add_hls_granules(
 
     Data contains tile_id and a series of date for which the tile is desired. This
     function takes the tile_id and the dates and finds the HLS tiles closest to the
-    desired date with a tolearance of `temporal_tolerance`.
+    desired date with a tolerance of `temporal_tolerance`.
 
     Args:
         data (pd.DataFrame): A dataframe containing observations that fall within a
