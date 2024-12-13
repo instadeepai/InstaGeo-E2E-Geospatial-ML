@@ -54,7 +54,12 @@ def test_get_chip_coords():
 
 
 @pytest.mark.auth
-def test_chip_creator(setup_and_teardown_output_dir):
+@pytest.mark.parametrize(
+    "data_source, chip_counts, tile_counts", [("HLS", 3, 21), ("S2", 2, 2)]
+)
+def test_chip_creator(
+    setup_and_teardown_output_dir, data_source, chip_counts, tile_counts
+):
     output_directory = "/tmp/csv_chip_creator"
     argv = [
         "chip_creator",
@@ -97,9 +102,11 @@ def test_chip_creator(setup_and_teardown_output_dir):
     assert np.unique(seg_map.band_data).size > 1
     assert (
         len(
-            pd.read_csv(os.path.join(output_directory, "granules_to_download.csv"))[
-                "tiles"
-            ].tolist()
+            pd.read_csv(
+                os.path.join(
+                    output_directory, f"{data_source.lower()}_granules_to_download.csv"
+                )
+            )
         )
         == 28
     )
@@ -132,7 +139,9 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
     FLAGS(argv)
     chip_creator.main("None")
     assert os.path.exists(os.path.join(output_directory, "hls_dataset.json"))
-    assert os.path.exists(os.path.join(output_directory, "granules_to_download.csv"))
+    assert os.path.exists(
+        os.path.join(output_directory, "hls_granules_to_download.csv")
+    )
     assert not os.path.exists(os.path.join(output_directory, "chips"))
     assert not os.path.exists(os.path.join(output_directory, "seg_maps"))
 

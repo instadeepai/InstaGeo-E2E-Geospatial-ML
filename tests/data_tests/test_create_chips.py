@@ -6,7 +6,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from instageo.data.hls_pipeline import create_and_save_chips_with_seg_maps_hls
+from instageo.data.data_pipeline import create_and_save_chips_with_seg_maps
+from instageo.data.hls_utils import open_mf_tiff_dataset
 
 
 @pytest.fixture
@@ -33,6 +34,7 @@ def test_create_chips(setup_and_teardown_output_dir):
             "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
             "fmasks": {"Fmask_0": fmask_path},
         },
+        "38PLB",
         df,
         chip_size,
         output_directory,
@@ -43,16 +45,15 @@ def test_create_chips(setup_and_teardown_output_dir):
         window_size=0,
     )
     num_chips = len(chips)
-
     assert num_chips == 3
     for i in range(num_chips):
         chip_path = os.path.join(
-            output_directory, "chips", "chip_20200101_S30_T38PMB_2022145T072619_1_2.tif"
+            output_directory, "chips", "chip_20200101_38PLB_1_2.tif"
         )
         seg_map_path = os.path.join(
             output_directory,
             "seg_maps",
-            "seg_map_20200101_S30_T38PMB_2022145T072619_1_2.tif",
+            "seg_map_20200101_38PLB_1_2.tif",
         )
         chip = xr.open_dataset(chip_path)
         seg_map = xr.open_dataset(seg_map_path)

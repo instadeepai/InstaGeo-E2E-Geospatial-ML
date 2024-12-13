@@ -19,24 +19,24 @@
 
 """Utility Functions for Reading and Processing Sentinel-2 Dataset."""
 
+import glob
 import multiprocessing
 import os
-import re
-import shutil
 import subprocess
 import time
 import zipfile
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import rasterio
 import requests  # type: ignore
-import rioxarray
 import xarray as xr
 from absl import logging
 from rasterio.crs import CRS
+
+from instageo.data.data_pipeline import get_tile_info
 
 
 class S2AuthState:
@@ -236,50 +236,11 @@ def download_with_wget(access_token: str, download_url: str, output_file: str) -
         logging.error(f"Failed to download: {e}")
 
 
-def download_product(
-    auth_state: S2AuthState,
-    download_info: Tuple[str, str, str],
-    output_directory: str,
-) -> None:
-    """Download Sentinel-2 product.
-
-    Downloads a product using the provided download information and handles token refreshing.
-
-    Args:
-        auth_state (S2AuthState): The authentication state manager to handle token refresh.
-        download_info (Tuple[str, str, str]): A tuple containing the download URL, full tile ID,
-        and tile name.
-        output_directory (str): The directory path where the downloaded files will be saved.
-
-    Returns:
-        None
-    """
-    download_url, full_tile_id, tile_name = download_info
-    output_file = os.path.join(output_directory, tile_name, f"{full_tile_id}.zip")
-
-    access_token = auth_state.refresh_access_token_if_needed()
-
-    download_with_wget(access_token, download_url, output_file)
-
-    while True:
-        try:
-            access_token = auth_state.refresh_access_token_if_needed()
-            download_with_wget(access_token, download_url, output_file)
-            break  # Exit loop if download succeeds
-        except Exception as e:
-            logging.error(f"Error during download: {e}")
-            if "401" in str(e) or "token" in str(e).lower():
-                logging.info("Reauthenticating and retrying download...")
-                auth_state.authenticate()  # Reauthenticate if token-related issue
-            else:
-                raise
-
-
 def download_worker(
     client_id: str | None,
     username: str | None,
     password: str | None,
-    download_info: Tuple[str, str, str],
+    download_info: Tuple[str, str],
     output_directory: str,
 ) -> None:
     """Worker function for downloading a Sentinel-2 product.
@@ -299,15 +260,21 @@ def download_worker(
     """
     auth_state = S2AuthState(client_id=client_id, username=username, password=password)
     auth_state.authenticate()
-    download_product(auth_state, download_info, output_directory)
+    access_token = auth_state.refresh_access_token_if_needed()
+
+    download_url, tile_id = download_info
+    output_file = os.path.join(output_directory, f"{tile_id}.zip")
+
+    download_with_wget(access_token, download_url, output_file)
 
 
 def parallel_downloads_s2(
     client_id: str | None,
     username: str | None,
     password: str | None,
-    download_info_list: List[Tuple[str, str, str]],
+    download_info_list: List[Tuple[str, str]],
     output_directory: str,
+    num_workers: int = 4,
 ) -> None:
     """Parallel download for Sentinel-2 Tiles.
 
@@ -318,16 +285,14 @@ def parallel_downloads_s2(
         client_id (str | None): The client ID for authentication.
         username (str | None): The username for authentication.
         password (str | None): The password for authentication.
-        download_info_list (List[Tuple[str, str, str]]): A list of download information tuples.
+        download_info_list (List[Tuple[str, str]]): A list of download information tuples.
         output_directory (str): The directory path where the downloaded files will be saved.
+        num_workers (int): Number of parallel processes used during download.
 
     Returns:
         None
     """
-    auth_state = S2AuthState(client_id=client_id, username=username, password=password)
-    auth_state.authenticate()
-
-    with multiprocessing.Pool(processes=4) as pool:
+    with multiprocessing.Pool(processes=num_workers) as pool:
         pool.starmap(
             download_worker,
             [
@@ -343,251 +308,59 @@ def parallel_downloads_s2(
         )
 
 
-def unzip_file(zip_file: str, output_dir: str) -> None:
-    """Unzip S2 products.
-
-    Extracts the contents of a zip file to the specified output directory.
-
-    Args:
-        zip_file (str): The path to the zip file to be extracted.
-        output_dir (str): The directory where the contents of the zip file will be extracted.
-
-    Returns:
-        None: This function doesn't return any value. It prints messages indicating the status.
-
-    Raises:
-        zipfile.BadZipFile: If the provided file is not a valid zip file.
-        FileNotFoundError: If the zip file is not found at the given path.
-    """
-    try:
-        with zipfile.ZipFile(zip_file, "r") as zip_ref:
-            zip_ref.extractall(output_dir)
-        os.remove(zip_file)
-    except zipfile.BadZipFile:
-        logging.info(f"Error: {zip_file} is not a valid zip file")
-    except FileNotFoundError:
-        logging.info(f"File not found: {zip_file}")
-    except Exception as e:
-        logging.info(f"An error occurred: {e}")
-
-
-def get_band_files(
-    tile_name: str, full_tile_id: str, output_directory: str, bands_needed: list
-) -> None:
-    """Handle band files.
-
-    Navigates through the folders to find the bands in the IMG_DATA/R20m folder,
-    moves them to the tile folder, and deletes unnecessary files.
-
-    Args:
-        tile_name (str): The tile name.
-        full_tile_id (str): The base folder where the unzipped contents are stored.
-        output_directory (str): The root directory where the tile folders are located.
-        bands_needed (list): A list of band names to be processed.
-
-    Returns:
-    None: This function doesn't return any value. It performs file operations and prints messages.
-    """
-    tile_folder = os.path.join(output_directory, tile_name)
-
-    granule_dir = os.path.join(tile_folder, full_tile_id, "GRANULE")
-    if not os.path.isdir(granule_dir):
-        logging.info(f"GRANULE folder not found in {full_tile_id}")
-        return
-
-    granule_folders = os.listdir(granule_dir)
-    if not granule_folders:
-        logging.info(f"No subfolder found in GRANULE for {full_tile_id}")
-        return
-    # checks the length of granule_folders
-    if len(granule_folders) > 1:
-        logging.warning(
-            f"Unexpected multiple subfolders in GRANULE for {full_tile_id}: {granule_folders}"
-        )
-        raise ValueError(f"Multiple subfolders found in GRANULE: {granule_folders}")
-    granule_folder = granule_folders[0]
-
-    img_data_dir = os.path.join(granule_dir, granule_folder, "IMG_DATA", "R20m")
-    if not os.path.isdir(img_data_dir):
-        logging.info(f"R20m folder not found in {granule_folder}")
-        return
-
-    # Iterate over all files in the R20m folder and move needed bands
-    for file_name in os.listdir(img_data_dir):
-        if any(band in file_name for band in bands_needed):
-            full_file_path = os.path.join(img_data_dir, file_name)
-            target_file_path = os.path.join(tile_folder, file_name)
-            shutil.move(full_file_path, target_file_path)
-
-    # After processing, remove the original folder structure to clean up
-    shutil.rmtree(os.path.join(tile_folder, full_tile_id))
-
-
-def count_valid_pixels(scl_band_path: str) -> int:
-    """Valid pixels count.
-
-    The SCL band (Scene Classification Layer) is a raster data product that classifies each pixel
-    in the image into specific categories, enabling further analysis and processing. The
-    classification is represented as an integer value per pixel, where each value corresponds
-    to a specific class.
-    This function counts valid pixels in the SCL band, ignoring pixels with class 0 (No Data).
-
-    Args:
-        scl_band_path (str): The file path to the SCL band.
-
-    Returns:
-    int: The number of valid pixels.
-    """
-    valid_pixels = 0
-    with rasterio.open(scl_band_path) as src:
-        scl_data = src.read(1)  # Read the SCL band data as a 2D numpy array
-        valid_pixels = np.count_nonzero(scl_data)
-    return valid_pixels
-
-
-def find_scl_file(
-    output_path: str, tile_name: str, acquisition_date: datetime
-) -> Optional[str]:
-    """SCL file finder.
-
-    The SCL band (Scene Classification Layer) is a raster data product typically generated from
-    Sentinel-2 satellite imagery as part of Level-2A processing that classifies each pixel in
-    the image into specific categories, enabling further analysis and processing.
-    This function finds the SCL file matching the acquisition date.
-
-    Args:
-        output_path (str): Path to the tile's folder.
-        tile_name (str): Name of the tile.
-        acquisition_date (datetime): Acquisition date for the product.
-
-    Returns:
-    Optional[str]: Path to the matching SCL file, or None if not found.
-    """
-    acquisition_date_str = acquisition_date.strftime("%Y%m%d")
-
-    for file_name in os.listdir(output_path):
-        if (
-            file_name.endswith("_SCL_20m.jp2")
-            and tile_name in file_name
-            and acquisition_date_str in file_name
-        ):
-            return os.path.join(output_path, file_name)
-
-    return None
-
-
 def open_mf_jp2_dataset(
-    band_folder: str,
-    history_dates: list[tuple[str, list[str]]],
+    band_files: dict[str, dict[str, str]],
     mask_cloud: bool,
     water_mask: bool,
-    temporal_tolerance: int,
-    num_bands_per_timestamp: int,
-) -> tuple[list[xr.Dataset | None], CRS | None]:
-    """Handle JP2 data grouped by timestamps with temporal tolerance.
-
-    Open multiple JP2 (JPEG 2000 which is an image compression standard and coding system) files as
-    xarray Datasets for each date group and optionally apply filtering for water and clouds, with a
-    date tolerance window.
+) -> tuple[xr.Dataset, CRS]:
+    """Open multiple JP2 files as an xarray Dataset.
 
     Args:
-        band_folder (str): Path to the folder where the bands and SCL band are stored.
-        history_dates (list): A list of tuples where each tuple has an ID and a list of dates.
-        mask_cloud (bool): Whether to apply cloud filtering (classes 8 and 9).
-        water_mask (bool): Whether to apply water filtering (class 6).
-        temporal_tolerance (int): Tolerance in days to expand the search window for closest tiles.
-        num_bands_per_timestamp (int): Number of bands for each timestamp.
+        band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
+        mask_cloud (bool): Perform cloud masking.
+        water_mask (bool): Perform water masking.
 
     Returns:
-        tuple[list[xr.Dataset | None], CRS | None]:
-        A tuple containing:
-        - A list of xarray Datasets for each group or None if invalid.
-        - A single CRS value if all datasets share the same CRS, otherwise None.
+        (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
+            provided TIFF files and its CRS
     """
-    datasets: list[xr.Dataset | None] = []
-    crs_set = set()
-
-    if not os.path.exists(band_folder):
-        logging.info(f"Folder '{band_folder}' does not exist.")
-        return [None] * len(history_dates), None
-
-    all_files = [
-        os.path.join(band_folder, f)
-        for f in os.listdir(band_folder)
-        if f.endswith(".jp2")
-    ]
-
-    pattern = r"_(\d{8})T"
-    file_dates = []
-    for f in all_files:
-        match = re.search(pattern, f)
-        if match:
-            file_dates.append(pd.to_datetime(match.group(1), format="%Y%m%d"))
-        else:
-            file_dates.append(None)
-
-    file_map = dict(zip(all_files, file_dates))
-
-    for group_id, dates in history_dates:
-        expanded_dates = [
-            (
-                pd.to_datetime(date_str) - timedelta(days=temporal_tolerance),
-                pd.to_datetime(date_str) + timedelta(days=temporal_tolerance),
+    band_paths = []
+    scl_paths = []
+    bands_needed = ["B02", "B03", "B04", "B8A", "B11", "B12"]
+    for granule in band_files["granules"]:
+        for band in bands_needed:
+            pattern = os.path.join(
+                granule, "GRANULE/*", "IMG_DATA/R20m", f"*_{band}_20m.jp2"
             )
-            for date_str in dates
-        ]
+            matching_paths = glob.glob(pattern)
+            band_paths.append(matching_paths[0])
+        pattern = os.path.join(granule, "GRANULE/*", "IMG_DATA/R20m", "*_SCL_20m.jp2")
+        matching_paths = glob.glob(pattern)
+        scl_paths.append(matching_paths[0])
 
-        band_files, scl_band_files = create_band_files(
-            file_map, expanded_dates, dates, num_bands_per_timestamp, group_id
-        )
+    bands_dataset = xr.open_mfdataset(
+        band_paths,
+        concat_dim="band",
+        combine="nested",
+    )
+    scl_data = xr.open_mfdataset(
+        scl_paths,
+        concat_dim="band",
+        combine="nested",
+    ).band_data.values
 
-        if not band_files or not scl_band_files:
-            datasets.append(None)
-            continue
+    if water_mask:
+        bands_dataset = apply_class_mask(
+            bands_dataset, scl_data, [6]
+        )  # Class 6 for water
+    if mask_cloud:
+        bands_dataset = apply_class_mask(
+            bands_dataset, scl_data, [8, 9]
+        )  # Classes 8 and 9 for clouds
 
-        bands_list = []
-        band_crs = None
-
-        for band_file in band_files:
-            if os.path.getsize(band_file) > 0:
-                band_data = rioxarray.open_rasterio(band_file)
-                bands_list.append(band_data)
-                if band_crs is None:
-                    band_crs = band_data.rio.crs
-                crs_set.add(band_data.rio.crs)
-            else:
-                logging.info(f"Skipping empty band file: {band_file}")
-
-        if not bands_list:
-            logging.info(f"Skipping group '{group_id}' - no valid band files found")
-            datasets.append(None)
-            continue
-
-        bands_dataarray = xr.concat(bands_list, dim="band")
-        bands_dataset = bands_dataarray.to_dataset(name="bands")
-
-        scl_data = create_scl_data(scl_band_files)
-
-        # Apply masking
-        if water_mask:
-            bands_dataset = apply_class_mask(
-                bands_dataset, scl_data, [6]
-            )  # Class 6 for water
-        if mask_cloud:
-            bands_dataset = apply_class_mask(
-                bands_dataset, scl_data, [8, 9]
-            )  # Classes 8 and 9 for clouds
-
-        datasets.append(bands_dataset)
-
-    # Ensure all CRS values are the same
-    if len(crs_set) == 1:
-        final_crs = crs_set.pop()
-    else:
-        logging.info(f"CRS mismatch detected: {crs_set}. Returning None for CRS.")
-        final_crs = None
-
-    return datasets, final_crs
+    with rasterio.open(band_paths[0]) as src:
+        crs = src.crs
+    return bands_dataset, crs
 
 
 def apply_class_mask(
@@ -605,85 +378,365 @@ def apply_class_mask(
         xr.Dataset: The masked dataset.
     """
     mask_array = np.isin(scl_data, class_ids).astype(np.uint8)
-    dataset["bands"] = dataset["bands"].where(mask_array == 0)
+    if mask_array.ndim == 3:
+        mask_array = mask_array.any(axis=0)
+    dataset = dataset.where(mask_array == 0)
     return dataset
 
 
-def create_band_files(
-    file_map: dict,
-    expanded_dates: list,
-    dates: list,
-    num_bands_per_timestamp: int,
-    group_id: str,
-) -> Tuple[List[str], List[str]]:
-    """Create band files.
+def process_s2_metadata(metadata: dict, tile_id: str) -> pd.DataFrame:
+    """Processes Sentinel-2 Metadata.
 
-    Create band and SCL files based on expanded date ranges and temporal tolerance for each group.
+    Given Sentinel-2 metadata retrieved from the Copernicus OpenSearch API, this function extracts
+    the relevant fields for each granule found.
 
     Args:
-        file_map (dict): A mapping of file paths to their corresponding datetime objects.
-        expanded_dates (list): A list of tuples containing the start and end date for each
-        timestamp.
-        dates (list): A list of original timestamps (for which bands are being created).
-        num_bands_per_timestamp (int): Number of bands for each timestamp (used for validation).
-        group_id (str): The ID of the group being processed (used for logging and debugging).
+        metadata (dict): Dict containing various metadata about the retrieved Sentinel-2 granules.
+        tile_id (str): ID of the tile used to query the Copernicus OpenSearch API.
 
     Returns:
-        tuple: A tuple containing two lists:
-            - band_files: A list of band file paths.
-            - scl_band_files: A list of SCL band file paths.
+        A pandas dataframe containing the granules and extracted metadata.
     """
-    band_files = [
-        file
-        for file, file_date in file_map.items()
-        if any(start <= file_date <= end for start, end in expanded_dates)
-        and "SCL" not in file
+    granules = [
+        {
+            "uuid": granule["id"],
+            "title": granule["properties"]["title"],
+            "tile_id": granule["properties"]["title"].split("_")[5],
+            "date": granule["properties"]["startDate"],
+            "url": granule["properties"]["services"]["download"]["url"],
+            "size": granule["properties"]["services"]["download"]["size"],
+            "cloud_cover": granule["properties"]["cloudCover"],
+            "thumbnail": granule["properties"]["thumbnail"],
+        }
+        for granule in metadata["features"]
     ]
-    scl_band_files = [
-        file
-        for file, file_date in file_map.items()
-        if any(start <= file_date <= end for start, end in expanded_dates)
-        and "SCL" in file
-    ]
-
-    if len(band_files) % num_bands_per_timestamp != 0:
-        logging.info(
-            f"Unexpected number of band files for group '{group_id}': {len(band_files)}. "
-            f"Skipping group..."
-        )
-        return [], []
-
-    if len(scl_band_files) != len(dates):
-        logging.info(
-            f"Skipping group '{dates[0]}' - missing SCL bands for each timestamp. "
-            f"Expected {len(dates)}, found {len(scl_band_files)}"
-        )
-        return [], []
-
-    band_files.sort()
-    scl_band_files.sort()
-
-    return band_files, scl_band_files
+    granules_df = pd.DataFrame(granules)
+    granules_df = granules_df[granules_df["tile_id"].str.contains(tile_id)]
+    return granules_df
 
 
-def create_scl_data(scl_band_files: List[str]) -> np.ndarray:
-    """Create SCL data.
+def retrieve_s2_metadata(
+    tile_info_df: pd.DataFrame, temporal_tolerance: int, cloud_coverage: int = 10
+) -> dict[str, list[str]]:
+    """Retrieve Sentinel-2 Tiles Metadata.
 
-    Load and stack SCL (Scene Classification Layer) data from a list of file paths.
+    Given a tile_id, start_date and end_date, this function fetches all the Sentinel-2 granules
+    available for this tile_id in this time window.
 
     Args:
-        scl_band_files (List[str]): A list of file paths to SCL band files.
+        tile_info_df (pd.DataFrame): A dataframe containing tile_id, start_date and
+            end_date in each row.
+        temporal_tolerance (int): Number of days before and after which a tile is a valid pick.
+        cloud_coverage (int): Minimum percentage of cloud cover acceptable for a Sentinel-2 tile.
 
     Returns:
-        np.ndarray: A stacked NumPy array of SCL data.
+        A dictionary mapping tile_id to a list of available Sentinel-2 granules.
     """
-    scl_data = []
-    for scl_path in scl_band_files:
-        with rasterio.open(scl_path) as scl_src:
-            scl_data.append(scl_src.read(1))
+    granules_dict = {}
+    for _, (
+        tile_id,
+        start_date,
+        end_date,
+        lon_min,
+        lon_max,
+        lat_min,
+        lat_max,
+    ) in tile_info_df.iterrows():
+        start_date_window = (
+            pd.to_datetime(start_date) - timedelta(days=temporal_tolerance)
+        ).strftime("%Y-%m-%d")
+        end_date_window = (
+            pd.to_datetime(end_date) + timedelta(days=temporal_tolerance)
+        ).strftime("%Y-%m-%d")
 
-    if not scl_data:
-        logging.info("No SCL files could be loaded. The input file list may be empty.")
-        return np.array([])
+        url = (
+            "https://catalogue.dataspace.copernicus.eu/"
+            f"resto/api/collections/Sentinel2/search.json"
+            f"?productType=S2MSI2A&cloudCover=[0,{cloud_coverage}]"
+            f"&startDate={start_date_window}T00:00:00Z"
+            f"&completionDate={end_date_window}T23:59:59Z"
+            f"&maxRecords=500"
+            f"&box={lon_min},{lat_min},{lon_max},{lat_max}"
+        )
+        response = requests.get(url)
+        if response.status_code == 200:
+            granules_metadata = response.json()
+            granules_dict[tile_id] = process_s2_metadata(granules_metadata, tile_id)
+        else:
+            granules_dict[tile_id] = None
+    return granules_dict
 
-    return np.stack(scl_data, axis=0)
+
+def find_best_tile(
+    tile_queries: dict[str, tuple[str, list[str]]],
+    tile_database: dict[str, pd.DataFrame],
+    temporal_tolerance: int = 5,
+) -> pd.DataFrame:
+    """Find Best Sentinel-2 Tile.
+
+    Sentinel-2 dataset gets updated every 5 days and each tile is marked by the time of
+    observation and size. This makes it difficult to deterministically find tiles for a given
+    observation time. Rather we try to find a tile with observation time closest to our
+    desired time and maximum size which indicates a higher number of valid pixels.
+
+    To do this, we create a database of tiles within a specific timeframe then we search
+    for our desired tile within the database.
+
+    Args:
+        tile_queries (dict[str, tuple[str, list[str]]]): A dict with tile_query as key
+            and a tuple of tile_id and a list  of dates on which the tile needs to be
+            retrieved as value.
+        tile_database (dict[str, list[str]]): A database mapping Sentinel-2 tile_id to a list of
+            available granules within a pre-defined period of time.
+        temporal_tolerance: Number of days that can be tolerated for matching a closest
+            tile in tile_databse.
+
+    Returns:
+        DataFrame containing the tile queries to the tile found.
+    """
+    query_results = []
+    for query_str, (tile_id, dates) in tile_queries.items():
+        if tile_id not in tile_database:
+            query_results.append(
+                {
+                    "tile_queries": query_str,
+                    "s2_tiles": [None] * len(dates),
+                    "thumbnails": [None] * len(dates),
+                    "urls": [None] * len(dates),
+                }
+            )
+            continue
+
+        # Load tile data and query dates
+        tile_entries = tile_database[tile_id]
+        query_dates = pd.to_datetime(dates)
+
+        tile_entries["date"] = pd.to_datetime(tile_entries["date"]).dt.tz_localize(None)
+        s2_tiles, thumbnails, urls = [], [], []
+
+        for query_date in query_dates:
+            # Filter tiles within temporal tolerance
+            filtered_tiles = tile_entries[
+                (
+                    tile_entries["date"]
+                    >= query_date - pd.Timedelta(days=temporal_tolerance)
+                )
+                & (
+                    tile_entries["date"]
+                    <= query_date + pd.Timedelta(days=temporal_tolerance)
+                )
+            ]
+
+            if not filtered_tiles.empty:
+                # Sort tiles by size (descending) and temporal difference (ascending)
+                best_tile = (
+                    filtered_tiles.assign(
+                        temporal_diff=(filtered_tiles["date"] - query_date).abs()
+                    )
+                    .sort_values(by=["size", "temporal_diff"], ascending=[False, True])
+                    .iloc[0]
+                )
+
+                s2_tiles.append(best_tile["title"])
+                thumbnails.append(best_tile["thumbnail"])
+                urls.append(best_tile["url"])
+            else:
+                s2_tiles.append(None)
+                thumbnails.append(None)
+                urls.append(None)
+
+        query_results.append(
+            {
+                "tile_queries": query_str,
+                "s2_tiles": s2_tiles,
+                "thumbnails": thumbnails,
+                "urls": urls,
+            }
+        )
+
+    return pd.DataFrame(query_results)
+
+
+def extract_and_delete_zip_files(parent_dir: str) -> None:
+    """Extract and Delete Zip Files.
+
+    Extracts all ZIP files in the subdirectories of the specified parent directory to their
+    respective parent directories and deletes the ZIP files after extraction.
+
+    Args:
+        parent_dir (str): The path to the parent directory containing subdirectories with ZIP files.
+
+    Returns:
+        None
+    """
+    for root, dirs, files in os.walk(parent_dir):
+        for file in files:
+            if file.endswith(".zip"):
+                zip_path = os.path.join(root, file)
+                extract_to = root
+
+                try:
+                    # Extract the ZIP file
+                    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                        zip_ref.extractall(extract_to)
+                    logging.info(f"Extracted: {zip_path} to {extract_to}")
+
+                    # Delete the ZIP file after extraction
+                    os.remove(zip_path)
+                    logging.info(f"Deleted: {zip_path}")
+
+                except Exception as e:
+                    logging.error(f"Error processing {zip_path}: {e}")
+
+
+def download_tile_data(
+    granules_to_download: pd.DataFrame,
+    output_directory: str,
+    client_id: str | None,
+    username: str | None,
+    password: str | None,
+    max_retries: int = 3,
+) -> None:
+    """Download Sentinel-2 Tiles .
+
+    Processes the provided tile database to filter products by month, creates necessary
+    directories, and initiates parallel downloads if valid products are found.
+
+    Args:
+        tile_database (Dict[str, Any]): A dictionary where keys are tile names and values
+        are data about each tile.
+        output_directory (str): Path to the directory where tiles should be stored.
+        client_id (str | None): The client ID for authentication during the download process.
+        username (str | None): The username for authentication.
+        password (str | None): The password for authentication.
+
+    Returns:
+        None
+    """
+    retries = 0
+    complete = False
+    while retries <= max_retries:
+        download_info_list = [
+            (row["urls"], row["tiles"])
+            for _, row in granules_to_download.iterrows()
+            if not (
+                os.path.exists(os.path.join(output_directory, f"{row['tiles']}.zip"))
+                or os.path.isfile(
+                    os.path.join(output_directory, row["tiles"], "manifest.safe")
+                )
+            )
+        ]
+        if not download_info_list:
+            complete = True
+            break
+        parallel_downloads_s2(
+            client_id,
+            username,
+            password,
+            download_info_list,
+            output_directory,
+            num_workers=4,
+        )
+        for filename in os.listdir(output_directory):
+            file_path = os.path.join(output_directory, filename)
+            if os.path.isfile(file_path) and filename.lower().endswith(".zip"):
+                try:
+                    with zipfile.ZipFile(file_path, "r") as zip_ref:
+                        bad_file = zip_ref.testzip()
+                        if bad_file:
+                            logging.info(f"Deleting {file_path}: Bad ZIP file")
+                            os.remove(file_path)
+                except zipfile.BadZipFile:
+                    logging.info(f"Deleting {file_path}: Corrupted ZIP file")
+                    os.remove(file_path)
+        retries += 1
+    if complete:
+        logging.info("Successfully downloaded all granules")
+    else:
+        logging.warning(
+            f"Couldn't download the following granules after {max_retries} retries:\n{download_info_list}"  # noqa
+        )
+
+
+def add_s2_granules(
+    data: pd.DataFrame,
+    num_steps: int = 3,
+    temporal_step: int = 10,
+    temporal_tolerance: int = 5,
+) -> pd.DataFrame:
+    """Add Sentinel-2 Granules.
+
+    Data contains tile_id and a series of date for which the tile is desired. This
+    function takes the tile_id and the dates and finds the Sentinel-2 granules closest to the
+    desired date with a tolerance of `temporal_tolerance`.
+
+    Args:
+        data (pd.DataFrame): A dataframe containing observations that fall within a
+            dense tile.
+        num_steps (int): Number of temporal steps into the past to fetch.
+        temporal_step (int): Step size (in days) for creating temporal steps.
+        temporal_tolerance (int): Tolerance (in days) for finding closest Sentinel-2 granule.
+
+    Returns:
+        A dataframe containing a list of Sentinel-2 granules. Each granule is a directory
+        containing all the bands.
+    """
+    tiles_info, tile_queries = get_tile_info(
+        data, num_steps=num_steps, temporal_step=temporal_step
+    )
+    tile_queries_str = [
+        f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
+    ]
+    data["tile_queries"] = tile_queries_str
+    tile_database = retrieve_s2_metadata(tiles_info, temporal_tolerance)
+    tile_queries_dict = {k: v for k, v in zip(tile_queries_str, tile_queries)}
+    query_result = find_best_tile(
+        tile_queries=tile_queries_dict,
+        tile_database=tile_database,
+        temporal_tolerance=temporal_tolerance,
+    )
+    data = pd.merge(data, query_result, how="left", on="tile_queries")
+    return data
+
+
+def create_s2_dataset(
+    data_with_tiles: pd.DataFrame, outdir: str
+) -> tuple[dict[str, dict[str, list[str]]], pd.DataFrame]:
+    """Creates Sentinel-2 Dataset.
+
+    A Sentinel-2 dataset is a JSON mapping unique granule ids in the dataset to their respective
+    granule paths. This is required for creating chips for the entire dataset.
+
+    Args:
+        data_with_tiles (pd.DataFrame): A dataframe containing observations that fall
+            within a dense tile. It also has `s2_tiles` column that contains a temporal
+            series of Sentinel-2 granules.
+        outdir (str): Output directory where tiles could be downloaded to.
+
+    Returns:
+        A tuple containing Sentinel-2 dataset and a list of tiles that needs to be downloaded.
+    """
+    data_with_tiles = data_with_tiles.drop_duplicates(subset=["s2_tiles"])
+    data_with_tiles = data_with_tiles[
+        data_with_tiles["s2_tiles"].apply(
+            lambda granule_lst: all(str(item).startswith("S2") for item in granule_lst)
+        )
+    ]
+    assert (
+        not data_with_tiles.empty
+    ), "No observation record with valid Sentinel-2 granules"
+    s2_dataset = {}
+    tiles_to_download = []
+    urls = []
+    for _, row in data_with_tiles.iterrows():
+        s2_dataset[f'{row["date"].strftime("%Y-%m-%d")}_{row["mgrs_tile_id"]}'] = {
+            "granules": [
+                os.path.join(outdir, "s2_tiles", tile) for tile in row["s2_tiles"]
+            ],
+        }
+        tiles_to_download.extend(row["s2_tiles"])
+        urls.extend(row["urls"])
+    granules_to_download = pd.DataFrame(
+        {"tiles": tiles_to_download, "urls": urls}
+    ).drop_duplicates()
+    return s2_dataset, granules_to_download

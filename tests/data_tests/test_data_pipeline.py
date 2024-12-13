@@ -1,3 +1,6 @@
+import os
+import shutil
+
 import geopandas as gpd
 import pandas as pd
 import pytest
@@ -60,6 +63,14 @@ def test_open_mf_tiff_dataset_cloud_mask():
     assert isinstance(crs, CRS)
     assert crs == 32613
     assert result_with_mask["band_data"].shape == (2, 224, 224)
+
+
+@pytest.fixture
+def setup_and_teardown_output_dir():
+    output_dir = "/tmp/test_hls"
+    os.makedirs(output_dir, exist_ok=True)
+    yield
+    shutil.rmtree(output_dir)
 
 
 def test_get_tiles(observation_data):
