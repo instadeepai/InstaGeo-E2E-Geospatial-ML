@@ -137,14 +137,14 @@ class PrithviSeg(nn.Module):
         super().__init__()
         weights_dir = Path.home() / ".instageo" / "prithvi"
         weights_dir.mkdir(parents=True, exist_ok=True)
-        weights_path = weights_dir / "Prithvi_100M.pt"
-        cfg_path = weights_dir / "Prithvi_100M_config.yaml"
+        weights_path = weights_dir / "Prithvi_EO_V1_100M.pt"
+        cfg_path = weights_dir / "config.yaml"
         download_file(
-            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M/resolve/main/Prithvi_100M.pt?download=true",  # noqa
+            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-1.0-100M/resolve/main/Prithvi_EO_V1_100M.pt?download=true",  # noqa
             weights_path,
         )
         download_file(
-            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M/raw/main/Prithvi_100M_config.yaml",  # noqa
+            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M/raw/main/config.yaml",  # noqa
             cfg_path,
         )
         checkpoint = torch.load(weights_path, map_location="cpu")
