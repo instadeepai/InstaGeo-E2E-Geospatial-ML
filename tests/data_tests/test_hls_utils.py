@@ -359,12 +359,13 @@ def test_create_hls_dataset(observation_data):
 
 
 @pytest.mark.auth
-def test_download_hls_tile():
+def test_download_hls_tile(setup_and_teardown_output_dir):
+    outdir = "/tmp/test_hls"
     urls = [
         "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif"  # noqa
     ]
-    parallel_download(urls, outdir="/tmp")
-    out_filename = "/tmp/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif"  # noqa
+    parallel_download(urls, outdir=outdir)
+    out_filename = "/tmp/test_hls/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif"  # noqa
     assert os.path.exists(out_filename)
     src = rasterio.open(out_filename)
     assert isinstance(src.crs, CRS)
