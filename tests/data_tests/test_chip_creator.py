@@ -134,7 +134,10 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
 
 def test_missing_flags_raises_error():
     """Test missing flags."""
-    FLAGS([__file__])
+    FLAGS.dataframe_path = None
+    FLAGS.output_directory = None
+    FLAGS(["test"])
+
     with pytest.raises(app.UsageError) as excinfo:
         check_required_flags()
     assert "Flag --dataframe_path is required" in str(
