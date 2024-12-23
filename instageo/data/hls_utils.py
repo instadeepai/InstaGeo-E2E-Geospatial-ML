@@ -52,7 +52,7 @@ def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
 
 def find_closest_tile(
     tile_queries: dict[str, tuple[str, list[str]]],
-    tile_database: dict[str, list[str]],
+    tile_database: dict[str, tuple[list[str], list[list[str]]]],
     temporal_tolerance: int = 5,
 ) -> pd.DataFrame:
     """Find Closes HLS Tile.
@@ -79,28 +79,30 @@ def find_closest_tile(
     """
     # parse dates only once at the beginning for every tile_id
     parsed_tiles_entries: Any = {}
-    select_parsed_date = lambda item: item[1]
+    select_parsed_date = lambda item: item[2]
     for tile_id in tile_database:
         parsed_tiles_entries[tile_id] = list(
             filter(
                 select_parsed_date,
                 [
-                    (entry, parse_date_from_entry(entry))
-                    for entry in tile_database[tile_id]
+                    (entry, data_links, parse_date_from_entry(entry))
+                    for entry, data_links in zip(*tile_database[tile_id])
                 ],
             )
         )
     del tile_database
 
-    query_results = {}
+    query_results: Any = {}
     for query_str, (tile_id, dates) in tile_queries.items():
         result = []
+        result_data_links = []
         if tile_id in parsed_tiles_entries:
             for date_str in dates:
                 date = pd.to_datetime(date_str)
                 year, day_of_year = date.year, date.day_of_year
                 query_date = datetime(year, 1, 1) + timedelta(days=day_of_year - 1)
                 closest_entry = None
+                closest_entry_data_links = []
                 min_diff = timedelta.max.days
 
                 index = bisect.bisect_left(
@@ -108,29 +110,40 @@ def find_closest_tile(
                 )
 
                 if index > 0:
-                    entry, before_date = parsed_tiles_entries[tile_id][index - 1]
+                    entry, data_links, before_date = parsed_tiles_entries[tile_id][
+                        index - 1
+                    ]
                     diff = abs((before_date - query_date).days)
                     if diff < min_diff:
                         closest_entry = entry
+                        closest_entry_data_links = data_links
                         min_diff = diff
 
                 if index < len(parsed_tiles_entries[tile_id]):
-                    entry, after_date = parsed_tiles_entries[tile_id][index]
+                    entry, data_links, after_date = parsed_tiles_entries[tile_id][index]
                     diff = abs((after_date - query_date).days)
                     if diff < min_diff:
                         closest_entry = entry
+                        closest_entry_data_links = data_links
                         min_diff = diff
 
                 result.append(closest_entry if min_diff <= temporal_tolerance else None)
+                result_data_links.append(
+                    closest_entry_data_links if min_diff <= temporal_tolerance else None
+                )
 
-        query_results[query_str] = result
-    query_results = pd.DataFrame(
-        {"tile_queries": query_results.keys(), "hls_tiles": query_results.values()}
+        query_results[query_str] = result, result_data_links
+
+    query_results = pd.DataFrame.from_dict(
+        query_results, orient="index", columns=["hls_tiles", "data_links"]
     )
+    query_results.index.name = "tile_queries"
     return query_results
 
 
-def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
+def retrieve_hls_metadata(
+    tile_info_df: pd.DataFrame,
+) -> dict[str, tuple[list[str], list[list[str]]]]:
     """Retrieve HLS Tiles Metadata.
 
     Given a tile_id, start_date and end_date, this function fetches all the HLS granules
@@ -172,7 +185,7 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
         else:
             return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
 
-    granules_dict = {}
+    granules_dict: Any = {}
     for _, (
         tile_id,
         start_date,
@@ -187,11 +200,15 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
             bounding_box=(_make_valid_bbox(lon_min, lat_min, lon_max, lat_max)),
             temporal=(f"{start_date}T00:00:00", f"{end_date}T23:59:59"),
         )
-        granules = pd.json_normalize(results)
+        granules = pd.json_normalize(
+            [result | {"data_links": result.data_links()} for result in results]
+        )
         assert not granules.empty, "No granules found"
         granules = granules[granules["meta.native-id"].str.contains(tile_id)]
-        granules = list(granules["meta.native-id"])
-        granules_dict[tile_id] = granules
+        granules, data_links = list(granules["meta.native-id"]), list(
+            granules["data_links"]
+        )
+        granules_dict[tile_id] = granules, data_links
     return granules_dict
 
 
