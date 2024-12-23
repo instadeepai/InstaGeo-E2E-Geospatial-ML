@@ -330,7 +330,7 @@ def get_chip_coords_2(
     cols, rows = np.floor(
         ~tile.rio.transform() * (df.geometry.x.values, df.geometry.y.values)
     ).astype(int)
-    return np.unique(np.stack((rows // chip_size, cols // chip_size), axis=-1), axis=0)
+    return np.unique(np.stack((cols // chip_size, rows // chip_size), axis=-1), axis=0)
 
 
 def create_and_save_chips_with_seg_maps_2(
