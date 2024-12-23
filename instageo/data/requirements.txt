@@ -1,2 +1,2 @@
 mgrs==1.4.6
-earthaccess==0.8.2
+earthaccess==0.12.0
