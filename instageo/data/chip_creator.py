@@ -19,7 +19,6 @@
 
 """InstaGeo Chip Creator Module."""
 
-import bisect
 import json
 import os
 from itertools import chain
@@ -31,23 +30,24 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
-import rasterio.features
-import rasterio.transform
-import rasterio.windows
 import xarray as xr
 from absl import app, flags, logging
-from shapely.geometry import Point
 from tqdm import tqdm
 
 import instageo.data.hls_utils as hls_utils
-from instageo.data.geo_utils import apply_mask, open_hls_cogs, open_mf_tiff_dataset
+from instageo.data.geo_utils import (
+    MASK_DECODING_POS,
+    apply_mask,
+    open_hls_cogs,
+    open_mf_tiff_dataset,
+)
 
 logging.set_verbosity(logging.INFO)
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("dataframe_path", None, "Path to the DataFrame CSV file.")
-flags.DEFINE_integer("chip_size", 224, "Size of each chip.")
+flags.DEFINE_integer("chip_size", 256, "Size of each chip.")
 flags.DEFINE_integer("src_crs", 4326, "CRS of the geo-coordinates in `dataframe_path`")
 flags.DEFINE_string(
     "output_directory",
@@ -107,6 +107,36 @@ flags.DEFINE_integer(
     if only interested in the pixel in which the observation falls.""",
     lower_bound=0,
 )
+flags.DEFINE_enum(
+    "processing_method",
+    "cog",
+    ["cog", "download", "download-only"],
+    """Method to use to process the tiles:
+    - "cog" corresponds to creating the chips by utilizing the Cloud Optimized GeoTIFFs.
+    - "download" corresponds to downloading entire HLS tiles to be used for creating
+    the chips.
+    - "download-only" corresponds to a simple download of the tiles without further
+    processing.""",
+)
+flags.DEFINE_list(
+    "mask_types",
+    [],
+    "List of different types of masking to apply",
+)
+flags.register_validator(
+    "mask_types",
+    lambda val_list: all(v in MASK_DECODING_POS.keys() for v in val_list),
+    message=f"Valid values are {list(MASK_DECODING_POS.keys())}",
+)
+flags.DEFINE_enum(
+    "masking_strategy",
+    "each",
+    ["each", "any"],
+    """Method to use when applying masking:
+    - "each" for timestep-wise masking.
+    - "any" to exclude pixels if the mask is present for at least one timestep.
+    """,
+)
 
 
 def check_required_flags() -> None:
@@ -119,7 +149,7 @@ def check_required_flags() -> None:
 
 def create_segmentation_map(
     chip: Any, df: pd.DataFrame, no_data_value: int, window_size: int
-) -> np.ndarray:
+) -> xr.DataArray:
     """Create a segmentation map for the chip using the DataFrame.
 
     Args:
@@ -131,53 +161,7 @@ def create_segmentation_map(
         window_size (int): Window size to use around the observation pixel.
 
     Returns:
-        np.ndarray: The created segmentation map as a NumPy array.
-    """
-    seg_map = chip.isel(band=0).assign(
-        {
-            "band_data": (
-                ("y", "x"),
-                no_data_value * np.ones((chip.sizes["x"], chip.sizes["y"])),
-            )
-        }
-    )
-    df = df[
-        (chip["x"].min().item() <= df["geometry"].x)
-        & (df["geometry"].x <= chip["x"].max().item())
-        & (chip["y"].min().item() <= df["geometry"].y)
-        & (df["geometry"].y <= chip["y"].max().item())
-    ]
-    cols, rows = np.floor(
-        ~seg_map.rio.transform() * (df.geometry.x.values, df.geometry.y.values)
-    ).astype(int)
-    offsets = np.arange(-window_size, window_size + 1)
-    offset_rows, offset_cols = np.meshgrid(offsets, offsets)
-    window_rows = np.clip(
-        rows[:, np.newaxis, np.newaxis] + offset_rows, 0, chip.sizes["x"] - 1
-    )
-    window_cols = np.clip(
-        cols[:, np.newaxis, np.newaxis] + offset_cols, 0, chip.sizes["y"] - 1
-    )
-    window_labels = np.repeat(df.label.values, offset_rows.ravel().shape)
-    seg_map.band_data.values[window_rows.ravel(), window_cols.ravel()] = window_labels
-    return seg_map.band_data.squeeze()
-
-
-def create_segmentation_map_2(
-    chip: Any, df: pd.DataFrame, no_data_value: int, window_size: int
-) -> np.ndarray:
-    """Create a segmentation map for the chip using the DataFrame.
-
-    Args:
-        chip (Any): The chip (subset of the original data) for which the segmentation
-            map is being created.
-        df (pd.DataFrame): DataFrame containing the data to be used in the segmentation
-            map.
-        no_data_value (int): Value to be used for pixels with no data.
-        window_size (int): Window size to use around the observation pixel.
-
-    Returns:
-        np.ndarray: The created segmentation map as a NumPy array.
+         xr.DataArray: The created segmentation map as an xarray DataArray.
     """
     seg_map = xr.full_like(chip.isel(band=0), fill_value=no_data_value, dtype=np.int16)
     df = df[
@@ -204,118 +188,11 @@ def create_segmentation_map_2(
 
 def get_chip_coords(
     df: gpd.GeoDataFrame, tile: xr.DataArray, chip_size: int
-) -> list[tuple[int, int]]:
+) -> np.array:
     """Get Chip Coordinates.
 
     Given a list of x,y coordinates tuples of a point and an xarray dataarray, this
-    function returns the corresponding x,y indices of the grid where each point will fall
-    when the DataArray is gridded such that each grid has size `chip_size`
-    indices where it will fall.
-
-    Args:
-        gdf (gpd.GeoDataFrame): GeoPandas dataframe containing the point.
-        tile (xr.DataArray): Tile DataArray.
-        chip_size (int): Size of each chip.
-
-    Returns:
-        List of chip indices.
-    """
-    coords = []
-    for _, row in df.iterrows():
-        x = bisect.bisect_left(tile["x"].values, row["geometry"].x)
-        y = bisect.bisect_left(tile["y"].values[::-1], row["geometry"].y)
-        y = tile.sizes["y"] - y - 1
-        x = int(x // chip_size)
-        y = int(y // chip_size)
-        coords.append((x, y))
-    return coords
-
-
-def create_and_save_chips_with_seg_maps(
-    hls_tile_dict: dict[str, dict[str, str]],
-    df: pd.DataFrame,
-    chip_size: int,
-    output_directory: str,
-    no_data_value: int,
-    src_crs: int,
-    mask_cloud: bool,
-    window_size: int,
-) -> tuple[list[str], list[str | None]]:
-    """Chip Creator.
-
-    Create chips and corresponding segmentation maps from a HLS tile and save them to
-    an output directory.
-
-    Args:
-        hls_tile_dict (Dict): A dict mapping band names to HLS tile filepath.
-        df (pd.DataFrame): DataFrame containing the data for segmentation maps.
-        chip_size (int): Size of each chip.
-        output_directory (str): Directory where the chips and segmentation maps will be
-            saved.
-        no_data_value (int): Value to use for no data areas in the segmentation maps.
-        src_crs (int): CRS of points in `df`
-        mask_cloud (bool): Perform cloud masking if True.
-        window_size (int): Window size to use around the observation pixel.
-
-    Returns:
-        A tuple containing the lists of created chips and segmentation maps.
-    """
-    ds, crs = open_mf_tiff_dataset(hls_tile_dict, mask_cloud)
-    df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
-    df.set_crs(epsg=src_crs, inplace=True)
-    df = df.to_crs(crs=crs)
-
-    df = df[
-        (ds["x"].min().item() <= df["geometry"].x)
-        & (df["geometry"].x <= ds["x"].max().item())
-        & (ds["y"].min().item() <= df["geometry"].y)
-        & (df["geometry"].y <= ds["y"].max().item())
-    ]
-    os.makedirs(output_directory, exist_ok=True)
-    tile_name_splits = hls_tile_dict["tiles"]["B02_0"].split(".")
-    tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
-    date_id = df.iloc[0]["date"].strftime("%Y%m%d")
-    chips = []
-    seg_maps: list[str | None] = []
-    n_chips_x = ds.sizes["x"] // chip_size
-    n_chips_y = ds.sizes["y"] // chip_size
-    chip_coords = list(set(get_chip_coords(df, ds, chip_size)))
-    for x, y in chip_coords:
-        if (x >= n_chips_x) or (y >= n_chips_y):
-            continue
-        chip_id = f"{date_id}_{tile_id}_{x}_{y}"
-        chip_name = f"chip_{chip_id}.tif"
-        seg_map_name = f"seg_map_{chip_id}.tif"
-
-        chip_filename = os.path.join(output_directory, "chips", chip_name)
-        seg_map_filename = os.path.join(output_directory, "seg_maps", seg_map_name)
-        if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
-            continue
-
-        chip = ds.isel(
-            x=slice(x * chip_size, (x + 1) * chip_size),
-            y=slice(y * chip_size, (y + 1) * chip_size),
-        )
-        if chip.count().values == 0:
-            continue
-        seg_map = create_segmentation_map(chip, df, no_data_value, window_size)
-        if seg_map.where(seg_map != no_data_value).count().values == 0:
-            continue
-        seg_maps.append(seg_map_name)
-        seg_map.rio.to_raster(seg_map_filename)
-        chip = chip.fillna(no_data_value)
-        chips.append(chip_name)
-        chip.band_data.rio.to_raster(chip_filename)
-    return chips, seg_maps
-
-
-def get_chip_coords_2(
-    df: gpd.GeoDataFrame, tile: xr.DataArray, chip_size: int
-) -> list[tuple[int, int]]:
-    """Get Chip Coordinates.
-
-    Given a list of x,y coordinates tuples of a point and an xarray dataarray, this
-    function returns the corresponding x,y indices of the grid where each point will fall
+    function returns the unique corresponding x,y indices of the grid where each point will fall
     when the DataArray is gridded such that each grid has size `chip_size`
     indices where it will fall.
 
@@ -333,14 +210,16 @@ def get_chip_coords_2(
     return np.unique(np.stack((cols // chip_size, rows // chip_size), axis=-1), axis=0)
 
 
-def create_and_save_chips_with_seg_maps_2(
+def create_and_save_chips_with_seg_maps(
+    processing_method: str,
     hls_tile_dict: dict[str, Any],
     df: pd.DataFrame,
     chip_size: int,
     output_directory: str,
     no_data_value: int,
     src_crs: int,
-    mask_cloud: bool,
+    mask_types: list[str],
+    masking_strategy: str,
     window_size: int,
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
@@ -349,6 +228,8 @@ def create_and_save_chips_with_seg_maps_2(
     an output directory.
 
     Args:
+        processing_method (str): Processing method to use to create the chips and
+        segmentation maps.
         hls_tile_dict (Dict): A dict mapping band names to HLS tile filepath.
         df (pd.DataFrame): DataFrame containing the data for segmentation maps.
         chip_size (int): Size of each chip.
@@ -356,13 +237,21 @@ def create_and_save_chips_with_seg_maps_2(
             saved.
         no_data_value (int): Value to use for no data areas in the segmentation maps.
         src_crs (int): CRS of points in `df`
-        mask_cloud (bool): Perform cloud masking if True.
+        mask_types (list[str]): Types of masking to perform.
+        masking_strategy (str): Masking strategy to apply ("each" for timestep-wise masking,
+        and "any" to exclude pixels if the mask is present for at least one timestep. The
+        behavior is the same if the chip is extracted for one timestep.)
         window_size (int): Window size to use around the observation pixel.
 
     Returns:
         A tuple containing the lists of created chips and segmentation maps.
     """
-    dsb, dsm, crs = open_hls_cogs(hls_tile_dict, mask_cloud)
+    load_masks = True if mask_types else False
+    dsb, dsm, crs = (
+        open_hls_cogs(hls_tile_dict, load_masks=load_masks)
+        if processing_method == "cog"
+        else open_mf_tiff_dataset(hls_tile_dict, load_masks=load_masks)
+    )
     df = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(x=df.x, y=df.y))
     df.set_crs(epsg=src_crs, inplace=True)
     df = df.to_crs(crs=crs)
@@ -381,8 +270,7 @@ def create_and_save_chips_with_seg_maps_2(
 
     n_chips_x = dsb.sizes["x"] // chip_size
     n_chips_y = dsb.sizes["y"] // chip_size
-    # chip_coords = list(set(get_chip_coords(df, dsb, chip_size)))
-    chip_coords = get_chip_coords_2(df, dsb, chip_size)
+    chip_coords = get_chip_coords(df, dsb, chip_size)
     for x, y in chip_coords:
         # TODO: handle potential partially out of bound chips
         if (x >= n_chips_x) or (y >= n_chips_y):
@@ -395,26 +283,27 @@ def create_and_save_chips_with_seg_maps_2(
         seg_map_filename = os.path.join(output_directory, "seg_maps", seg_map_name)
         if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
             continue
-
         chip = dsb.isel(
             x=slice(x * chip_size, (x + 1) * chip_size),
             y=slice(y * chip_size, (y + 1) * chip_size),
         ).compute()
-        if dsm:
+        chip = chip if processing_method == "cog" else chip.band_data
+        if dsm is not None:
             chip_mask = dsm.isel(
                 x=slice(x * chip_size, (x + 1) * chip_size),
                 y=slice(y * chip_size, (y + 1) * chip_size),
             ).compute()
+            chip_mask = chip_mask if processing_method == "cog" else chip_mask.band_data
             chip = apply_mask(
                 chip=chip,
                 mask=chip_mask,
                 no_data_value=no_data_value,
-                masking_strategy="each",
-                decoding_positions=[1],
+                mask_types=mask_types,
+                masking_strategy=masking_strategy,
             )
         if chip.count().values == 0:
             continue
-        seg_map = create_segmentation_map_2(chip, df, no_data_value, window_size)
+        seg_map = create_segmentation_map(chip, df, no_data_value, window_size)
         if seg_map.where(seg_map != no_data_value).count().values == 0:
             continue
         seg_maps.append(seg_map_name)
@@ -577,13 +466,13 @@ def main(argv: Any) -> None:
             os.path.join(FLAGS.output_directory, "granules_to_download.csv")
         )["tiles"].tolist()
     os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
-    logging.info("Downloading HLS Tiles")
-    # hls_utils.parallel_download(
-    #     granules_to_download,
-    #     outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
-    # )
-    # return
-    if FLAGS.download_only:
+    if FLAGS.processing_method in ["download", "download-only"]:
+        logging.info("Downloading HLS Tiles")
+        hls_utils.parallel_download(
+            granules_to_download,
+            outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
+        )
+    if FLAGS.processing_method == "download-only":
         return
     logging.info("Creating Chips and Segmentation Maps")
     all_chips = []
@@ -601,14 +490,16 @@ def main(argv: Any) -> None:
                 & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
             ]
             try:
-                chips, seg_maps = create_and_save_chips_with_seg_maps_2(
+                chips, seg_maps = create_and_save_chips_with_seg_maps(
+                    FLAGS.processing_method,
                     hls_tile_dict,
                     obsv_data,
                     chip_size=FLAGS.chip_size,
                     output_directory=FLAGS.output_directory,
                     no_data_value=FLAGS.no_data_value,
                     src_crs=FLAGS.src_crs,
-                    mask_cloud=FLAGS.mask_cloud,
+                    mask_types=FLAGS.mask_types,
+                    masking_strategy=FLAGS.masking_strategy,
                     window_size=FLAGS.window_size,
                 )
                 all_chips.extend(chips)
