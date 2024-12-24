@@ -171,7 +171,7 @@ def apply_mask(
         xr.DataArray: An array representing a chip with the relevant pixels being masked.
     """
     for mask_type in mask_types:
-        pos = MASK_DECODING_POS.get(mask_type)
+        pos = MASK_DECODING_POS.get(mask_type, None)
         if pos:
             mask = decode_fmask_value(mask, pos)
             if masking_strategy == "each":

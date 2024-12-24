@@ -41,6 +41,7 @@ from instageo.data.geo_utils import (
     open_hls_cogs,
     open_mf_tiff_dataset,
 )
+from instageo.data.settings import GDALOptions
 
 logging.set_verbosity(logging.INFO)
 
@@ -393,19 +394,7 @@ def setup() -> None:
     Configures relevant GDAL options for reading COGs
     """
     earthaccess.login(persist=True)
-
-    GDAL_OPTIONS = dict(
-        CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",
-        GDAL_HTTP_AUTH="BEARER",
-        GDAL_HTTP_BEARER=earthaccess.get_edl_token().get("access_token"),
-        GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
-        GDAL_HTTP_MAX_RETRY="10",
-        GDAL_HTTP_RETRY_DELAY="0.5",
-        GDAL_CACHEMAX=1024,
-        GDAL_SWATH_SIZE=16777216,  # 16 MB
-        CPL_VSIL_CURL_CACHE_SIZE=67108864,  # 64 MB
-    )
-    env = rasterio.Env(**GDAL_OPTIONS)
+    env = rasterio.Env(**GDALOptions().model_dump())
     env.__enter__()
 
 
