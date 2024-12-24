@@ -28,6 +28,7 @@ def test_create_chips(setup_and_teardown_output_dir):
     os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
     os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
     chips, labels = create_and_save_chips_with_seg_maps(
+        "download",
         {
             "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
             "fmasks": {"Fmask_0": fmask_path},
@@ -37,7 +38,8 @@ def test_create_chips(setup_and_teardown_output_dir):
         output_directory,
         no_data_value,
         src_crs=4326,
-        mask_cloud=False,
+        mask_types=["water"],
+        masking_strategy="any",
         window_size=0,
     )
     num_chips = len(chips)
@@ -87,13 +89,15 @@ def test_seg_map_validity():
         os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
         os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
         _, labels = create_and_save_chips_with_seg_maps(
+            processing_method="download",
             hls_tile_dict=hls_tile_dict,
             df=obsv,
             chip_size=chip_size,
             output_directory=output_directory,
             no_data_value=no_data_value,
             src_crs=4326,
-            mask_cloud=False,
+            mask_types=["water"],
+            masking_strategy="any",
             window_size=window_size,
         )
 

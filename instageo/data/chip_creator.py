@@ -92,10 +92,6 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
-flags.DEFINE_boolean(
-    "download_only", False, "Downloads HLS dataset without creating chips."
-)
-flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
 flags.DEFINE_integer(
     "window_size",
     0,

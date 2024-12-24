@@ -47,8 +47,8 @@ def open_mf_tiff_dataset(
         load_masks (bool): Whether or not to load the masks files.
 
     Returns:
-        (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
-            provided TIFF files, (optionally) the masks and its CRS
+        (xr.Dataset, xr.Dataset | None, CRS): A tuple of xarray Dataset combining data from all the
+            provided TIFF files, (optionally) the masks, and the CRS
     """
     band_paths = list(band_files["tiles"].values())
     bands_dataset = xr.open_mfdataset(
@@ -154,7 +154,7 @@ def apply_mask(
     mask: xr.DataArray,
     no_data_value: int,
     masking_strategy: str = "each",
-    mask_types: list[str] = ["cloud", "water"],
+    mask_types: list[str] = list(MASK_DECODING_POS.keys()),
 ) -> xr.DataArray:
     """Apply masking to a chip.
 
@@ -173,14 +173,16 @@ def apply_mask(
     for mask_type in mask_types:
         pos = MASK_DECODING_POS.get(mask_type, None)
         if pos:
-            mask = decode_fmask_value(mask, pos)
+            decoded_mask = decode_fmask_value(mask, pos)
             if masking_strategy == "each":
                 # repeat across timesteps so that, each mask is applied to its
                 # corresponding timestep
-                mask = mask.values.repeat(chip.shape[0] // mask.shape[0], axis=0)
+                decoded_mask = decoded_mask.values.repeat(
+                    chip.shape[0] // mask.shape[0], axis=0
+                )
             elif masking_strategy == "any":
                 # collapse the mask to exclude a pixel if its corresponding mask value
                 # for at least one timestep is 1
-                mask = mask.values.any(axis=0)
-            chip = chip.where(mask == 0, other=no_data_value)
+                decoded_mask = decoded_mask.values.any(axis=0)
+            chip = chip.where(decoded_mask == 0, other=no_data_value)
     return chip
