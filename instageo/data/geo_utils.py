@@ -33,47 +33,49 @@ from rasterio.crs import CRS
 BLOCKSIZE_X = 256
 BLOCKSIZE_Y = 256
 
+# Masks decoding positions
+MASK_DECODING_POS = {"cloud": 1, "water": 5}
+
 
 def open_mf_tiff_dataset(
-    band_files: dict[str, dict[str, str]], mask_cloud: bool
-) -> tuple[xr.Dataset, CRS]:
+    band_files: dict[str, Any], load_masks: bool
+) -> tuple[xr.Dataset, xr.Dataset | None, CRS]:
     """Open multiple TIFF files as an xarray Dataset.
 
     Args:
         band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
-        mask_cloud (bool): Perform cloud masking.
+        load_masks (bool): Whether or not to load the masks files.
 
     Returns:
         (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
-            provided TIFF files and its CRS
+            provided TIFF files, (optionally) the masks and its CRS
     """
     band_paths = list(band_files["tiles"].values())
     bands_dataset = xr.open_mfdataset(
         band_paths,
         concat_dim="band",
         combine="nested",
+        mask_and_scale=False,  # Scaling will be applied manually
     )
+    bands_dataset.band_data.attrs["scale_factor"] = 1
     mask_paths = list(band_files["fmasks"].values())
-    mask_dataset = xr.open_mfdataset(
-        mask_paths,
-        concat_dim="band",
-        combine="nested",
+    mask_dataset = (
+        xr.open_mfdataset(
+            mask_paths,
+            concat_dim="band",
+            combine="nested",
+        )
+        if load_masks
+        else None
     )
-    water_mask = decode_fmask_value(mask_dataset, 5)
-    water_mask = water_mask.band_data.values.any(axis=0).astype(int)
-    bands_dataset = bands_dataset.where(water_mask == 0)
-    if mask_cloud:
-        cloud_mask = decode_fmask_value(mask_dataset, 1)
-        cloud_mask = cloud_mask.band_data.values.any(axis=0).astype(int)
-        bands_dataset = bands_dataset.where(cloud_mask == 0)
     with rasterio.open(band_paths[0]) as src:
         crs = src.crs
-    return bands_dataset, crs
+    return bands_dataset, mask_dataset, crs
 
 
 @dask.delayed
 def load_cog(url: str) -> xr.DataArray:
-    """Load a COG file as an xarray Dataset.
+    """Load a COG file as an xarray DataArray.
 
     Args:
         url (str): COG url.
@@ -82,14 +84,17 @@ def load_cog(url: str) -> xr.DataArray:
         xr.DataArray: An array exposing the data loaded from the COG
     """
     return rxr.open_rasterio(
-        url, chunks=dict(band=1, x=BLOCKSIZE_X, y=BLOCKSIZE_Y), lock=False
+        url,
+        chunks=dict(band=1, x=BLOCKSIZE_X, y=BLOCKSIZE_Y),
+        lock=False,
+        mask_and_scale=False,  # Scaling will be applied manually
     )
 
 
 def open_hls_cogs(
     bands_infos: dict[str, Any], load_masks: bool
-) -> tuple[xr.Dataset, xr.Dataset | None, str]:
-    """Open multiple COGs as an xarray Dataset.
+) -> tuple[xr.DataArray, xr.DataArray | None, str]:
+    """Open multiple COGs as an xarray DataArray.
 
     Args:
         bands_infos (dict[str, Any]): A dictionary containing data links for
@@ -97,8 +102,8 @@ def open_hls_cogs(
         load_masks (bool): Whether or not to load the masks COGs.
 
     Returns:
-        (xr.Dataset, xr.Dataset | None, str): A tuple of xarray Dataset combining data from all the
-            COGs bands, (optionally) the COGs masks and the CRS used
+        (xr.DataArray, xr.DataArray | None, str): A tuple of xarray Dataset combining
+        data from all the COGs bands, (optionally) the COGs masks and the CRS used
     """
     cogs_urls = bands_infos["data_links"]
     # For each timestep, this will contain a list of links for the different bands
@@ -110,13 +115,11 @@ def open_hls_cogs(
     all_timesteps_bands = xr.concat(
         dask.compute(*[load_cog(link) for link in bands_links]), dim="band"
     )
+    all_timesteps_bands.attrs["scale_factor"] = 1
 
     # only read masks if necessary
     all_timesteps_masks = (
-        xr.concat(
-            dask.compute(*[load_cog(link) for link in masks_links]),
-            dim="band",
-        )
+        xr.concat(dask.compute(*[load_cog(link) for link in masks_links]), dim="band")
         if load_masks
         else None
     )
@@ -151,7 +154,7 @@ def apply_mask(
     mask: xr.DataArray,
     no_data_value: int,
     masking_strategy: str = "each",
-    decoding_positions: list[int] = [1, 5],
+    mask_types: list[str] = ["cloud", "water"],
 ) -> xr.DataArray:
     """Apply masking to a chip.
 
@@ -162,21 +165,22 @@ def apply_mask(
         masking_strategy (str): Masking strategy to apply ("each" for timestep-wise masking,
         and "any" to exclude pixels if the mask is present for at least one timestep. The
         behavior is the same if the chip is extracted for one timestep.)
-        decoding_positions (list[int]): Positions where to decode the masks before masking
-        out relevant pixels, 1 for cloud masking and 5 for water masking.
+        mask_types (list[str]): Mask types to apply.
 
     Returns:
         xr.DataArray: An array representing a chip with the relevant pixels being masked.
     """
-    for pos in decoding_positions:
-        mask = decode_fmask_value(mask, pos)
-        if masking_strategy == "each":
-            # repeat across timesteps so that, each mask is applied to its
-            # corresponding timestep
-            mask = mask.values.repeat(chip.shape[0] // mask.shape[0], axis=0)
-        elif masking_strategy == "any":
-            # collapse the mask to exclude a pixel if its corresponding mask value
-            # for at least one timestep is 1
-            mask = mask.values.any(axis=0)
-        chip = chip.where(mask == 0, other=no_data_value)
+    for mask_type in mask_types:
+        pos = MASK_DECODING_POS.get(mask_type)
+        if pos:
+            mask = decode_fmask_value(mask, pos)
+            if masking_strategy == "each":
+                # repeat across timesteps so that, each mask is applied to its
+                # corresponding timestep
+                mask = mask.values.repeat(chip.shape[0] // mask.shape[0], axis=0)
+            elif masking_strategy == "any":
+                # collapse the mask to exclude a pixel if its corresponding mask value
+                # for at least one timestep is 1
+                mask = mask.values.any(axis=0)
+            chip = chip.where(mask == 0, other=no_data_value)
     return chip
