@@ -229,9 +229,9 @@ def download_with_wget(access_token: str, download_url: str, output_file: str) -
                 print(line, end="")
         process.wait()
         if process.returncode == 0:
-            print(f"Download completed: {output_file}")
+            logging.info(f"Download completed: {output_file}")
         else:
-            print(f"Download failed with exit code {process.returncode}")
+            logging.info(f"Download failed with exit code {process.returncode}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Failed to download: {e}")
 
