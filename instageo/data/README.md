@@ -24,7 +24,7 @@ Sentinel-2, part of [ESA](https://www.esa.int/)'s [Copernicus Program](https://w
 - For each record, create a corresponding temporal series of granules
 - Create a set of all granules
 - Download the required bands from each granule
-- Create and save chips and segementation maps
+- Create and save chips and segmentation maps
 
 Chip creator is particularly useful for geospatial image segmentation where large satellite images are segmented into smaller chips for training geospatial models (such as [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M)) using image segmentation objective.
 
@@ -94,7 +94,7 @@ To run the module, use the following command in the terminal:
 python chip_creator.py --dataframe_path="<path_to_dataframe_csv>" --chip_size=<chip_size> --output_directory="<output_directory>" --no_data_value=<no_data_value> --src_crs=<source_crs>
 ```
 
-Replace `<hls_tile_path>`, `<path_to_dataframe_csv>`, `<chip_size>`, `<output_directory>`, `<no_data_value>` `<source_crs>` and `<destination_crs>`  with appropriate values.
+Replace `<hls_tile_path>`, `<path_to_dataframe_csv>`, `<chip_size>`, `<output_directory>`, `<no_data_value>` `<source_crs>` and `<destination_crs>` with appropriate values.
 
 ### Example with HLS
 ```bash

@@ -42,6 +42,7 @@ def create_and_save_chips_with_seg_maps(
     src_crs: int,
     mask_cloud: bool,
     water_mask: bool,
+    window_size: int,
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -61,6 +62,7 @@ def create_and_save_chips_with_seg_maps(
         src_crs (int): CRS of points in `df`
         mask_cloud (bool): Perform cloud masking if True.
         water_mask (bool): Perform water masking if True.
+        window_size (int): Window size to use around the observation pixel.
 
     Returns:
         A tuple containing the lists of created chips and segmentation maps.
@@ -101,7 +103,7 @@ def create_and_save_chips_with_seg_maps(
         )
         if chip.count().values == 0:
             continue
-        seg_map = create_segmentation_map(chip, df, no_data_value)
+        seg_map = create_segmentation_map(chip, df, no_data_value, window_size)
         if seg_map.where(seg_map != -1).count().values == 0:
             continue
         seg_maps.append(seg_map_name)
@@ -119,7 +121,7 @@ def get_tile_info(
 
     Retrieves a summary of all tiles required for a given dataset. The summary contains
     the desired start and end date for each tile. Also retrieves a list of queries
-    that can be used to retieve the tiles for each observation in `data`.
+    that can be used to retrieve the tiles for each observation in `data`.
 
     Args:
         data (pd.DataFrame): A dataframe containing observation records.
@@ -193,6 +195,7 @@ def create_segmentation_map(
     chip: Any,
     df: pd.DataFrame,
     no_data_value: int,
+    window_size: int,
 ) -> np.ndarray:
     """Create a segmentation map for the chip using the DataFrame.
 
@@ -202,6 +205,7 @@ def create_segmentation_map(
         df (pd.DataFrame): DataFrame containing the data to be used in the segmentation
             map.
         no_data_value (int): Value to be used for pixels with no data.
+        window_size (int): Window size to use around the observation pixel.
 
     Returns:
         np.ndarray: The created segmentation map as a NumPy array.
@@ -220,14 +224,19 @@ def create_segmentation_map(
         & (chip["y"].min().item() <= df["geometry"].y)
         & (df["geometry"].y <= chip["y"].max().item())
     ]
-    # Use a tolerance of 30 meters
-    for _, row in df.iterrows():
-        nearest_index = seg_map.sel(
-            x=row["geometry"].x, y=row["geometry"].y, method="nearest", tolerance=30
-        )
-        seg_map.loc[
-            dict(x=nearest_index["x"].values.item(), y=nearest_index["y"].values.item())
-        ] = row["label"]
+    cols, rows = np.floor(
+        ~seg_map.rio.transform() * (df.geometry.x.values, df.geometry.y.values)
+    ).astype(int)
+    offsets = np.arange(-window_size, window_size + 1)
+    offset_rows, offset_cols = np.meshgrid(offsets, offsets)
+    window_rows = np.clip(
+        rows[:, np.newaxis, np.newaxis] + offset_rows, 0, chip.sizes["x"] - 1
+    )
+    window_cols = np.clip(
+        cols[:, np.newaxis, np.newaxis] + offset_cols, 0, chip.sizes["y"] - 1
+    )
+    window_labels = np.repeat(df.label.values, offset_rows.ravel().shape)
+    seg_map.band_data.values[window_rows.ravel(), window_cols.ravel()] = window_labels
     return seg_map.band_data.squeeze()
 
 

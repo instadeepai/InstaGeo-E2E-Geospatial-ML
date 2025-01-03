@@ -25,6 +25,7 @@ from typing import Any
 
 import pandas as pd
 import rasterio
+import rasterio.features
 from absl import app, flags, logging
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -49,9 +50,37 @@ flags.DEFINE_string(
 flags.DEFINE_integer(
     "no_data_value", -1, "Value to use for no data areas in the segmentation maps."
 )
-flags.DEFINE_integer("min_count", 100, "Minimum observation counts per tile")
-flags.DEFINE_integer("num_steps", 3, "Number of temporal steps")
-flags.DEFINE_integer("temporal_step", 30, "Temporal step size.")
+flags.DEFINE_integer(
+    "min_count", 100, "Minimum observation counts per tile", lower_bound=1
+)
+flags.DEFINE_boolean(
+    "shift_to_month_start",
+    True,
+    "Indicates whether or not to shift the observation date to the beginning of the month",
+)
+flags.DEFINE_boolean(
+    "is_time_series_task",
+    True,
+    """Indicates whether or not the current task is a time series one. The data will be then
+    retrieved before the date of observation""",
+)
+flags.DEFINE_integer(
+    "num_steps",
+    3,
+    """Number of temporal steps. When `is_time_series_task` is set to True, an attempt
+    will be made to retrieve `num_steps` HLS chips prior to the observation date.
+    Otherwise, the value of `num_steps` will default to 1 and an attempt will be made to retrieve
+    the HLS chip corresponding to the observation date.
+    """,
+    lower_bound=1,
+)
+flags.DEFINE_integer(
+    "temporal_step",
+    30,
+    """Temporal step size. When dealing with a time series task, an attempt will be made to
+    fetch the data up to `temporal_step` days away from the date of observation. A tolerance might
+    be applied when fetching the data for the different time steps.""",
+)
 flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
@@ -65,6 +94,18 @@ flags.DEFINE_integer(
     "cloud_coverage",
     10,
     "Percentage of cloud cover to use. Accepted values are between 0 and 100.",
+)
+flags.DEFINE_integer(
+    "window_size",
+    0,
+    """Size of the window defined around the observation pixel. For instance, a value of 1 means
+    that the label of the observation will be assigned to a 3x3 pixels window centered around the
+    pixel of observation. The values are assigned within the bounds of a specific chip, i.e the
+    window will be clipped to the extents of the chip in case it falls outside of the chip. A
+    non-zero value for this parameter typically means that the observation covers more ground or
+    pixels and can, in some cases account for low geolocation precision. Keep the default value
+    if only interested in the pixel in which the observation falls.""",
+    lower_bound=0,
 )
 
 
@@ -85,8 +126,17 @@ def main(argv: Any) -> None:
     """
     del argv
     data = pd.read_csv(FLAGS.dataframe_path)
-    data["date"] = pd.to_datetime(data["date"]) - pd.offsets.MonthBegin(1)
-    data["input_features_date"] = data["date"] - pd.DateOffset(months=1)
+    data["date"] = (
+        pd.to_datetime(data["date"]) - pd.offsets.MonthBegin(1)
+        if FLAGS.shift_to_month_start
+        else pd.to_datetime(data["date"])
+    )
+    data["input_features_date"] = (
+        data["date"] - pd.DateOffset(days=FLAGS.temporal_step)
+        if FLAGS.is_time_series_task
+        else data["date"]
+    )
+    FLAGS.num_steps = 1 if not FLAGS.is_time_series_task else FLAGS.num_steps
     sub_data = get_tiles(data, min_count=FLAGS.min_count)
 
     if FLAGS.data_source == "HLS":
@@ -156,6 +206,7 @@ def main(argv: Any) -> None:
                     src_crs=FLAGS.src_crs,
                     mask_cloud=FLAGS.mask_cloud,
                     water_mask=FLAGS.water_mask,
+                    window_size=FLAGS.window_size,
                 )
                 all_chips.extend(chips)
                 all_seg_maps.extend(seg_maps)
@@ -249,6 +300,7 @@ def main(argv: Any) -> None:
                     src_crs=FLAGS.src_crs,
                     mask_cloud=FLAGS.mask_cloud,
                     water_mask=FLAGS.water_mask,
+                    window_size=FLAGS.window_size,
                 )
                 all_chips.extend(chips)
                 all_seg_maps.extend(seg_maps)

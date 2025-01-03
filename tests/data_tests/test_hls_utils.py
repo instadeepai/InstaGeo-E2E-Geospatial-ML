@@ -141,8 +141,8 @@ def test_retrieve_hls_metadata():
     tile_info = pd.DataFrame(
         {
             "tile_id": ["38PMB"],
-            "min_date": ["2022-05-29"],
-            "max_date": ["2022-06-09"],
+            "min_date": ["2022-05-24"],
+            "max_date": ["2022-06-14"],
             "lon_min": [44.451435],
             "lon_max": [44.744167],
             "lat_min": [15.099767],
@@ -152,6 +152,10 @@ def test_retrieve_hls_metadata():
     tile_database = retrieve_hls_metadata(tile_info)
     assert tile_database == {
         "38PMB": [
+            "HLS.S30.T38PMB.2022145T072619.v2.0",
+            "HLS.L30.T38PMB.2022146T072532.v2.0",
+            "HLS.L30.T38PMB.2022147T071947.v2.0",
+            "HLS.S30.T38PMB.2022147T071621.v2.0",
             "HLS.S30.T38PMB.2022150T072621.v2.0",
             "HLS.S30.T38PMB.2022152T071619.v2.0",
             "HLS.L30.T38PMB.2022154T072604.v2.0",
@@ -159,6 +163,10 @@ def test_retrieve_hls_metadata():
             "HLS.S30.T38PMB.2022155T072619.v2.0",
             "HLS.S30.T38PMB.2022157T071631.v2.0",
             "HLS.S30.T38PMB.2022160T072621.v2.0",
+            "HLS.L30.T38PMB.2022162T072536.v2.0",
+            "HLS.S30.T38PMB.2022162T071619.v2.0",
+            "HLS.L30.T38PMB.2022163T072000.v2.0",
+            "HLS.S30.T38PMB.2022165T072619.v2.0",
         ]
     }
 
@@ -278,43 +286,43 @@ def test_find_closest_tile():
     query_result = find_closest_tile(tile_queries, tile_database)
     assert list(query_result["hls_tiles"]) == [
         [
-            "HLS.L30.T38PMB.2022154T072604.v2.0.",
-            "HLS.S30.T38PMB.2022145T072619.v2.0.",
+            "HLS.S30.T38PMB.2022160T072621.v2.0.",
+            "HLS.S30.T38PMB.2022150T072621.v2.0.",
             "HLS.L30.T38PMB.2022139T071922.v2.0.",
         ],
         [
-            "HLS.L30.T38PPB.2022155T071923.v2.0.",
-            "HLS.L30.T38PPB.2022147T071947.v2.0.",
+            "HLS.S30.T38PPB.2022157T071631.v2.0.",
+            "HLS.L30.T38PPB.2022148T071311.v2.0.",
             "HLS.L30.T38PPB.2022139T071922.v2.0.",
         ],
         [None, None, None],
         [
-            "HLS.L30.T30RYS.2022155T103334.v2.0.",
-            "HLS.L30.T30RYS.2022147T103357.v2.0.",
+            "HLS.S30.T30RYS.2022159T102559.v2.0.",
+            "HLS.S30.T30RYS.2022149T102559.v2.0.",
             "HLS.L30.T30RYS.2022140T102748.v2.0.",
         ],
         [None, None, None],
         [None, None, None],
         [
-            "HLS.L30.T38PMB.2022155T071923.v2.0.",
-            "HLS.S30.T38PMB.2022145T072619.v2.0.",
-            "HLS.L30.T38PMB.2022139T071922.v2.0.",
+            "HLS.S30.T38PMB.2022160T072621.v2.0.",
+            "HLS.S30.T38PMB.2022150T072621.v2.0.",
+            "HLS.S30.T38PMB.2022140T072621.v2.0.",
         ],
         [
-            "HLS.L30.T38PNB.2022156T071344.v2.0.",
-            "HLS.L30.T38PNB.2022147T071947.v2.0.",
+            "HLS.S30.T38PNB.2022157T071631.v2.0.",
+            "HLS.S30.T38PNB.2022152T071619.v2.0.",
             "HLS.S30.T38PNB.2022142T071619.v2.0.",
         ],
         [None, None, None],
         [
-            "HLS.S30.T38QMD.2022157T071631.v2.0.",
-            "HLS.L30.T38QMD.2022147T071923.v2.0.",
+            "HLS.L30.T38QMD.2022162T072512.v2.0.",
+            "HLS.S30.T38QMD.2022152T071619.v2.0.",
             "HLS.S30.T38QMD.2022142T071619.v2.0.",
         ],
         [
-            "HLS.S30.T38PMB.2022157T071631.v2.0.",
-            "HLS.L30.T38PMB.2022147T071947.v2.0.",
-            "HLS.L30.T38PMB.2022139T071922.v2.0.",
+            "HLS.L30.T38PMB.2022162T072536.v2.0.",
+            "HLS.S30.T38PMB.2022152T071619.v2.0.",
+            "HLS.S30.T38PMB.2022142T071619.v2.0.",
         ],
     ]
 
@@ -338,24 +346,24 @@ def test_add_hls_granules(observation_data):
     result = add_hls_granules(data)
     assert list(result["hls_tiles"]) == [
         [
-            "HLS.L30.T38PMB.2022154T072604.v2.0",
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
+            "HLS.S30.T38PMB.2022160T072621.v2.0",
+            "HLS.S30.T38PMB.2022150T072621.v2.0",
             "HLS.L30.T38PMB.2022139T071922.v2.0",
         ],
         [
-            "HLS.L30.T38PMB.2022154T072604.v2.0",
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
+            "HLS.S30.T38PMB.2022160T072621.v2.0",
+            "HLS.S30.T38PMB.2022150T072621.v2.0",
             "HLS.L30.T38PMB.2022139T071922.v2.0",
         ],
         [
-            "HLS.L30.T38PMB.2022154T072604.v2.0",
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
+            "HLS.S30.T38PMB.2022160T072621.v2.0",
+            "HLS.S30.T38PMB.2022150T072621.v2.0",
             "HLS.L30.T38PMB.2022139T071922.v2.0",
         ],
         [
-            "HLS.L30.T38PMB.2022155T071923.v2.0",
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
-            "HLS.L30.T38PMB.2022139T071922.v2.0",
+            "HLS.S30.T38PMB.2022160T072621.v2.0",
+            "HLS.S30.T38PMB.2022150T072621.v2.0",
+            "HLS.S30.T38PMB.2022140T072621.v2.0",
         ],
     ]
 
@@ -372,19 +380,19 @@ def test_create_hls_dataset(observation_data):
     assert len(hls_dataset["2022-06-08_T38PMB"]["fmasks"]) == 3
     assert (
         hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_0"]
-        == "hls_tiles/HLS.L30.T38PMB.2022154T072604.v2.0.B02.tif"
+        == "hls_tiles/HLS.S30.T38PMB.2022160T072621.v2.0.B02.tif"
     )
     assert (
         hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_0"]
-        == "hls_tiles/HLS.L30.T38PMB.2022154T072604.v2.0.Fmask.tif"
+        == "hls_tiles/HLS.S30.T38PMB.2022160T072621.v2.0.Fmask.tif"
     )
     assert (
         hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_1"]
-        == "hls_tiles/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif"
+        == "hls_tiles/HLS.S30.T38PMB.2022150T072621.v2.0.B02.tif"
     )
     assert (
         hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_1"]
-        == "hls_tiles/HLS.S30.T38PMB.2022145T072619.v2.0.Fmask.tif"
+        == "hls_tiles/HLS.S30.T38PMB.2022150T072621.v2.0.Fmask.tif"
     )
     assert (
         hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_2"]
