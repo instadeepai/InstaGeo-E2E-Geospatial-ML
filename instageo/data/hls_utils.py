@@ -23,14 +23,17 @@ import bisect
 import os
 import re
 from datetime import datetime, timedelta
-from multiprocessing import cpu_count
 from typing import Any
 
 import earthaccess
-import mgrs
 import pandas as pd
+import rasterio
+import xarray as xr
 from absl import logging
+from rasterio.crs import CRS
 from shapely.geometry import box
+
+from instageo.data.data_pipeline import get_tile_info
 
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
@@ -130,6 +133,23 @@ def find_closest_tile(
     return query_results
 
 
+def decode_fmask_value(value: xr.Dataset, position: int) -> xr.Dataset:
+    """Decodes HLS v2.0 Fmask.
+
+    The decoding strategy is described in Appendix A of the user manual
+    (https://lpdaac.usgs.gov/documents/1698/HLS_User_Guide_V2.pdf).
+
+    Arguments:
+        value: Input xarray Dataset created from Fmask.tif
+        position: Bit position to decode.
+
+    Returns:
+        Xarray dataset containing decoded bits.
+    """
+    quotient = value // (2**position)
+    return quotient - ((quotient // 2) * 2)
+
+
 def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
     """Retrieve HLS Tiles Metadata.
 
@@ -195,89 +215,43 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
     return granules_dict
 
 
-def get_hls_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
-    """Get HLS Tile ID for Each Observation.
-
-    Observations are usually described by geolocation scattered across the globe. They are
-    dense as well as sparse in various locations. In order to optimize resource usage, we
-    subset the observations in dense locations.
-
-    We first add the HLS tile ID for each observationa and count the number of
-    observations in each tile. Then we retain the tiles with `min_count` observations.
+def open_mf_tiff_dataset(
+    band_files: dict[str, dict[str, str]], mask_cloud: bool, water_mask: bool
+) -> tuple[xr.Dataset, CRS]:
+    """Open multiple TIFF files as an xarray Dataset.
 
     Args:
-        data: Dataframe containing locust observations
-        min_count: minimum count of locust observations per HLS tile.
+        band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
+        mask_cloud (bool): Perform cloud masking.
+        water_mask (bool): Perform water masking.
 
     Returns:
-        Subset of observations where there are at least `min_count` observations per tile
-
+        (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
+            provided TIFF files and its CRS
     """
-    mgrs_object = mgrs.MGRS()
-    get_mgrs_tile_id = lambda row: mgrs_object.toMGRS(
-        row["y"], row["x"], MGRSPrecision=0
+    band_paths = list(band_files["tiles"].values())
+    bands_dataset = xr.open_mfdataset(
+        band_paths,
+        concat_dim="band",
+        combine="nested",
     )
-    data["mgrs_tile_id"] = data.apply(get_mgrs_tile_id, axis=1)
-    tile_counts = data.groupby("mgrs_tile_id").size().sort_values(ascending=False)
-    data = pd.merge(
-        data, tile_counts.reset_index(name="counts"), how="left", on="mgrs_tile_id"
+    mask_paths = list(band_files["fmasks"].values())
+    mask_dataset = xr.open_mfdataset(
+        mask_paths,
+        concat_dim="band",
+        combine="nested",
     )
-    sub_data = data[data["counts"] >= min_count]
-    assert not sub_data.empty, "No observation records left"
-    return sub_data
-
-
-def get_hls_tile_info(
-    data: pd.DataFrame,
-    num_steps: int = 3,
-    temporal_step: int = 10,
-    temporal_tolerance: int = 5,
-) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
-    """Get HLS Tile Info.
-
-    Retrieves a summary of all tiles required for a given dataset. The summary contains
-    the desired start and end date for each HLS tile. Also retrieves a list of queries
-    that can be used to retrieve the tiles for each observation in `data`.
-
-    Args:
-        data (pd.DataFrame): A dataframe containing observation records.
-        num_steps (int): Number of temporal time steps
-        temporal_step (int): Size of each temporal step.
-        temporal_tolerance (int): Number of days used as offset for the
-        start and end dates to search for each HLS tile.
-
-    Returns:
-        A `tile_info` dataframe and a list of `tile_queries`
-    """
-    data = data[["mgrs_tile_id", "input_features_date", "x", "y"]].reset_index(
-        drop=True
-    )
-    tile_queries = []
-    tile_info: Any = []
-    for _, (tile_id, date, lon, lat) in data.iterrows():
-        history = []
-        for i in range(num_steps):
-            curr_date = date - pd.Timedelta(days=temporal_step * i)
-            history.append(curr_date.strftime("%Y-%m-%d"))
-            tile_info.append([tile_id, curr_date, lon, lat])
-        tile_queries.append((tile_id, history))
-    tile_info = (
-        pd.DataFrame(tile_info, columns=["tile_id", "date", "lon", "lat"])
-        .groupby("tile_id")
-        .agg(
-            min_date=("date", "min"),
-            max_date=("date", "max"),
-            lon_min=("lon", "min"),
-            lon_max=("lon", "max"),
-            lat_min=("lat", "min"),
-            lat_max=("lat", "max"),
-        )
-    ).reset_index()
-    tile_info["min_date"] -= pd.Timedelta(days=temporal_tolerance)
-    tile_info["max_date"] += pd.Timedelta(days=temporal_tolerance)
-    tile_info["min_date"] = tile_info["min_date"].dt.strftime("%Y-%m-%d")
-    tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%d")
-    return tile_info, tile_queries
+    if water_mask:
+        mask_water = decode_fmask_value(mask_dataset, 5)
+        mask_water = mask_water.band_data.values.any(axis=0).astype(int)
+        bands_dataset = bands_dataset.where(mask_water == 0)
+    if mask_cloud:
+        cloud_mask = decode_fmask_value(mask_dataset, 1)
+        cloud_mask = cloud_mask.band_data.values.any(axis=0).astype(int)
+        bands_dataset = bands_dataset.where(cloud_mask == 0)
+    with rasterio.open(band_paths[0]) as src:
+        crs = src.crs
+    return bands_dataset, crs
 
 
 def add_hls_granules(
@@ -303,11 +277,8 @@ def add_hls_granules(
         A dataframe containing a list of HLS granules. Each granule is a directory
         containing all the bands.
     """
-    tiles_info, tile_queries = get_hls_tile_info(
-        data,
-        num_steps=num_steps,
-        temporal_step=temporal_step,
-        temporal_tolerance=temporal_tolerance,
+    tiles_info, tile_queries = get_tile_info(
+        data, num_steps=num_steps, temporal_step=temporal_step
     )
     tile_queries_str = [
         f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
@@ -324,6 +295,79 @@ def add_hls_granules(
     return data
 
 
+def create_hls_dataset(
+    data_with_tiles: pd.DataFrame, outdir: str
+) -> tuple[dict[str, dict[str, dict[str, str]]], set[str]]:
+    """Creates HLS Dataset.
+
+    A HLS dataset is a list of dictionary mapping band names to corresponding GeoTiff
+    filepath. It is required for creating chips.
+
+    Args:
+        data_with_tiles (pd.DataFrame): A dataframe containing observations that fall
+            within a dense tile. It also has `hls_tiles` column that contains a temporal
+            series of HLS granules.
+        outdir (str): Output directory where tiles could be downloaded to.
+
+    Returns:
+        A tuple containing HLS dataset and a list of tiles that needs to be downloaded.
+    """
+    data_with_tiles = data_with_tiles.drop_duplicates(subset=["hls_tiles"])
+    data_with_tiles = data_with_tiles[
+        data_with_tiles["hls_tiles"].apply(
+            lambda granule_lst: all("HLS" in str(item) for item in granule_lst)
+        )
+    ]
+    assert not data_with_tiles.empty, "No observation record with valid HLS tiles"
+    hls_dataset = {}
+    granules_to_download = []
+    s30_bands = ["B02", "B03", "B04", "B8A", "B11", "B12", "Fmask"]
+    l30_bands = ["B02", "B03", "B04", "B05", "B06", "B07", "Fmask"]
+    for hls_tiles, obsv_date in zip(
+        data_with_tiles["hls_tiles"], data_with_tiles["date"]
+    ):
+        band_id, band_path = [], []
+        mask_id, mask_path = [], []
+        for idx, tile in enumerate(hls_tiles):
+            tile = tile.strip(".")
+            if "HLS.S30" in tile:
+                for band in s30_bands:
+                    if band == "Fmask":
+                        mask_id.append(f"{band}_{idx}")
+                        mask_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    else:
+                        band_id.append(f"{band}_{idx}")
+                        band_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    granules_to_download.append(
+                        f"https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSS30.020/{tile}/{tile}.{band}.tif"  # noqa
+                    )
+            else:
+                for band in l30_bands:
+                    if band == "Fmask":
+                        mask_id.append(f"{band}_{idx}")
+                        mask_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    else:
+                        band_id.append(f"{band}_{idx}")
+                        band_path.append(
+                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
+                        )
+                    granules_to_download.append(
+                        f"https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/{tile}/{tile}.{band}.tif"  # noqa
+                    )
+
+        hls_dataset[f'{obsv_date.strftime("%Y-%m-%d")}_{tile.split(".")[2]}'] = {
+            "tiles": {k: v for k, v in zip(band_id, band_path)},
+            "fmasks": {k: v for k, v in zip(mask_id, mask_path)},
+        }
+    return hls_dataset, set(granules_to_download)
+
+
 def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None:
     """Parallel Download.
 
@@ -338,7 +382,7 @@ def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None
     Returns:
         None
     """
-    num_cpus = cpu_count()
+    num_cpus = os.cpu_count()
     earthaccess.login(persist=True)
     retries = 0
     complete = False

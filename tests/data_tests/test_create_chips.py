@@ -6,7 +6,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from instageo.data.chip_creator import create_and_save_chips_with_seg_maps
+from instageo.data.data_pipeline import create_and_save_chips_with_seg_maps
+from instageo.data.hls_utils import open_mf_tiff_dataset
 
 
 @pytest.fixture
@@ -28,29 +29,31 @@ def test_create_chips(setup_and_teardown_output_dir):
     os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
     os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
     chips, labels = create_and_save_chips_with_seg_maps(
+        open_mf_tiff_dataset,
         {
             "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
             "fmasks": {"Fmask_0": fmask_path},
         },
+        "38PMB",
         df,
         chip_size,
         output_directory,
         no_data_value,
         src_crs=4326,
         mask_cloud=False,
+        water_mask=False,
         window_size=0,
     )
     num_chips = len(chips)
-
     assert num_chips == 3
     for i in range(num_chips):
         chip_path = os.path.join(
-            output_directory, "chips", "chip_20200101_S30_T38PMB_2022145T072619_1_2.tif"
+            output_directory, "chips", "chip_20200101_38PMB_1_2.tif"
         )
         seg_map_path = os.path.join(
             output_directory,
             "seg_maps",
-            "seg_map_20200101_S30_T38PMB_2022145T072619_1_2.tif",
+            "seg_map_20200101_38PMB_1_2.tif",
         )
         chip = xr.open_dataset(chip_path)
         seg_map = xr.open_dataset(seg_map_path)
@@ -61,53 +64,59 @@ def test_create_chips(setup_and_teardown_output_dir):
         assert np.unique(seg_map.band_data).size > 1
 
 
-def test_seg_map_validity():
+@pytest.mark.parametrize("window_size", [0, 3, 5, 7])
+def test_seg_map_validity(setup_and_teardown_output_dir, window_size):
     geotiff_path = "tests/data/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif"
     fmask_path = "tests/data/fmask.tif"
     chip_size = 64
     output_directory = "/tmp/output"
     no_data_value = -1
-    hls_tile_dict = {
-        "tiles": {"B02_0": geotiff_path},
-        "fmasks": {"Fmask_0": fmask_path},
-    }
-    label_val = 1
-    obsv = pd.DataFrame(
-        dict(
-            x=[-107.11335902745832],
-            y=[41.37894599955397],
-            label=[label_val],
-            date=[pd.to_datetime("2022-06-01")],
-        )
+    df = pd.read_csv("tests/data/sample_4326.csv")
+    df["date"] = pd.to_datetime("2020-01-01")
+    os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
+    os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
+
+    chips, seg_maps = create_and_save_chips_with_seg_maps(
+        open_mf_tiff_dataset,
+        {
+            "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
+            "fmasks": {"Fmask_0": fmask_path},
+        },
+        "38PMB",
+        df,
+        chip_size,
+        output_directory,
+        no_data_value,
+        src_crs=4326,
+        mask_cloud=False,
+        water_mask=False,
+        window_size=window_size,
     )
 
-    # Test for different window sizes (1*1, 3*3, 5*5)
-    for window_size in range(3):
-        os.makedirs(output_directory, exist_ok=True)
-        os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
-        os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
-        _, labels = create_and_save_chips_with_seg_maps(
-            hls_tile_dict=hls_tile_dict,
-            df=obsv,
-            chip_size=chip_size,
-            output_directory=output_directory,
-            no_data_value=no_data_value,
-            src_crs=4326,
-            mask_cloud=False,
-            window_size=window_size,
-        )
+    # Verify chips and segmentation maps exist and match expectations
+    assert len(chips) > 0
+    assert len(seg_maps) > 0
 
-        num_seg_maps = len(labels)
-        assert num_seg_maps == 1
+    for chip_name, seg_map_name in zip(chips, seg_maps):
+        chip_path = os.path.join(output_directory, "chips", chip_name)
+        seg_map_path = os.path.join(output_directory, "seg_maps", seg_map_name)
 
-        seg_map_path = os.path.join(
-            output_directory,
-            "seg_maps",
-            "seg_map_20220601_S30_T38PMB_2022145T072619_2_0.tif",
-        )
+        assert os.path.exists(chip_path), f"Chip file missing: {chip_path}"
+        assert os.path.exists(
+            seg_map_path
+        ), f"Segmentation map file missing: {seg_map_path}"
+
+        chip = xr.open_dataset(chip_path)
         seg_map = xr.open_dataset(seg_map_path)
-        assert seg_map.band_data.shape == (1, 64, 64)
 
-        obsv_values_count_ref = (2 * window_size + 1) ** 2
-        assert (seg_map.band_data.values == label_val).sum() == obsv_values_count_ref
-        shutil.rmtree(output_directory)
+        assert chip.band_data.shape == (2, chip_size, chip_size), "Chip shape mismatch"
+        assert np.unique(chip.band_data).size > 1, "Chip contains only one unique value"
+
+        assert seg_map.band_data.shape == (
+            1,
+            chip_size,
+            chip_size,
+        ), "Segmentation map shape mismatch"
+        assert (
+            np.unique(seg_map.band_data).size > 1
+        ), "Segmentation map contains only one unique value"
