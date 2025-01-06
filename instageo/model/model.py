@@ -160,7 +160,6 @@ class PrithviSeg(nn.Module):
         if freeze_backbone:
             for param in model.parameters():
                 param.requires_grad = False
-        del checkpoint["pos_embed"]
         _ = model.load_state_dict(checkpoint, strict=False)
 
         self.prithvi_100M_backbone = model
