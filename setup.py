@@ -11,7 +11,9 @@ data_dependencies = [
     "Bottleneck",
     "absl-py",
     "mgrs==1.4.6",
-    "earthaccess==0.8.2",
+    "earthaccess==0.12.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
 ]
 model_dependencies = [
     # Add dependencies specific to the model component
