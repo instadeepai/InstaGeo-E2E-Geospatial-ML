@@ -179,7 +179,7 @@ def retrieve_hls_metadata(
             A tuple of coordinates to use for a bounding box
 
         """
-        epsilon = 5e-5
+        epsilon = 1e-3
         if box(lon_min, lat_min, lon_max, lat_max).is_valid:
             return lon_min, lat_min, lon_max, lat_max
         else:

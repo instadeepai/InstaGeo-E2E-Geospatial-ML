@@ -56,7 +56,7 @@ flags.DEFINE_string(
     "Directory where the chips and segmentation maps will be saved.",
 )
 flags.DEFINE_integer(
-    "no_data_value", -1, "Value to use for no data areas in the segmentation maps."
+    "no_data_value", -9999, "Value to use for no data areas in the segmentation maps."
 )
 flags.DEFINE_integer(
     "min_count", 100, "Minimum observation counts per tile", lower_bound=1
@@ -305,7 +305,6 @@ def create_and_save_chips_with_seg_maps(
             continue
         seg_maps.append(seg_map_name)
         seg_map.rio.to_raster(seg_map_filename)
-        chip = chip.fillna(no_data_value)
         chips.append(chip_name)
         chip.rio.to_raster(chip_filename)
     return chips, seg_maps
