@@ -298,7 +298,7 @@ def create_and_save_chips_with_seg_maps(
                 mask_types=mask_types,
                 masking_strategy=masking_strategy,
             )
-        if chip.count().values == 0:
+        if chip.where(chip != no_data_value).count().values == 0:
             continue
         seg_map = create_segmentation_map(chip, df, no_data_value, window_size)
         if seg_map.where(seg_map != no_data_value).count().values == 0:
