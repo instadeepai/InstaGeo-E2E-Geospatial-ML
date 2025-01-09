@@ -484,8 +484,8 @@ def main(cfg: DictConfig) -> None:
             input_root=root_dir,
             preprocess_func=partial(
                 process_and_augment,
-                mean=MEAN,
-                std=STD,
+                mean=[0] * len(MEAN),
+                std=[1] * len(STD),
                 temporal_size=TEMPORAL_SIZE,
                 im_size=IM_SIZE,
             ),
