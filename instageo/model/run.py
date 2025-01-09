@@ -418,6 +418,38 @@ class PrithviSegmentationModule(pl.LightningModule):
         }
 
 
+def compute_mean_std(data_loader: DataLoader) -> Tuple[List[float], List[float]]:
+    """Compute the mean and standard deviation of a dataset.
+
+    Args:
+        data_loader (DataLoader): PyTorch DataLoader.
+
+    Returns:
+        mean (list): List of means for each channel.
+        std (list): List of standard deviations for each channel.
+    """
+    mean = 0.0
+    var = 0.0
+    nb_samples = 0
+
+    for data, _ in data_loader:
+        # Reshape data to (B, C, H*W)
+        batch_samples = data.size(0)
+        data = data.view(batch_samples, data.size(1), -1)
+
+        nb_samples += batch_samples
+
+        # Sum over batch, height and width
+        mean += data.mean(2).sum(0)
+
+        var += data.var(2, unbiased=False).sum(0)
+
+    mean /= nb_samples
+    var /= nb_samples
+    std = torch.sqrt(var)
+    return mean.tolist(), std.tolist()  # type:ignore
+
+
 @hydra.main(config_path="configs", version_base=None, config_name="config")
 def main(cfg: DictConfig) -> None:
     """Runner Entry Point.
@@ -445,6 +477,34 @@ def main(cfg: DictConfig) -> None:
     train_filepath = cfg.train_filepath
     test_filepath = cfg.test_filepath
     checkpoint_path = cfg.checkpoint_path
+
+    if cfg.mode == "stats":
+        train_dataset = InstaGeoDataset(
+            filename=train_filepath,
+            input_root=root_dir,
+            preprocess_func=partial(
+                process_and_augment,
+                mean=MEAN,
+                std=STD,
+                temporal_size=TEMPORAL_SIZE,
+                im_size=IM_SIZE,
+            ),
+            bands=BANDS,
+            replace_label=cfg.dataloader.replace_label,
+            reduce_to_zero=cfg.dataloader.reduce_to_zero,
+            no_data_value=cfg.dataloader.no_data_value,
+            constant_multiplier=cfg.dataloader.constant_multiplier,
+        )
+        train_loader = create_dataloader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=1,
+        )
+        mean, std = compute_mean_std(train_loader)
+        print(mean)
+        print(std)
+        exit(0)
 
     if cfg.mode == "train":
         check_required_flags(["root_dir", "train_filepath", "valid_filepath"], cfg)
