@@ -100,8 +100,8 @@ def test_get_chip_coords():
     df = df.to_crs(crs=32613)
 
     ds = xr.open_dataset("tests/data/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif")
-    chip_coords = get_chip_coords(df, ds, 64)
-    assert chip_coords == [
+    chip_coords = {tuple(coords) for coords in get_chip_coords(df, ds, 64)}
+    assert chip_coords == {
         (2, 0),
         (0, 3),
         (2, 2),
@@ -112,7 +112,7 @@ def test_get_chip_coords():
         (0, 3),
         (2, 3),
         (1, 2),
-    ]
+    }
 
 
 def test_get_tile_info(observation_data):

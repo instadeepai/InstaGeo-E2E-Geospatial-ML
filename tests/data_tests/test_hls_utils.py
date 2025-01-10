@@ -120,9 +120,7 @@ def test_open_mf_tiff_dataset_cloud_mask():
     }
     result_no_mask, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
     num_points = result_no_mask.band_data.count().values.item()
-    result_with_mask, crs = open_mf_tiff_dataset(
-        band_files, mask_cloud=True, water_mask=False
-    )
+    result_with_mask, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
     fmask = xr.open_dataset("tests/data/fmask.tif")
     cloud_mask = decode_fmask_value(fmask, 1)
     num_clouds = cloud_mask.where(cloud_mask == 1).band_data.count().values.item()

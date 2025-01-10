@@ -49,12 +49,12 @@ def test_create_chips(setup_and_teardown_output_dir):
     assert num_chips == 3
     for i in range(num_chips):
         chip_path = os.path.join(
-            output_directory, "chips", "chip_20200101_38PMB_1_2.tif"
+            output_directory, "chips", "chip_20200101_S30_T38PMB_2022145T072619_1_2.tif"
         )
         seg_map_path = os.path.join(
             output_directory,
             "seg_maps",
-            "seg_map_20200101_38PMB_1_2.tif",
+            "seg_map_20200101_S30_T38PMB_2022145T072619_1_2.tif",
         )
         chip = xr.open_dataset(chip_path)
         seg_map = xr.open_dataset(seg_map_path)
