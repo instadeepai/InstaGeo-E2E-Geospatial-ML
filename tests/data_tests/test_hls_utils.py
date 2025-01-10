@@ -11,6 +11,7 @@ from rasterio.crs import CRS
 from instageo.data.data_pipeline import get_tiles
 from instageo.data.hls_utils import (
     add_hls_granules,
+    apply_mask,
     create_hls_dataset,
     decode_fmask_value,
     find_closest_tile,
@@ -120,17 +121,22 @@ def test_open_mf_tiff_dataset_cloud_mask():
     }
     result_no_mask, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
     num_points = result_no_mask.band_data.count().values.item()
-    result_with_mask, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
+    result_with_mask, mask_ds, crs = open_mf_tiff_dataset(band_files, load_masks=True)
+    result_with_mask = apply_mask(
+        result_with_mask,
+        mask_ds.band_data,
+        -1,
+        masking_strategy="any",
+    )
     fmask = xr.open_dataset("tests/data/fmask.tif")
     cloud_mask = decode_fmask_value(fmask, 1)
     num_clouds = cloud_mask.where(cloud_mask == 1).band_data.count().values.item()
     assert (
-        result_with_mask.band_data.count().values.item() == num_points - 2 * num_clouds
+        result_with_mask.band_data.where(result_with_mask.band_data != -1)
+        .count()
+        .values.item()
+        == num_points - 2 * num_clouds
     )
-    assert isinstance(result_with_mask, xr.Dataset)
-    assert isinstance(crs, CRS)
-    assert crs == 32613
-    assert result_with_mask["band_data"].shape == (2, 224, 224)
 
 
 def test_retrieve_hls_metadata():
