@@ -100,7 +100,7 @@ def test_open_mf_tiff_dataset():
         },
     }
 
-    result, crs = open_mf_tiff_dataset(band_files, mask_cloud=False, water_mask=False)
+    result, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
     assert isinstance(result, xr.Dataset)
     assert isinstance(crs, CRS)
     assert crs == 32613
