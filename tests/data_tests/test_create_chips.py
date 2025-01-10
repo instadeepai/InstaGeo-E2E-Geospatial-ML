@@ -36,13 +36,13 @@ def test_create_chips(setup_and_teardown_output_dir):
             "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
             "fmasks": {"Fmask_0": fmask_path},
         },
-        "38PMB",
         df,
         chip_size,
         output_directory,
         no_data_value,
         src_crs=4326,
-        water_mask=False,
+        mask_types=[],
+        masking_strategy="any",
         window_size=0,
     )
     num_chips = len(chips)
