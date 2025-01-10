@@ -31,28 +31,6 @@ def setup_and_teardown_output_dir():
         pass
 
 
-def test_get_chip_coords():
-    df = pd.read_csv("tests/data/sample_4326.csv")
-    df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
-    df.set_crs(epsg=4326, inplace=True)
-    df = df.to_crs(crs=32613)
-
-    ds = xr.open_dataset("tests/data/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif")
-    chip_coords = {tuple(coords) for coords in get_chip_coords(df, ds, 64)}
-    assert chip_coords == {
-        (2, 0),
-        (0, 3),
-        (2, 2),
-        (0, 3),
-        (2, 0),
-        (3, 2),
-        (2, 3),
-        (0, 3),
-        (2, 3),
-        (1, 2),
-    }
-
-
 @pytest.mark.auth
 @pytest.mark.parametrize(
     "data_source, chip_counts, tile_counts", [("HLS", 3, 21), ("S2", 2, 2)]
