@@ -14,6 +14,7 @@ data_dependencies = [
     "earthaccess==0.12.0",
     "pydantic==2.10.4",
     "pydantic-settings==2.7.0",
+    "python-dotenv==1.0.1",
 ]
 model_dependencies = [
     # Add dependencies specific to the model component

@@ -11,7 +11,8 @@ from absl import flags
 from shapely.geometry import Point
 
 from instageo.data import chip_creator
-from instageo.data.chip_creator import app, check_required_flags, get_chip_coords
+from instageo.data.chip_creator import app, check_required_flags
+from instageo.data.data_pipeline import get_chip_coords
 
 FLAGS = flags.FLAGS
 
@@ -56,7 +57,12 @@ def test_get_chip_coords():
 
 
 @pytest.mark.auth
-def test_chip_creator(setup_and_teardown_output_dir):
+@pytest.mark.parametrize(
+    "data_source, chip_counts, tile_counts", [("HLS", 3, 21), ("S2", 2, 2)]
+)
+def test_chip_creator(
+    setup_and_teardown_output_dir, data_source, chip_counts, tile_counts
+):
     output_directory = "/tmp/csv_chip_creator"
     argv = [
         "chip_creator",
@@ -76,6 +82,8 @@ def test_chip_creator(setup_and_teardown_output_dir):
         "30",
         "--num_steps",
         "1",
+        "--data_source",
+        data_source,
         "--masking_strategy",
         "any",
         "--mask_types",
@@ -88,7 +96,7 @@ def test_chip_creator(setup_and_teardown_output_dir):
     chips = os.listdir(os.path.join(output_directory, "chips"))
     seg_maps = os.listdir(os.path.join(output_directory, "seg_maps"))
     assert len(chips) == len(seg_maps)
-    assert len(chips) == 4
+    assert len(chips) == chip_counts
     chip_path = os.path.join(output_directory, "chips", chips[0])
     seg_map_path = os.path.join(output_directory, "seg_maps", seg_maps[0])
     chip = xr.open_dataset(chip_path)
@@ -99,11 +107,13 @@ def test_chip_creator(setup_and_teardown_output_dir):
     assert np.unique(seg_map.band_data).size > 1
     assert (
         len(
-            pd.read_csv(os.path.join(output_directory, "granules_to_download.csv"))[
-                "tiles"
-            ].tolist()
+            pd.read_csv(
+                os.path.join(
+                    output_directory, f"{data_source.lower()}_granules_to_download.csv"
+                )
+            )
         )
-        == 28
+        == tile_counts
     )
 
 
@@ -130,11 +140,16 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
         "1",
         "--processing_method",
         "download-only",
+        "True",
+        "--data_source",
+        "HLS",
     ]
     FLAGS(argv)
     chip_creator.main("None")
     assert os.path.exists(os.path.join(output_directory, "hls_dataset.json"))
-    assert os.path.exists(os.path.join(output_directory, "granules_to_download.csv"))
+    assert os.path.exists(
+        os.path.join(output_directory, "hls_granules_to_download.csv")
+    )
     assert not os.path.exists(os.path.join(output_directory, "chips"))
     assert not os.path.exists(os.path.join(output_directory, "seg_maps"))
 
@@ -185,7 +200,10 @@ def test_chip_creator_cog(setup_and_teardown_output_dir):
 
 def test_missing_flags_raises_error():
     """Test missing flags."""
-    FLAGS([__file__])
+    FLAGS.dataframe_path = None
+    FLAGS.output_directory = None
+    FLAGS(["test"])
+
     with pytest.raises(app.UsageError) as excinfo:
         check_required_flags()
     assert "Flag --dataframe_path is required" in str(
