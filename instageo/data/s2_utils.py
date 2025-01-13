@@ -415,7 +415,7 @@ def process_s2_metadata(metadata: dict, tile_id: str) -> pd.DataFrame:
 
 
 def retrieve_s2_metadata(
-    tile_info_df: pd.DataFrame, temporal_tolerance: int, cloud_coverage: int = 10
+    tile_info_df: pd.DataFrame, cloud_coverage: int = 10
 ) -> dict[str, list[str]]:
     """Retrieve Sentinel-2 Tiles Metadata.
 
@@ -425,7 +425,6 @@ def retrieve_s2_metadata(
     Args:
         tile_info_df (pd.DataFrame): A dataframe containing tile_id, start_date and
             end_date in each row.
-        temporal_tolerance (int): Number of days before and after which a tile is a valid pick.
         cloud_coverage (int): Minimum percentage of cloud cover acceptable for a Sentinel-2 tile.
 
     Returns:
@@ -456,6 +455,9 @@ def retrieve_s2_metadata(
         response = requests.get(url)
         if response.status_code == 200:
             granules_metadata = response.json()
+            import json
+
+            logging.info(json.dumps(granules_metadata, indent=4))
             granules_dict[tile_id] = process_s2_metadata(granules_metadata, tile_id)
         else:
             granules_dict[tile_id] = None
@@ -658,6 +660,7 @@ def add_s2_granules(
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 5,
+    cloud_coverage: int = 10,
 ) -> pd.DataFrame:
     """Add Sentinel-2 Granules.
 
@@ -671,6 +674,8 @@ def add_s2_granules(
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
         temporal_tolerance (int): Tolerance (in days) for finding closest Sentinel-2 granule.
+        cloud_coverage (int): Minimum percentage of cloud cover acceptable for a Sentinel-2 tile.
+
 
     Returns:
         A dataframe containing a list of Sentinel-2 granules. Each granule is a directory
@@ -686,7 +691,7 @@ def add_s2_granules(
         f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
     ]
     data["tile_queries"] = tile_queries_str
-    tile_database = retrieve_s2_metadata(tiles_info, temporal_tolerance)
+    tile_database = retrieve_s2_metadata(tiles_info, cloud_coverage)
     tile_queries_dict = {k: v for k, v in zip(tile_queries_str, tile_queries)}
     query_result = find_best_tile(
         tile_queries=tile_queries_dict,
