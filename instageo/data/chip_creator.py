@@ -293,6 +293,7 @@ def main(argv: Any) -> None:
                 num_steps=FLAGS.num_steps,
                 temporal_step=FLAGS.temporal_step,
                 temporal_tolerance=FLAGS.temporal_tolerance,
+                cloud_coverage=FLAGS.cloud_coverage,
             )
 
             logging.info("Retrieving S2 tiles that will be downloaded.")
