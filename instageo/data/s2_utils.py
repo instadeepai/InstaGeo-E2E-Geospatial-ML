@@ -25,7 +25,6 @@ import os
 import subprocess
 import time
 import zipfile
-from datetime import timedelta
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -445,19 +444,12 @@ def retrieve_s2_metadata(
         lon_min, lat_min, lon_max, lat_max = make_valid_bbox(
             lon_min, lat_min, lon_max, lat_max
         )
-        start_date_window = (
-            pd.to_datetime(start_date) - timedelta(days=temporal_tolerance)
-        ).strftime("%Y-%m-%d")
-        end_date_window = (
-            pd.to_datetime(end_date) + timedelta(days=temporal_tolerance)
-        ).strftime("%Y-%m-%d")
-
         url = (
             "https://catalogue.dataspace.copernicus.eu/"
             f"resto/api/collections/Sentinel2/search.json"
             f"?productType=S2MSI2A&cloudCover=[0,{cloud_coverage}]"
-            f"&startDate={start_date_window}T00:00:00Z"
-            f"&completionDate={end_date_window}T23:59:59Z"
+            f"&startDate={start_date}T00:00:00Z"
+            f"&completionDate={end_date}T23:59:59Z"
             f"&maxRecords=500"
             f"&box={lon_min},{lat_min},{lon_max},{lat_max}"
         )
