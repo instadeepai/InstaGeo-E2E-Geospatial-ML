@@ -323,7 +323,7 @@ def test_retrieve_s2_metadata_success():
         )
         mock_process.return_value = processed_metadata
 
-        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+        result = retrieve_s2_metadata(tile_info_df)
 
         mock_get.assert_called_once()
         mock_process.assert_called_once_with(mock_response_data, "33UUU")
@@ -350,7 +350,7 @@ def test_retrieve_s2_metadata_api_error():
     with patch("instageo.data.s2_utils.requests.get") as mock_get:
         mock_get.return_value = MagicMock(status_code=500)
 
-        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+        result = retrieve_s2_metadata(tile_info_df)
 
         mock_get.assert_called_once()
         assert isinstance(result, dict)
@@ -382,7 +382,7 @@ def test_retrieve_s2_metadata_no_features():
         )
         mock_process.return_value = pd.DataFrame()
 
-        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+        result = retrieve_s2_metadata(tile_info_df)
 
         mock_get.assert_called_once()
         mock_process.assert_called_once_with(mock_response_data, "33UUU")
@@ -416,7 +416,7 @@ def test_retrieve_s2_metadata_multiple_tiles():
         )
         mock_process.return_value = pd.DataFrame()
 
-        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+        result = retrieve_s2_metadata(tile_info_df)
 
         assert isinstance(result, dict)
         assert "33UUU" in result
