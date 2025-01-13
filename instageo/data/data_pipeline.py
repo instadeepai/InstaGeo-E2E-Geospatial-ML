@@ -27,7 +27,7 @@ import dask.delayed
 import rasterio
 import rioxarray as rxr
 import xarray as xr
-from shapely.geometry import Point
+from shapely.geometry import Point, box
 
 
 def create_and_save_chips_with_seg_maps(

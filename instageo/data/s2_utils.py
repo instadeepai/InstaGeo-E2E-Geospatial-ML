@@ -36,7 +36,7 @@ import xarray as xr
 from absl import logging
 from rasterio.crs import CRS
 
-from instageo.data.data_pipeline import get_tile_info
+from instageo.data.data_pipeline import get_tile_info, make_valid_bbox
 
 
 class S2AuthState:
@@ -442,6 +442,9 @@ def retrieve_s2_metadata(
         lat_min,
         lat_max,
     ) in tile_info_df.iterrows():
+        lon_min, lat_min, lon_max, lat_max = make_valid_bbox(
+            lon_min, lat_min, lon_max, lat_max
+        )
         start_date_window = (
             pd.to_datetime(start_date) - timedelta(days=temporal_tolerance)
         ).strftime("%Y-%m-%d")

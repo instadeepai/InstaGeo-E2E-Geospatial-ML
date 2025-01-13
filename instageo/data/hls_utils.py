@@ -159,35 +159,6 @@ def retrieve_hls_metadata(
     Returns:
         A dictionary mapping tile_id to a list of available HLS granules.
     """
-
-    def _make_valid_bbox(
-        lon_min: float, lat_min: float, lon_max: float, lat_max: float
-    ) -> tuple[float, float, float, float]:
-        """Create a valid bounding box to search for HLS tiles.
-
-        The purpose of this function is to still be able to extract data through
-        earthaccess even given just a single observation in a tile (min_count = 1).
-        When the number of observations in a tile is 1, or if we only have aligned
-        observations, the lon_min, lat_min, lon_max, lat_max extracted from those
-        won't produce a valid bounding box. Thus, we attempt to create a small buffer
-        around the observation(s) to produce a valid bounding box.
-
-        Args:
-            lon_min (float): Minimum longitude
-            lat_min (float): Minimum latitude
-            lon_max (float): Maximum longitude
-            lat_max (float): Maximum latitude
-
-        Returns:
-            A tuple of coordinates to use for a bounding box
-
-        """
-        epsilon = 1e-3
-        if box(lon_min, lat_min, lon_max, lat_max).is_valid:
-            return lon_min, lat_min, lon_max, lat_max
-        else:
-            return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
-
     granules_dict: Any = {}
     for _, (
         tile_id,
@@ -200,7 +171,7 @@ def retrieve_hls_metadata(
     ) in tile_info_df.iterrows():
         results = earthaccess.search_data(
             short_name=["HLSL30", "HLSS30"],
-            bounding_box=(_make_valid_bbox(lon_min, lat_min, lon_max, lat_max)),
+            bounding_box=(make_valid_bbox(lon_min, lat_min, lon_max, lat_max)),
             temporal=(f"{start_date}T00:00:00", f"{end_date}T23:59:59"),
         )
         granules = pd.json_normalize(
