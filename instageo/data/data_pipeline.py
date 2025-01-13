@@ -217,7 +217,10 @@ def create_and_save_chips_with_seg_maps(
 
 
 def get_tile_info(
-    data: pd.DataFrame, num_steps: int = 3, temporal_step: int = 10
+    data: pd.DataFrame,
+    num_steps: int = 3,
+    temporal_step: int = 10,
+    temporal_tolerance: int = 5,
 ) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
     """Get Tile Info.
 
@@ -229,6 +232,8 @@ def get_tile_info(
         data (pd.DataFrame): A dataframe containing observation records.
         num_steps (int): Number of temporal time steps
         temporal_step (int): Size of each temporal step.
+        temporal_tolerance (int): Number of days used as offset for the
+        start and end dates to search for each tile.
 
     Returns:
         A `tile_info` dataframe and a list of `tile_queries`
@@ -237,13 +242,13 @@ def get_tile_info(
         drop=True
     )
     tile_queries = []
-    tile_info = []
+    tile_info: Any = []
     for _, (tile_id, date, lon, lat) in data.iterrows():
         history = []
         for i in range(num_steps):
             curr_date = date - pd.Timedelta(days=temporal_step * i)
             history.append(curr_date.strftime("%Y-%m-%d"))
-            tile_info.append([tile_id, curr_date.strftime("%Y-%m-%d"), lon, lat])
+            tile_info.append([tile_id, curr_date, lon, lat])
         tile_queries.append((tile_id, history))
     tile_info = (
         pd.DataFrame(tile_info, columns=["tile_id", "date", "lon", "lat"])
@@ -257,6 +262,10 @@ def get_tile_info(
             lat_max=("lat", "max"),
         )
     ).reset_index()
+    tile_info["min_date"] -= pd.Timedelta(days=temporal_tolerance)
+    tile_info["max_date"] += pd.Timedelta(days=temporal_tolerance)
+    tile_info["min_date"] = tile_info["min_date"].dt.strftime("%Y-%m-%d")
+    tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%d")
     return tile_info, tile_queries
 
 

@@ -123,8 +123,8 @@ def test_get_tile_info(observation_data):
         pd.DataFrame(
             {
                 "tile_id": ["38PMB"],
-                "min_date": ["2022-05-29"],
-                "max_date": ["2022-06-09"],
+                "min_date": ["2022-05-24"],
+                "max_date": ["2022-06-14"],
                 "lon_min": [44.451435],
                 "lon_max": [44.744167],
                 "lat_min": [15.099767],
