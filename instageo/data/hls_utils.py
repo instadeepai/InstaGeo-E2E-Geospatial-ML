@@ -342,7 +342,10 @@ def add_hls_granules(
         containing all the bands.
     """
     tiles_info, tile_queries = get_tile_info(
-        data, num_steps=num_steps, temporal_step=temporal_step
+        data,
+        num_steps=num_steps,
+        temporal_step=temporal_step,
+        temporal_tolerance=temporal_tolerance,
     )
     tile_queries_str = [
         f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
