@@ -455,9 +455,6 @@ def retrieve_s2_metadata(
         response = requests.get(url)
         if response.status_code == 200:
             granules_metadata = response.json()
-            import json
-
-            logging.info(json.dumps(granules_metadata, indent=4))
             granules_dict[tile_id] = process_s2_metadata(granules_metadata, tile_id)
         else:
             granules_dict[tile_id] = None
