@@ -27,7 +27,7 @@ import mgrs
 import numpy as np
 import pandas as pd
 import xarray as xr
-from shapely.geometry import Point
+from shapely.geometry import Point, box
 
 
 def s2_create_and_save_chips_with_seg_maps(
@@ -354,3 +354,32 @@ def get_chip_coords(
         ~tile.rio.transform() * (df.geometry.x.values, df.geometry.y.values)
     ).astype(int)
     return np.unique(np.stack((cols // chip_size, rows // chip_size), axis=-1), axis=0)
+
+
+def make_valid_bbox(
+    lon_min: float, lat_min: float, lon_max: float, lat_max: float
+) -> tuple[float, float, float, float]:
+    """Create a valid bounding box to search for tiles.
+
+    The purpose of this function is to still be able to extract data through
+    earthaccess even given just a single observation in a tile (min_count = 1).
+    When the number of observations in a tile is 1, or if we only have aligned
+    observations, the lon_min, lat_min, lon_max, lat_max extracted from those
+    won't produce a valid bounding box. Thus, we attempt to create a small buffer
+    around the observation(s) to produce a valid bounding box.
+
+    Args:
+        lon_min (float): Minimum longitude
+        lat_min (float): Minimum latitude
+        lon_max (float): Maximum longitude
+        lat_max (float): Maximum latitude
+
+    Returns:
+        A tuple of coordinates to use for a bounding box
+
+    """
+    epsilon = 1e-3
+    if box(lon_min, lat_min, lon_max, lat_max).is_valid:
+        return lon_min, lat_min, lon_max, lat_max
+    else:
+        return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
