@@ -81,7 +81,7 @@ def create_and_save_chips_with_seg_maps(
     seg_maps: list[str | None] = []
     n_chips_x = ds.sizes["x"] // chip_size
     n_chips_y = ds.sizes["y"] // chip_size
-    chip_coords = list(set(get_chip_coords(df, ds, chip_size)))
+    chip_coords = get_chip_coords(df, ds, chip_size)
     for x, y in chip_coords:
         if (x >= n_chips_x) or (y >= n_chips_y):
             continue
@@ -97,7 +97,7 @@ def create_and_save_chips_with_seg_maps(
         chip = ds.isel(
             x=slice(x * chip_size, (x + 1) * chip_size),
             y=slice(y * chip_size, (y + 1) * chip_size),
-        )
+        ).compute()
         if chip.count().values == 0:
             continue
         seg_map = create_segmentation_map(chip, df, no_data_value)
