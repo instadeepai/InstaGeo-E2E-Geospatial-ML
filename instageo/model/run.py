@@ -433,7 +433,7 @@ def compute_mean_std(data_loader: DataLoader) -> Tuple[List[float], List[float]]
     nb_samples = 0
 
     for data, _ in data_loader:
-        # Reshape data to (B, C, H*W)
+        # Reshape data to (B, C, T*H*W)
         batch_samples = data.size(0)
         data = data.view(batch_samples, data.size(1), -1)
 
