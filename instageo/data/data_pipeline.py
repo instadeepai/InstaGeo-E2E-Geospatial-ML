@@ -27,104 +27,27 @@ import mgrs
 import numpy as np
 import pandas as pd
 import xarray as xr
-from shapely.geometry import Point, box
+from shapely.geometry import box
 
-
-def s2_create_and_save_chips_with_seg_maps(
-    mf_reader: Callable,
-    tile_dict: dict[str, dict[str, str]],
-    tile_id: str,
-    df: pd.DataFrame,
-    chip_size: int,
-    output_directory: str,
-    no_data_value: int,
-    src_crs: int,
-    mask_cloud: bool,
-    water_mask: bool,
-    window_size: int,
-) -> tuple[list[str], list[str | None]]:
-    """Chip Creator.
-
-    Create chips and corresponding segmentation maps from a satellite image tile, read in as Xarray
-    dataset, and save them to an output directory.
-
-    Args:
-        mf_reader (callable[dict[str, dict[str, str]], bool, bool]): A multi-file reader that
-            accepts a dictionary of satellite image tile paths and reads it into an Xarray dataset.
-            Optionally performs water and cloud masking based on the boolean flags passed.
-        tile_dict (Dict): A dict mapping band names to tile filepath.
-        tile_id (str): MGRS ID of the tiles in `tile_dict`.
-        df (pd.DataFrame): DataFrame containing the labelled data for creating segmentation maps.
-        chip_size (int): Size of each chip.
-        output_directory (str): Directory where the chips and segmentation maps will be saved.
-        no_data_value (int): Value to use for no data areas in the segmentation maps.
-        src_crs (int): CRS of points in `df`
-        mask_cloud (bool): Perform cloud masking if True.
-        water_mask (bool): Perform water masking if True.
-        window_size (int): Window size to use around the observation pixel.
-
-    Returns:
-        A tuple containing the lists of created chips and segmentation maps.
-    """
-    ds, crs = mf_reader(tile_dict, mask_cloud, water_mask)
-    df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
-    df.set_crs(epsg=src_crs, inplace=True)
-    df = df.to_crs(crs=crs)
-
-    df = df[
-        (ds["x"].min().item() <= df["geometry"].x)
-        & (df["geometry"].x <= ds["x"].max().item())
-        & (ds["y"].min().item() <= df["geometry"].y)
-        & (df["geometry"].y <= ds["y"].max().item())
-    ]
-    os.makedirs(output_directory, exist_ok=True)
-    date_id = df.iloc[0]["date"].strftime("%Y%m%d")
-    chips = []
-    seg_maps: list[str | None] = []
-    n_chips_x = ds.sizes["x"] // chip_size
-    n_chips_y = ds.sizes["y"] // chip_size
-    chip_coords = get_chip_coords(df, ds, chip_size)
-    for x, y in chip_coords:
-        if (x >= n_chips_x) or (y >= n_chips_y):
-            continue
-        chip_id = f"{date_id}_{tile_id}_{x}_{y}"
-        chip_name = f"chip_{chip_id}.tif"
-        seg_map_name = f"seg_map_{chip_id}.tif"
-
-        chip_filename = os.path.join(output_directory, "chips", chip_name)
-        seg_map_filename = os.path.join(output_directory, "seg_maps", seg_map_name)
-        if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
-            continue
-
-        chip = ds.isel(
-            x=slice(x * chip_size, (x + 1) * chip_size),
-            y=slice(y * chip_size, (y + 1) * chip_size),
-        ).compute()
-        if chip.count().values == 0:
-            continue
-        seg_map = create_segmentation_map(
-            chip.band_data, df, no_data_value, window_size
-        )
-        if seg_map.where(seg_map != no_data_value).count().values == 0:
-            continue
-        seg_maps.append(seg_map_name)
-        seg_map.rio.to_raster(seg_map_filename)
-        chip = chip.fillna(no_data_value)
-        chips.append(chip_name)
-        chip.band_data.rio.to_raster(chip_filename)
-    return chips, seg_maps
+# Masks decoding positions
+MASK_DECODING_POS: dict[str, dict] = {
+    "HLS": {"cloud": 1, "water": 5},
+    "S2": {"cloud": [8, 9], "water": [6]},
+}
 
 
 def create_and_save_chips_with_seg_maps(
     data_reader: Callable,
     mask_fn: Callable,
     processing_method: str,
-    hls_tile_dict: dict[str, Any],
+    tile_dict: dict[str, Any],
+    data_source: str,
     df: pd.DataFrame,
     chip_size: int,
     output_directory: str,
     no_data_value: int,
     src_crs: int,
+    mask_decoder: Callable,
     mask_types: list[str],
     masking_strategy: str,
     window_size: int,
@@ -135,11 +58,14 @@ def create_and_save_chips_with_seg_maps(
     an output directory.
 
     Args:
-        data_reader (Callable): Function to use to read HLS data.
+        mf_reader (callable[dict[str, Any], bool]): A multi-file reader that
+            accepts a dictionary of satellite image tile paths and reads it into an Xarray dataset
+            or dataarray. Optionally performs masking based on the boolean mask types provided.
         mask_fn (Callable): Function to use to apply masks.
         processing_method (str): Processing method to use to create the chips and
         segmentation maps.
-        hls_tile_dict (Dict): A dict mapping band names to HLS tile filepath.
+        tile_dict (Dict): A dict mapping band names to tile filepath.
+        data_source (str): Data source.
         df (pd.DataFrame): DataFrame containing the data for segmentation maps.
         chip_size (int): Size of each chip.
         output_directory (str): Directory where the chips and segmentation maps will be
@@ -147,6 +73,7 @@ def create_and_save_chips_with_seg_maps(
         no_data_value (int): Value to use for no data areas in the segmentation maps.
         src_crs (int): CRS of points in `df`
         mask_types (list[str]): Types of masking to perform.
+        mask_decoder (Callable): Function to use to process/extract actual mask values
         masking_strategy (str): Masking strategy to apply ("each" for timestep-wise masking,
         and "any" to exclude pixels if the mask is present for at least one timestep. The
         behavior is the same if the chip is extracted for one timestep.)
@@ -156,7 +83,7 @@ def create_and_save_chips_with_seg_maps(
         A tuple containing the lists of created chips and segmentation maps.
     """
     load_masks = True if mask_types else False
-    dsb, dsm, crs = data_reader(hls_tile_dict, load_masks=load_masks)
+    dsb, dsm, crs = data_reader(tile_dict, load_masks=load_masks)
     df = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(x=df.x, y=df.y))
     df.set_crs(epsg=src_crs, inplace=True)
     df = df.to_crs(crs=crs)
@@ -167,8 +94,18 @@ def create_and_save_chips_with_seg_maps(
         & (df["geometry"].y <= dsb["y"].max().item())
     ]
     os.makedirs(output_directory, exist_ok=True)
-    tile_name_splits = hls_tile_dict["tiles"]["B02_0"].split(".")
-    tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
+    # TODO: handle chip names more gracefully
+    tile_name_splits = (
+        tile_dict["tiles"]["B02_0"].split(".")
+        if data_source == "HLS"
+        else tile_dict["granules"][0].split(".")[0].split("/")[-1].split("_")
+    )
+    tile_id = (
+        f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
+        if data_source == "HLS"
+        else f"{tile_name_splits[0]}_{tile_name_splits[1]}_"
+        f"{tile_name_splits[5]}_{tile_name_splits[2]}"
+    )
     date_id = df.iloc[0]["date"].strftime("%Y%m%d")
     chips = []
     seg_maps: list[str | None] = []
@@ -203,6 +140,8 @@ def create_and_save_chips_with_seg_maps(
                 chip=chip,
                 mask=chip_mask,
                 no_data_value=no_data_value,
+                mask_decoder=mask_decoder,
+                data_source=data_source,
                 mask_types=mask_types,
                 masking_strategy=masking_strategy,
             )
@@ -216,6 +155,49 @@ def create_and_save_chips_with_seg_maps(
         chips.append(chip_name)
         chip.rio.to_raster(chip_filename)
     return chips, seg_maps
+
+
+def apply_mask(
+    chip: xr.DataArray,
+    mask: xr.DataArray,
+    no_data_value: int,
+    mask_decoder: Callable,
+    data_source: str,
+    masking_strategy: str = "each",
+    mask_types: list[str] = list(MASK_DECODING_POS["HLS"].keys()),
+) -> xr.DataArray:
+    """Apply masking to a chip.
+
+    Args:
+        chip (xr.DataArray): Chip array containing the pixels to be masked out.
+        mask (xr.DataArray): Array containing the masks.
+        no_data_value (int): Value to be used for masked pixels.
+        mask_decoder (Callable): Function to use to process/extract actual mask values
+        data_source (str): Data source used to extract masking positions based on mask types
+        masking_strategy (str): Masking strategy to apply ("each" for timestep-wise masking,
+        and "any" to exclude pixels if the mask is present for at least one timestep. The
+        behavior is the same if the chip is extracted for one timestep.)
+        mask_types (list[str]): Mask types to apply.
+
+    Returns:
+        xr.DataArray: The masked data array.
+    """
+    for mask_type in mask_types:
+        pos = MASK_DECODING_POS[data_source].get(mask_type, None)
+        if pos:
+            decoded_mask = mask_decoder(mask, pos)
+            if masking_strategy == "each":
+                # repeat across timesteps so that, each mask is applied to its
+                # corresponding timestep
+                decoded_mask = decoded_mask.values.repeat(
+                    chip.shape[0] // mask.shape[0], axis=0
+                )
+            elif masking_strategy == "any":
+                # collapse the mask to exclude a pixel if its corresponding mask value
+                # for at least one timestep is 1
+                decoded_mask = decoded_mask.values.any(axis=0)
+            chip = chip.where(decoded_mask == 0, other=no_data_value)
+    return chip
 
 
 def get_tile_info(

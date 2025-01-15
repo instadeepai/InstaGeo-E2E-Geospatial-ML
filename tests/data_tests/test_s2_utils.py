@@ -12,6 +12,7 @@ from instageo.data.s2_utils import (
     S2AuthState,
     add_s2_granules,
     apply_class_mask,
+    create_mask_from_scl,
     create_s2_dataset,
     extract_and_delete_zip_files,
     find_best_tile,
@@ -141,13 +142,13 @@ def sample_dataset():
 
 @pytest.fixture
 def sample_scl_data():
-    return np.array([[1, 2], [3, 4]])  # 2x2 SCL mask
+    return xr.DataArray(np.array([[1, 2], [3, 4]]))  # 2x2 SCL mask
 
 
-def test_apply_class_mask_valid_mask(sample_dataset, sample_scl_data):
+def test_create_mask_from_valid_scl_data(sample_dataset, sample_scl_data):
     class_ids = [2, 3]
-    result = apply_class_mask(sample_dataset, sample_scl_data, class_ids)
-
+    mask = create_mask_from_scl(sample_scl_data, class_ids)
+    result = sample_dataset.where(mask.values == 0)
     expected_data = np.array(
         [
             [[1, np.nan], [np.nan, 4]],
@@ -159,10 +160,10 @@ def test_apply_class_mask_valid_mask(sample_dataset, sample_scl_data):
     np.testing.assert_almost_equal(result["bands"].values, expected_data)
 
 
-def test_apply_class_mask_no_classes_to_mask(sample_dataset, sample_scl_data):
+def test_create_mask_from_scl_data_no_classes(sample_dataset, sample_scl_data):
     class_ids = []
-    result = apply_class_mask(sample_dataset, sample_scl_data, class_ids)
-
+    mask = create_mask_from_scl(sample_scl_data, class_ids)
+    result = sample_dataset.where(mask.values == 0)
     xr.testing.assert_equal(result, sample_dataset)
 
 

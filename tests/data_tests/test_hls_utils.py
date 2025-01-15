@@ -8,10 +8,9 @@ import rasterio
 import xarray as xr
 from rasterio.crs import CRS
 
-from instageo.data.data_pipeline import get_tiles
+from instageo.data.data_pipeline import apply_mask, get_tiles
 from instageo.data.hls_utils import (
     add_hls_granules,
-    apply_mask,
     create_hls_dataset,
     decode_fmask_value,
     find_closest_tile,
@@ -126,6 +125,8 @@ def test_open_mf_tiff_dataset_cloud_mask():
         result_with_mask,
         mask_ds.band_data,
         -1,
+        decode_fmask_value,
+        "HLS",
         masking_strategy="any",
     )
     fmask = xr.open_dataset("tests/data/fmask.tif")

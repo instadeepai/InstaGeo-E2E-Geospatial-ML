@@ -33,9 +33,10 @@ from tqdm import tqdm
 
 from instageo.data import hls_utils, s2_utils
 from instageo.data.data_pipeline import (
+    MASK_DECODING_POS,
+    apply_mask,
     create_and_save_chips_with_seg_maps,
     get_tiles,
-    s2_create_and_save_chips_with_seg_maps,
 )
 from instageo.data.settings import GDALOptions
 
@@ -89,11 +90,6 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
-flags.DEFINE_boolean(
-    "download_only", False, "Downloads dataset without creating chips."
-)
-flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
-flags.DEFINE_boolean("water_mask", False, "Perform Water Masking")
 flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2"], "Data source to use.")
 flags.DEFINE_integer(
     "cloud_coverage",
@@ -130,8 +126,8 @@ flags.DEFINE_list(
 )
 flags.register_validator(
     "mask_types",
-    lambda val_list: all(v in hls_utils.MASK_DECODING_POS.keys() for v in val_list),
-    message=f"Valid values are {list(hls_utils.MASK_DECODING_POS.keys())}",
+    lambda val_list: all(v in MASK_DECODING_POS["HLS"].keys() for v in val_list),
+    message=f"Valid values are {list(MASK_DECODING_POS['HLS'].keys())}",
 )
 flags.DEFINE_enum(
     "masking_strategy",
@@ -247,19 +243,21 @@ def main(argv: Any) -> None:
                 ]
                 try:
                     chips, seg_maps = create_and_save_chips_with_seg_maps(
-                        (
+                        data_reader=(
                             hls_utils.open_hls_cogs
                             if FLAGS.processing_method == "cog"
                             else hls_utils.open_mf_tiff_dataset
                         ),
-                        hls_utils.apply_mask,
-                        FLAGS.processing_method,
-                        hls_tile_dict,
-                        obsv_data,
+                        mask_fn=apply_mask,
+                        processing_method=FLAGS.processing_method,
+                        tile_dict=hls_tile_dict,
+                        data_source=FLAGS.data_source,
+                        df=obsv_data,
                         chip_size=FLAGS.chip_size,
                         output_directory=FLAGS.output_directory,
                         no_data_value=FLAGS.no_data_value,
                         src_crs=FLAGS.src_crs,
+                        mask_decoder=hls_utils.decode_fmask_value,
                         mask_types=FLAGS.mask_types,
                         masking_strategy=FLAGS.masking_strategy,
                         window_size=FLAGS.window_size,
@@ -328,7 +326,7 @@ def main(argv: Any) -> None:
             password=os.getenv("PASSWORD"),
         )
 
-        if FLAGS.download_only:
+        if FLAGS.processing_method == "download-only":
             return
 
         logging.info("Unzipping Sentinel-2 products")
@@ -348,17 +346,20 @@ def main(argv: Any) -> None:
                 & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
             ]
             try:
-                chips, seg_maps = s2_create_and_save_chips_with_seg_maps(
-                    s2_utils.open_mf_jp2_dataset,
-                    tile_dict,
-                    tile_id,
-                    obsv_data,
+                chips, seg_maps = create_and_save_chips_with_seg_maps(
+                    data_reader=s2_utils.open_mf_jp2_dataset,
+                    mask_fn=apply_mask,
+                    processing_method=FLAGS.processing_method,
+                    tile_dict=tile_dict,
+                    data_source=FLAGS.data_source,
+                    df=obsv_data,
                     chip_size=FLAGS.chip_size,
                     output_directory=FLAGS.output_directory,
                     no_data_value=FLAGS.no_data_value,
                     src_crs=FLAGS.src_crs,
-                    mask_cloud=FLAGS.mask_cloud,
-                    water_mask=FLAGS.water_mask,
+                    mask_decoder=s2_utils.create_mask_from_scl,
+                    mask_types=FLAGS.mask_types,
+                    masking_strategy=FLAGS.masking_strategy,
                     window_size=FLAGS.window_size,
                 )
                 all_chips.extend(chips)

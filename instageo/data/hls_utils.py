@@ -42,9 +42,6 @@ from instageo.data.data_pipeline import get_tile_info, make_valid_bbox
 BLOCKSIZE_X = 256
 BLOCKSIZE_Y = 256
 
-# Masks decoding positions
-MASK_DECODING_POS = {"cloud": 1, "water": 5}
-
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
     """Extracts the date from a HLS Tile Name.
@@ -171,45 +168,6 @@ def decode_fmask_value(
     """
     quotient = value // (2**position)
     return quotient - ((quotient // 2) * 2)
-
-
-def apply_mask(
-    chip: xr.DataArray,
-    mask: xr.DataArray,
-    no_data_value: int,
-    masking_strategy: str = "each",
-    mask_types: list[str] = list(MASK_DECODING_POS.keys()),
-) -> xr.DataArray:
-    """Apply masking to a chip.
-
-    Args:
-        chip (xr.DataArray): Chip array containing the pixels to be masked out.
-        mask (xr.DataArray): Array containing the masks.
-        no_data_value (int): Value to be used for masked pixels.
-        masking_strategy (str): Masking strategy to apply ("each" for timestep-wise masking,
-        and "any" to exclude pixels if the mask is present for at least one timestep. The
-        behavior is the same if the chip is extracted for one timestep.)
-        mask_types (list[str]): Mask types to apply.
-
-    Returns:
-        xr.DataArray: An array representing a chip with the relevant pixels being masked.
-    """
-    for mask_type in mask_types:
-        pos = MASK_DECODING_POS.get(mask_type, None)
-        if pos:
-            decoded_mask = decode_fmask_value(mask, pos)
-            if masking_strategy == "each":
-                # repeat across timesteps so that, each mask is applied to its
-                # corresponding timestep
-                decoded_mask = decoded_mask.values.repeat(
-                    chip.shape[0] // mask.shape[0], axis=0
-                )
-            elif masking_strategy == "any":
-                # collapse the mask to exclude a pixel if its corresponding mask value
-                # for at least one timestep is 1
-                decoded_mask = decoded_mask.values.any(axis=0)
-            chip = chip.where(decoded_mask == 0, other=no_data_value)
-    return chip
 
 
 def retrieve_hls_metadata(
