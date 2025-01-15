@@ -309,15 +309,16 @@ def parallel_downloads_s2(
 
 def open_mf_jp2_dataset(
     band_files: dict[str, dict[str, str]],
-    mask_cloud: bool,
-    water_mask: bool,
-) -> tuple[xr.Dataset, CRS]:
+    load_masks: bool = False,
+) -> tuple[xr.Dataset, xr.Dataset | None, CRS]:
     """Open multiple JP2 files as an xarray Dataset.
 
     Args:
         band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
         mask_cloud (bool): Perform cloud masking.
         water_mask (bool): Perform water masking.
+        load_masks (bool): Whether or not to load the masks files.
+
 
     Returns:
         (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
@@ -341,46 +342,37 @@ def open_mf_jp2_dataset(
         band_paths,
         concat_dim="band",
         combine="nested",
+        mask_and_scale=False,  # Scaling will be applied manually
     )
-    scl_data = xr.open_mfdataset(
-        scl_paths,
-        concat_dim="band",
-        combine="nested",
-    ).band_data.values
-
-    if water_mask:
-        bands_dataset = apply_class_mask(
-            bands_dataset, scl_data, [6]
-        )  # Class 6 for water
-    if mask_cloud:
-        bands_dataset = apply_class_mask(
-            bands_dataset, scl_data, [8, 9]
-        )  # Classes 8 and 9 for clouds
+    bands_dataset.band_data.attrs["scale_factor"] = 1
+    scl_data = (
+        xr.open_mfdataset(
+            scl_paths,
+            concat_dim="band",
+            combine="nested",
+        )
+        if load_masks
+        else None
+    )
 
     with rasterio.open(band_paths[0]) as src:
         crs = src.crs
-    return bands_dataset, crs
+    return bands_dataset, scl_data, crs
 
 
-def apply_class_mask(
-    dataset: xr.Dataset, scl_data: np.ndarray, class_ids: list[int]
-) -> xr.Dataset:
-    """Mask a specific class within SCL file.
+def create_mask_from_scl(
+    scl_data: xr.Dataset | xr.DataArray, class_ids: list[int]
+) -> xr.Dataset | xr.DataArray:
+    """Creates masks based on SCL data .
 
-    Apply a mask to the dataset based on specified SCL class IDs.
-    Args:
-        dataset (xr.Dataset): The dataset to which the mask will be applied.
-        scl_data (np.ndarray): The SCL data used for masking.
-        class_ids (list[int]): The class IDs to mask out (set to NaN).
+    Arguments:
+        scl_data: SCL input xarray Dataset or DataArray.
+        class_ids: Class ids to use to produce the mask.
 
     Returns:
-        xr.Dataset: The masked dataset.
+        Xarray dataset or dataarray containing the produced mask.
     """
-    mask_array = np.isin(scl_data, class_ids).astype(np.uint8)
-    if mask_array.ndim == 3:
-        mask_array = mask_array.any(axis=0)
-    dataset = dataset.where(mask_array == 0)
-    return dataset
+    return scl_data.isin(class_ids).astype(np.uint8)
 
 
 def process_s2_metadata(metadata: dict, tile_id: str) -> pd.DataFrame:

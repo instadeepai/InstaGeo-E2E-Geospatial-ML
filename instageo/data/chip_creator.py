@@ -555,7 +555,7 @@ def main(argv: Any) -> None:
             password=os.getenv("PASSWORD"),
         )
 
-        if FLAGS.download_only:
+        if FLAGS.processing_method == "download-only":
             return
 
         logging.info("Unzipping Sentinel-2 products")
