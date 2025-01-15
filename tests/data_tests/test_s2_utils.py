@@ -11,7 +11,6 @@ import xarray as xr
 from instageo.data.s2_utils import (
     S2AuthState,
     add_s2_granules,
-    apply_class_mask,
     create_mask_from_scl,
     create_s2_dataset,
     extract_and_delete_zip_files,
