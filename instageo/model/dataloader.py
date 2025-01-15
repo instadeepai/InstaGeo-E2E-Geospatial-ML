@@ -244,14 +244,6 @@ def get_raster_data(
             data = src.read()
     if (not is_label) and bands:
         data = data[bands, ...]
-    # For some reasons, some few HLS tiles are not scaled in v2.0.
-    # In the following lines, we find and scale them
-    bands = []
-    for band in data:
-        if band.max() > 10:
-            band *= 0.0001
-        bands.append(band)
-    data = np.stack(bands, axis=0)
     return data
 
 
