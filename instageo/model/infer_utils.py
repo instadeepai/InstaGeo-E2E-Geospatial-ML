@@ -26,6 +26,7 @@ import pytorch_lightning as pl
 import rasterio
 import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from instageo.model.dataloader import crop_array
 
@@ -120,7 +121,7 @@ def chip_inference(
     device = "cuda" if device == "gpu" else device
 
     with torch.no_grad():
-        for (data, _), file_names in dataloader:
+        for (data, _), file_names in tqdm(dataloader, desc="Running Inference"):
             data = data.to(device)
             prediction_batch = model(data)
             prediction_cls = (
