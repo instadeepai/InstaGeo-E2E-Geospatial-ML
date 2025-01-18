@@ -18,10 +18,9 @@
 # ------------------------------------------------------------------------------
 
 """Utils for Running Inference."""
-
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict
+from typing import Any, Dict, Generator, List
 
 import numpy as np
 import pytorch_lightning as pl
@@ -61,42 +60,40 @@ def sliding_window_inference(
     _, _, width, height = hls_tile.shape
 
     final_prediction = np.zeros((height, width), dtype=np.float32)
+    patch_coords = [
+        (x, y)
+        for y in range(0, height - window_size[1] + 1, stride)
+        for x in range(0, width - window_size[0] + 1, stride)
+    ]
 
-    patch_coords = []
-    current_batch = []
+    def get_batches(
+        patches: List[torch.Tensor], batch_size: int
+    ) -> Generator[List[torch.Tensor], None, None]:
+        """Splits a list of patches into batches of the specified size.
 
-    for y in range(0, height - window_size[1] + 1, stride):
-        for x in range(0, width - window_size[0] + 1, stride):
-            patch_array = crop_array(
-                hls_tile, x, y, x + window_size[0], y + window_size[1]
-            )
-            patch_coords.append((x, y))
-            current_batch.append(patch_array)
+        Args:
+            patches: List of tensors representing patches.
+            batch_size: Number of patches in each batch.
 
-            if len(current_batch) == batch_size:
-                batch_array = torch.stack(current_batch, dim=0)
-                batch_results = (
-                    model.predict_step(batch_array.to(device)).detach().cpu().numpy()
-                )
+        Yields:
+            Batches of patches as lists of tensors.
+        """
+        for i in range(0, len(patches), batch_size):
+            yield patches[i : i + batch_size]
 
-                for i, (px, py) in enumerate(patch_coords):
-                    final_prediction[
-                        py : py + window_size[1], px : px + window_size[0]
-                    ] = batch_results[i]
+    with torch.no_grad():
+        for batch_coords in get_batches(patch_coords, batch_size):
+            batch_patches = [
+                crop_array(hls_tile, x, y, x + window_size[0], y + window_size[1])
+                for x, y in batch_coords
+            ]
+            batch_tensor = torch.stack(batch_patches, dim=0).to(device)
+            batch_results = model.predict_step(batch_tensor).detach().cpu().numpy()
 
-                current_batch = []
-                patch_coords = []
-
-    if current_batch:
-        batch_array = torch.stack(current_batch, dim=0)
-        batch_results = (
-            model.predict_step(batch_array.to(device)).detach().cpu().numpy()
-        )
-
-        for i, (px, py) in enumerate(patch_coords):
-            final_prediction[
-                py : py + window_size[1], px : px + window_size[0]
-            ] = batch_results[i]
+            for (x, y), result in zip(batch_coords, batch_results):
+                final_prediction[
+                    y : y + window_size[1], x : x + window_size[0]
+                ] = result
 
     return final_prediction
 
