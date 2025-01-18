@@ -123,9 +123,8 @@ def process_and_augment(
     label = None
     # convert to PIL for easier transforms
     ims = [Image.fromarray(im) for im in ims]
-    if y is not None:
+    if train and (y is not None):
         label = Image.fromarray(y.copy().squeeze())
-    if train:
         ims, label = random_crop_and_flip(ims, label, im_size)
     ims, label = normalize_and_convert_to_tensor(ims, label, mean, std, temporal_size)
     return ims, label
@@ -332,6 +331,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         reduce_to_zero: bool,
         constant_multiplier: float,
         bands: List[int] | None = None,
+        include_filenames: bool = False,
     ):
         """Dataset Class for loading and preprocessing the dataset.
 
@@ -344,6 +344,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             reduce_to_zero (bool): Reduces the label index to start from Zero.
             replace_label (Tuple): Tuple of value to replace and the replacement value.
             constant_multiplier (float): Constant multiplier for image.
+            include_filenames (bool): Flag that determines whether to retuturn filenames.
 
         """
         self.input_root = input_root
@@ -354,6 +355,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         self.replace_label = replace_label
         self.reduce_to_zero = reduce_to_zero
         self.constant_multiplier = constant_multiplier
+        self.include_filenames = include_filenames
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Retrieves a sample from dataset.
@@ -375,7 +377,10 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             bands=self.bands,
             constant_multiplier=self.constant_multiplier,
         )
-        return self.preprocess_func(arr_x, arr_y)
+        if self.include_filenames:
+            return self.preprocess_func(arr_x, arr_y), im_fname
+        else:
+            return self.preprocess_func(arr_x, arr_y)
 
     def __len__(self) -> int:
         """Return length of dataset."""

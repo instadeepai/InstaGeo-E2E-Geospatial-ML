@@ -19,9 +19,13 @@
 
 """Utils for Running Inference."""
 
+import os
+
 import numpy as np
 import pytorch_lightning as pl
+import rasterio
 import torch
+from torch.utils.data import DataLoader
 
 from instageo.model.dataloader import crop_array
 
@@ -92,3 +96,48 @@ def sliding_window_inference(
             ] = batch_results[i]
 
     return final_prediction
+
+
+def chip_inference(
+    dataloader: DataLoader,
+    output_folder: str,
+    model: pl.LightningModule,
+    device: str = "gpu",
+) -> None:
+    """Chip Inference.
+
+    Performs inference on chips and saves corresponding prediction as a TIFF file.
+
+    Args:
+        dataloader: Dataloader that yields input, label and input filenames.
+        model: Trained model for inference.
+        output_folder: Path to save predictions.
+        device: Device used for training.
+
+    Returns:
+        None.
+    """
+    device = "cuda" if device == "gpu" else device
+
+    with torch.no_grad():
+        for (data, _), file_names in dataloader:
+            data = data.to(device)
+            prediction_batch = model(data)
+            prediction_cls = (
+                torch.nn.functional.softmax(prediction_batch, dim=1)
+                .argmax(dim=1)
+                .cpu()
+                .numpy()
+            )
+
+            # Save prediction as TIFF
+            for prediction, file_name in zip(prediction_cls, file_names):
+                with rasterio.open(file_name) as src:
+                    profile = src.profile
+                    profile.update(count=1, dtype=rasterio.float32)
+                output_basename = os.path.basename(file_name).replace(
+                    "chip", "prediction"
+                )
+                output_file_path = os.path.join(output_folder, output_basename)
+                with rasterio.open(output_file_path, "w", **profile) as dst:
+                    dst.write(prediction, 1)
