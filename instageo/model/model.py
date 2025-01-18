@@ -160,12 +160,7 @@ class PrithviSeg(nn.Module):
         if freeze_backbone:
             for param in model.parameters():
                 param.requires_grad = False
-        filtered_checkpoint_state_dict = {
-            key[len("encoder.") :]: value
-            for key, value in checkpoint.items()
-            if key.startswith("encoder.")
-        }
-        _ = model.load_state_dict(filtered_checkpoint_state_dict)
+        _ = model.load_state_dict(checkpoint, strict=False)
 
         self.prithvi_100M_backbone = model
 

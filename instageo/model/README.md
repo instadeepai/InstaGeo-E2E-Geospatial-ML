@@ -38,7 +38,7 @@ pip install . #run from instageo root
     - `learning_rate`: Initial learning rate.
     - `num_epochs`: Number of training epochs.
     - `batch_size`: Batch size for training and validation.
-    - `mode`: Select training, evaluation or stats mode.
+    - `mode`: Select one of training or evaluation mode.
 See `configs/config.yaml` for more.
 
 2. **Dataset Preparation:** Prepare your geospatial data using the InstaGeo Chip Creator or similar and place it in the specified `root_dir`. Ensure that the csv file for each dataset has `Input` and `Label` columns corresponding to the path of the image and label relative to the `root_dir`. Additionally, ensure the data is compatible with `InstaGeoDataset`
@@ -221,6 +221,5 @@ When the saved checkpoint is evaluated on the test set, you should have results 
 
 ## Customization
 
-- Use the `stats` mode to compute the `mean`, and `std` lists of your dataset.
-- Modify the `bands`, `mean`, and `std` lists in `configs/config.yaml` to match your dataset's characteristics and improve its normalization.
+- Modify the `bands`, `mean`, and `std` lists in `configs/config.yaml` to match your dataset's characteristics.
 - Implement additional data augmentation strategies in `process_and_augment`.
