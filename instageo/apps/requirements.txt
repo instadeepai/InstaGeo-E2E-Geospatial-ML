@@ -2,6 +2,7 @@ absl-py
 plotly
 rasterio
 xarray
+dask==2024.12.1
 datashader
 matplotlib
 streamlit==1.31.1
