@@ -25,7 +25,6 @@ import os
 import subprocess
 import time
 import zipfile
-from datetime import timedelta
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -36,7 +35,7 @@ import xarray as xr
 from absl import logging
 from rasterio.crs import CRS
 
-from instageo.data.data_pipeline import get_tile_info
+from instageo.data.data_pipeline import get_tile_info, make_valid_bbox
 
 
 class S2AuthState:
@@ -310,15 +309,16 @@ def parallel_downloads_s2(
 
 def open_mf_jp2_dataset(
     band_files: dict[str, dict[str, str]],
-    mask_cloud: bool,
-    water_mask: bool,
-) -> tuple[xr.Dataset, CRS]:
+    load_masks: bool = False,
+) -> tuple[xr.Dataset, xr.Dataset | None, CRS]:
     """Open multiple JP2 files as an xarray Dataset.
 
     Args:
         band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
         mask_cloud (bool): Perform cloud masking.
         water_mask (bool): Perform water masking.
+        load_masks (bool): Whether or not to load the masks files.
+
 
     Returns:
         (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
@@ -342,46 +342,37 @@ def open_mf_jp2_dataset(
         band_paths,
         concat_dim="band",
         combine="nested",
+        mask_and_scale=False,  # Scaling will be applied manually
     )
-    scl_data = xr.open_mfdataset(
-        scl_paths,
-        concat_dim="band",
-        combine="nested",
-    ).band_data.values
-
-    if water_mask:
-        bands_dataset = apply_class_mask(
-            bands_dataset, scl_data, [6]
-        )  # Class 6 for water
-    if mask_cloud:
-        bands_dataset = apply_class_mask(
-            bands_dataset, scl_data, [8, 9]
-        )  # Classes 8 and 9 for clouds
+    bands_dataset.band_data.attrs["scale_factor"] = 1
+    scl_data = (
+        xr.open_mfdataset(
+            scl_paths,
+            concat_dim="band",
+            combine="nested",
+        )
+        if load_masks
+        else None
+    )
 
     with rasterio.open(band_paths[0]) as src:
         crs = src.crs
-    return bands_dataset, crs
+    return bands_dataset, scl_data, crs
 
 
-def apply_class_mask(
-    dataset: xr.Dataset, scl_data: np.ndarray, class_ids: list[int]
-) -> xr.Dataset:
-    """Mask a specific class within SCL file.
+def create_mask_from_scl(
+    scl_data: xr.Dataset | xr.DataArray, class_ids: list[int]
+) -> xr.Dataset | xr.DataArray:
+    """Creates masks based on SCL data .
 
-    Apply a mask to the dataset based on specified SCL class IDs.
-    Args:
-        dataset (xr.Dataset): The dataset to which the mask will be applied.
-        scl_data (np.ndarray): The SCL data used for masking.
-        class_ids (list[int]): The class IDs to mask out (set to NaN).
+    Arguments:
+        scl_data: SCL input xarray Dataset or DataArray.
+        class_ids: Class ids to use to produce the mask.
 
     Returns:
-        xr.Dataset: The masked dataset.
+        Xarray dataset or dataarray containing the produced mask.
     """
-    mask_array = np.isin(scl_data, class_ids).astype(np.uint8)
-    if mask_array.ndim == 3:
-        mask_array = mask_array.any(axis=0)
-    dataset = dataset.where(mask_array == 0)
-    return dataset
+    return scl_data.isin(class_ids).astype(np.uint8)
 
 
 def process_s2_metadata(metadata: dict, tile_id: str) -> pd.DataFrame:
@@ -416,7 +407,7 @@ def process_s2_metadata(metadata: dict, tile_id: str) -> pd.DataFrame:
 
 
 def retrieve_s2_metadata(
-    tile_info_df: pd.DataFrame, temporal_tolerance: int, cloud_coverage: int = 10
+    tile_info_df: pd.DataFrame, cloud_coverage: int = 10
 ) -> dict[str, list[str]]:
     """Retrieve Sentinel-2 Tiles Metadata.
 
@@ -426,7 +417,6 @@ def retrieve_s2_metadata(
     Args:
         tile_info_df (pd.DataFrame): A dataframe containing tile_id, start_date and
             end_date in each row.
-        temporal_tolerance (int): Number of days before and after which a tile is a valid pick.
         cloud_coverage (int): Minimum percentage of cloud cover acceptable for a Sentinel-2 tile.
 
     Returns:
@@ -442,19 +432,15 @@ def retrieve_s2_metadata(
         lat_min,
         lat_max,
     ) in tile_info_df.iterrows():
-        start_date_window = (
-            pd.to_datetime(start_date) - timedelta(days=temporal_tolerance)
-        ).strftime("%Y-%m-%d")
-        end_date_window = (
-            pd.to_datetime(end_date) + timedelta(days=temporal_tolerance)
-        ).strftime("%Y-%m-%d")
-
+        lon_min, lat_min, lon_max, lat_max = make_valid_bbox(
+            lon_min, lat_min, lon_max, lat_max
+        )
         url = (
             "https://catalogue.dataspace.copernicus.eu/"
             f"resto/api/collections/Sentinel2/search.json"
             f"?productType=S2MSI2A&cloudCover=[0,{cloud_coverage}]"
-            f"&startDate={start_date_window}T00:00:00Z"
-            f"&completionDate={end_date_window}T23:59:59Z"
+            f"&startDate={start_date}T00:00:00Z"
+            f"&completionDate={end_date}T23:59:59Z"
             f"&maxRecords=500"
             f"&box={lon_min},{lat_min},{lon_max},{lat_max}"
         )
@@ -663,6 +649,7 @@ def add_s2_granules(
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 5,
+    cloud_coverage: int = 10,
 ) -> pd.DataFrame:
     """Add Sentinel-2 Granules.
 
@@ -676,19 +663,24 @@ def add_s2_granules(
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
         temporal_tolerance (int): Tolerance (in days) for finding closest Sentinel-2 granule.
+        cloud_coverage (int): Minimum percentage of cloud cover acceptable for a Sentinel-2 tile.
+
 
     Returns:
         A dataframe containing a list of Sentinel-2 granules. Each granule is a directory
         containing all the bands.
     """
     tiles_info, tile_queries = get_tile_info(
-        data, num_steps=num_steps, temporal_step=temporal_step
+        data,
+        num_steps=num_steps,
+        temporal_step=temporal_step,
+        temporal_tolerance=temporal_tolerance,
     )
     tile_queries_str = [
         f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
     ]
     data["tile_queries"] = tile_queries_str
-    tile_database = retrieve_s2_metadata(tiles_info, temporal_tolerance)
+    tile_database = retrieve_s2_metadata(tiles_info, cloud_coverage)
     tile_queries_dict = {k: v for k, v in zip(tile_queries_str, tile_queries)}
     query_result = find_best_tile(
         tile_queries=tile_queries_dict,

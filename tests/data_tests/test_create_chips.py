@@ -6,8 +6,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from instageo.data.data_pipeline import create_and_save_chips_with_seg_maps
-from instageo.data.hls_utils import open_mf_tiff_dataset
+from instageo.data.data_pipeline import apply_mask, create_and_save_chips_with_seg_maps
+from instageo.data.hls_utils import decode_fmask_value, open_mf_tiff_dataset
 
 
 @pytest.fixture
@@ -29,31 +29,34 @@ def test_create_chips(setup_and_teardown_output_dir):
     os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
     os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
     chips, labels = create_and_save_chips_with_seg_maps(
-        open_mf_tiff_dataset,
-        {
+        data_reader=open_mf_tiff_dataset,
+        mask_fn=apply_mask,
+        processing_method="download",
+        tile_dict={
             "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
             "fmasks": {"Fmask_0": fmask_path},
         },
-        "38PMB",
-        df,
-        chip_size,
-        output_directory,
-        no_data_value,
+        data_source="HLS",
+        df=df,
+        chip_size=chip_size,
+        output_directory=output_directory,
+        no_data_value=no_data_value,
         src_crs=4326,
-        mask_cloud=False,
-        water_mask=False,
+        mask_decoder=decode_fmask_value,
+        mask_types=[],
+        masking_strategy="any",
         window_size=0,
     )
     num_chips = len(chips)
     assert num_chips == 3
     for i in range(num_chips):
         chip_path = os.path.join(
-            output_directory, "chips", "chip_20200101_38PMB_1_2.tif"
+            output_directory, "chips", "chip_20200101_S30_T38PMB_2022145T072619_1_2.tif"
         )
         seg_map_path = os.path.join(
             output_directory,
             "seg_maps",
-            "seg_map_20200101_38PMB_1_2.tif",
+            "seg_map_20200101_S30_T38PMB_2022145T072619_1_2.tif",
         )
         chip = xr.open_dataset(chip_path)
         seg_map = xr.open_dataset(seg_map_path)
@@ -77,22 +80,24 @@ def test_seg_map_validity(setup_and_teardown_output_dir, window_size):
     os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
 
     chips, seg_maps = create_and_save_chips_with_seg_maps(
-        open_mf_tiff_dataset,
-        {
+        data_reader=open_mf_tiff_dataset,
+        mask_fn=apply_mask,
+        processing_method="download",
+        tile_dict={
             "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
             "fmasks": {"Fmask_0": fmask_path},
         },
-        "38PMB",
-        df,
-        chip_size,
-        output_directory,
-        no_data_value,
+        data_source="HLS",
+        df=df,
+        chip_size=chip_size,
+        output_directory=output_directory,
+        no_data_value=no_data_value,
         src_crs=4326,
-        mask_cloud=False,
-        water_mask=False,
+        mask_decoder=decode_fmask_value,
+        mask_types=[],
+        masking_strategy="any",
         window_size=window_size,
     )
-
     # Verify chips and segmentation maps exist and match expectations
     assert len(chips) > 0
     assert len(seg_maps) > 0

@@ -11,7 +11,7 @@ import xarray as xr
 from instageo.data.s2_utils import (
     S2AuthState,
     add_s2_granules,
-    apply_class_mask,
+    create_mask_from_scl,
     create_s2_dataset,
     extract_and_delete_zip_files,
     find_best_tile,
@@ -141,13 +141,13 @@ def sample_dataset():
 
 @pytest.fixture
 def sample_scl_data():
-    return np.array([[1, 2], [3, 4]])  # 2x2 SCL mask
+    return xr.DataArray(np.array([[1, 2], [3, 4]]))  # 2x2 SCL mask
 
 
-def test_apply_class_mask_valid_mask(sample_dataset, sample_scl_data):
+def test_create_mask_from_valid_scl_data(sample_dataset, sample_scl_data):
     class_ids = [2, 3]
-    result = apply_class_mask(sample_dataset, sample_scl_data, class_ids)
-
+    mask = create_mask_from_scl(sample_scl_data, class_ids)
+    result = sample_dataset.where(mask.values == 0)
     expected_data = np.array(
         [
             [[1, np.nan], [np.nan, 4]],
@@ -159,10 +159,10 @@ def test_apply_class_mask_valid_mask(sample_dataset, sample_scl_data):
     np.testing.assert_almost_equal(result["bands"].values, expected_data)
 
 
-def test_apply_class_mask_no_classes_to_mask(sample_dataset, sample_scl_data):
+def test_create_mask_from_scl_data_no_classes(sample_dataset, sample_scl_data):
     class_ids = []
-    result = apply_class_mask(sample_dataset, sample_scl_data, class_ids)
-
+    mask = create_mask_from_scl(sample_scl_data, class_ids)
+    result = sample_dataset.where(mask.values == 0)
     xr.testing.assert_equal(result, sample_dataset)
 
 
@@ -323,7 +323,7 @@ def test_retrieve_s2_metadata_success():
         )
         mock_process.return_value = processed_metadata
 
-        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+        result = retrieve_s2_metadata(tile_info_df)
 
         mock_get.assert_called_once()
         mock_process.assert_called_once_with(mock_response_data, "33UUU")
@@ -350,7 +350,7 @@ def test_retrieve_s2_metadata_api_error():
     with patch("instageo.data.s2_utils.requests.get") as mock_get:
         mock_get.return_value = MagicMock(status_code=500)
 
-        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+        result = retrieve_s2_metadata(tile_info_df)
 
         mock_get.assert_called_once()
         assert isinstance(result, dict)
@@ -382,7 +382,7 @@ def test_retrieve_s2_metadata_no_features():
         )
         mock_process.return_value = pd.DataFrame()
 
-        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+        result = retrieve_s2_metadata(tile_info_df)
 
         mock_get.assert_called_once()
         mock_process.assert_called_once_with(mock_response_data, "33UUU")
@@ -416,7 +416,7 @@ def test_retrieve_s2_metadata_multiple_tiles():
         )
         mock_process.return_value = pd.DataFrame()
 
-        result = retrieve_s2_metadata(tile_info_df, temporal_tolerance=5)
+        result = retrieve_s2_metadata(tile_info_df)
 
         assert isinstance(result, dict)
         assert "33UUU" in result

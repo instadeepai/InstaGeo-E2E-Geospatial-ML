@@ -11,7 +11,10 @@ data_dependencies = [
     "Bottleneck",
     "absl-py",
     "mgrs==1.4.6",
-    "earthaccess==0.8.2",
+    "earthaccess==0.12.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-dotenv==1.0.1",
 ]
 model_dependencies = [
     # Add dependencies specific to the model component
@@ -26,6 +29,7 @@ model_dependencies = [
 apps_dependencies = [
     # Add dependencies specific to the apps component
     "plotly",
+    "dask==2024.12.1",
     "datashader",
     "matplotlib",
     "streamlit==1.31.1",

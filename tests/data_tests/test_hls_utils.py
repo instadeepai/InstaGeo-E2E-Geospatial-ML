@@ -8,7 +8,7 @@ import rasterio
 import xarray as xr
 from rasterio.crs import CRS
 
-from instageo.data.data_pipeline import get_tiles
+from instageo.data.data_pipeline import apply_mask, get_tiles
 from instageo.data.hls_utils import (
     add_hls_granules,
     create_hls_dataset,
@@ -100,7 +100,7 @@ def test_open_mf_tiff_dataset():
         },
     }
 
-    result, crs = open_mf_tiff_dataset(band_files, mask_cloud=False, water_mask=False)
+    result, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
     assert isinstance(result, xr.Dataset)
     assert isinstance(crs, CRS)
     assert crs == 32613
@@ -118,23 +118,26 @@ def test_open_mf_tiff_dataset_cloud_mask():
             "band2": "tests/data/fmask.tif",
         },
     }
-    result_no_mask, crs = open_mf_tiff_dataset(
-        band_files, mask_cloud=False, water_mask=False
-    )
+    result_no_mask, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
     num_points = result_no_mask.band_data.count().values.item()
-    result_with_mask, crs = open_mf_tiff_dataset(
-        band_files, mask_cloud=True, water_mask=False
+    result_with_mask, mask_ds, crs = open_mf_tiff_dataset(band_files, load_masks=True)
+    result_with_mask = apply_mask(
+        result_with_mask,
+        mask_ds.band_data,
+        -1,
+        decode_fmask_value,
+        "HLS",
+        masking_strategy="any",
     )
     fmask = xr.open_dataset("tests/data/fmask.tif")
     cloud_mask = decode_fmask_value(fmask, 1)
     num_clouds = cloud_mask.where(cloud_mask == 1).band_data.count().values.item()
     assert (
-        result_with_mask.band_data.count().values.item() == num_points - 2 * num_clouds
+        result_with_mask.band_data.where(result_with_mask.band_data != -1)
+        .count()
+        .values.item()
+        == num_points - 2 * num_clouds
     )
-    assert isinstance(result_with_mask, xr.Dataset)
-    assert isinstance(crs, CRS)
-    assert crs == 32613
-    assert result_with_mask["band_data"].shape == (2, 224, 224)
 
 
 def test_retrieve_hls_metadata():
@@ -150,25 +153,24 @@ def test_retrieve_hls_metadata():
         }
     )
     tile_database = retrieve_hls_metadata(tile_info)
-    assert tile_database == {
-        "38PMB": [
-            "HLS.S30.T38PMB.2022145T072619.v2.0",
-            "HLS.L30.T38PMB.2022146T072532.v2.0",
-            "HLS.L30.T38PMB.2022147T071947.v2.0",
-            "HLS.S30.T38PMB.2022147T071621.v2.0",
-            "HLS.S30.T38PMB.2022150T072621.v2.0",
-            "HLS.S30.T38PMB.2022152T071619.v2.0",
-            "HLS.L30.T38PMB.2022154T072604.v2.0",
-            "HLS.L30.T38PMB.2022155T071923.v2.0",
-            "HLS.S30.T38PMB.2022155T072619.v2.0",
-            "HLS.S30.T38PMB.2022157T071631.v2.0",
-            "HLS.S30.T38PMB.2022160T072621.v2.0",
-            "HLS.L30.T38PMB.2022162T072536.v2.0",
-            "HLS.S30.T38PMB.2022162T071619.v2.0",
-            "HLS.L30.T38PMB.2022163T072000.v2.0",
-            "HLS.S30.T38PMB.2022165T072619.v2.0",
-        ]
-    }
+    print(tile_database)
+    assert tile_database["38PMB"][0] == [  # ignore links
+        "HLS.S30.T38PMB.2022145T072619.v2.0",
+        "HLS.L30.T38PMB.2022146T072532.v2.0",
+        "HLS.L30.T38PMB.2022147T071947.v2.0",
+        "HLS.S30.T38PMB.2022147T071621.v2.0",
+        "HLS.S30.T38PMB.2022150T072621.v2.0",
+        "HLS.S30.T38PMB.2022152T071619.v2.0",
+        "HLS.L30.T38PMB.2022154T072604.v2.0",
+        "HLS.L30.T38PMB.2022155T071923.v2.0",
+        "HLS.S30.T38PMB.2022155T072619.v2.0",
+        "HLS.S30.T38PMB.2022157T071631.v2.0",
+        "HLS.S30.T38PMB.2022160T072621.v2.0",
+        "HLS.L30.T38PMB.2022162T072536.v2.0",
+        "HLS.S30.T38PMB.2022162T071619.v2.0",
+        "HLS.L30.T38PMB.2022163T072000.v2.0",
+        "HLS.S30.T38PMB.2022165T072619.v2.0",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -189,79 +191,95 @@ def test_decode_fmask_value(value, position, result):
 
 
 def test_find_closest_tile():
+    # Let's ignore the links when defining the tile_database param
     tile_database = {
-        "30RYS": [
-            "HLS.L30.T30RYS.2022140T102748.v2.0.",
-            "HLS.S30.T30RYS.2022142T103629.v2.0.",
-            "HLS.S30.T30RYS.2022144T102611.v2.0.",
-            "HLS.L30.T30RYS.2022147T103357.v2.0.",
-            "HLS.S30.T30RYS.2022147T103631.v2.0.",
-            "HLS.L30.T30RYS.2022148T102722.v2.0.",
-            "HLS.S30.T30RYS.2022149T102559.v2.0.",
-            "HLS.S30.T30RYS.2022152T103629.v2.0.",
-            "HLS.S30.T30RYS.2022154T102611.v2.0.",
-            "HLS.L30.T30RYS.2022155T103334.v2.0.",
-            "HLS.L30.T30RYS.2022156T102755.v2.0.",
-            "HLS.S30.T30RYS.2022157T103631.v2.0.",
-            "HLS.S30.T30RYS.2022159T102559.v2.0.",
-        ],
-        "38PMB": [
-            "HLS.L30.T38PMB.2022139T071922.v2.0.",
-            "HLS.S30.T38PMB.2022140T072621.v2.0.",
-            "HLS.S30.T38PMB.2022142T071619.v2.0.",
-            "HLS.S30.T38PMB.2022145T072619.v2.0.",
-            "HLS.L30.T38PMB.2022146T072532.v2.0.",
-            "HLS.L30.T38PMB.2022147T071947.v2.0.",
-            "HLS.S30.T38PMB.2022147T071621.v2.0.",
-            "HLS.S30.T38PMB.2022150T072621.v2.0.",
-            "HLS.S30.T38PMB.2022152T071619.v2.0.",
-            "HLS.L30.T38PMB.2022154T072604.v2.0.",
-            "HLS.L30.T38PMB.2022155T071923.v2.0.",
-            "HLS.S30.T38PMB.2022155T072619.v2.0.",
-            "HLS.S30.T38PMB.2022157T071631.v2.0.",
-            "HLS.S30.T38PMB.2022160T072621.v2.0.",
-            "HLS.L30.T38PMB.2022162T072536.v2.0.",
-            "HLS.S30.T38PMB.2022162T071619.v2.0.",
-        ],
-        "38PNB": [
-            "HLS.S30.T38PNB.2022142T071619.v2.0.",
-            "HLS.L30.T38PNB.2022147T071947.v2.0.",
-            "HLS.S30.T38PNB.2022147T071621.v2.0.",
-            "HLS.L30.T38PNB.2022148T071311.v2.0.",
-            "HLS.S30.T38PNB.2022152T071619.v2.0.",
-            "HLS.L30.T38PNB.2022155T071923.v2.0.",
-            "HLS.L30.T38PNB.2022156T071344.v2.0.",
-            "HLS.S30.T38PNB.2022157T071631.v2.0.",
-        ],
-        "38PPB": [
-            "HLS.L30.T38PPB.2022139T071922.v2.0.",
-            "HLS.L30.T38PPB.2022140T071337.v2.0.",
-            "HLS.S30.T38PPB.2022142T071619.v2.0.",
-            "HLS.L30.T38PPB.2022147T071947.v2.0.",
-            "HLS.S30.T38PPB.2022147T071621.v2.0.",
-            "HLS.L30.T38PPB.2022148T071311.v2.0.",
-            "HLS.S30.T38PPB.2022152T071619.v2.0.",
-            "HLS.L30.T38PPB.2022155T071923.v2.0.",
-            "HLS.L30.T38PPB.2022156T071344.v2.0.",
-            "HLS.S30.T38PPB.2022157T071631.v2.0.",
-        ],
+        "30RYS": (
+            [
+                "HLS.L30.T30RYS.2022140T102748.v2.0.",
+                "HLS.S30.T30RYS.2022142T103629.v2.0.",
+                "HLS.S30.T30RYS.2022144T102611.v2.0.",
+                "HLS.L30.T30RYS.2022147T103357.v2.0.",
+                "HLS.S30.T30RYS.2022147T103631.v2.0.",
+                "HLS.L30.T30RYS.2022148T102722.v2.0.",
+                "HLS.S30.T30RYS.2022149T102559.v2.0.",
+                "HLS.S30.T30RYS.2022152T103629.v2.0.",
+                "HLS.S30.T30RYS.2022154T102611.v2.0.",
+                "HLS.L30.T30RYS.2022155T103334.v2.0.",
+                "HLS.L30.T30RYS.2022156T102755.v2.0.",
+                "HLS.S30.T30RYS.2022157T103631.v2.0.",
+                "HLS.S30.T30RYS.2022159T102559.v2.0.",
+            ],
+            [[], [], [], [], [], [], [], [], [], [], [], [], []],
+        ),
+        "38PMB": (
+            [
+                "HLS.L30.T38PMB.2022139T071922.v2.0.",
+                "HLS.S30.T38PMB.2022140T072621.v2.0.",
+                "HLS.S30.T38PMB.2022142T071619.v2.0.",
+                "HLS.S30.T38PMB.2022145T072619.v2.0.",
+                "HLS.L30.T38PMB.2022146T072532.v2.0.",
+                "HLS.L30.T38PMB.2022147T071947.v2.0.",
+                "HLS.S30.T38PMB.2022147T071621.v2.0.",
+                "HLS.S30.T38PMB.2022150T072621.v2.0.",
+                "HLS.S30.T38PMB.2022152T071619.v2.0.",
+                "HLS.L30.T38PMB.2022154T072604.v2.0.",
+                "HLS.L30.T38PMB.2022155T071923.v2.0.",
+                "HLS.S30.T38PMB.2022155T072619.v2.0.",
+                "HLS.S30.T38PMB.2022157T071631.v2.0.",
+                "HLS.S30.T38PMB.2022160T072621.v2.0.",
+                "HLS.L30.T38PMB.2022162T072536.v2.0.",
+                "HLS.S30.T38PMB.2022162T071619.v2.0.",
+            ],
+            [[], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []],
+        ),
+        "38PNB": (
+            [
+                "HLS.S30.T38PNB.2022142T071619.v2.0.",
+                "HLS.L30.T38PNB.2022147T071947.v2.0.",
+                "HLS.S30.T38PNB.2022147T071621.v2.0.",
+                "HLS.L30.T38PNB.2022148T071311.v2.0.",
+                "HLS.S30.T38PNB.2022152T071619.v2.0.",
+                "HLS.L30.T38PNB.2022155T071923.v2.0.",
+                "HLS.L30.T38PNB.2022156T071344.v2.0.",
+                "HLS.S30.T38PNB.2022157T071631.v2.0.",
+            ],
+            [[], [], [], [], [], [], [], []],
+        ),
+        "38PPB": (
+            [
+                "HLS.L30.T38PPB.2022139T071922.v2.0.",
+                "HLS.L30.T38PPB.2022140T071337.v2.0.",
+                "HLS.S30.T38PPB.2022142T071619.v2.0.",
+                "HLS.L30.T38PPB.2022147T071947.v2.0.",
+                "HLS.S30.T38PPB.2022147T071621.v2.0.",
+                "HLS.L30.T38PPB.2022148T071311.v2.0.",
+                "HLS.S30.T38PPB.2022152T071619.v2.0.",
+                "HLS.L30.T38PPB.2022155T071923.v2.0.",
+                "HLS.L30.T38PPB.2022156T071344.v2.0.",
+                "HLS.S30.T38PPB.2022157T071631.v2.0.",
+            ],
+            [[], [], [], [], [], [], [], [], [], []],
+        ),
         "38QMC": [],
-        "38QMD": [
-            "HLS.S30.T38QMD.2022142T071619.v2.0.",
-            "HLS.S30.T38QMD.2022145T072619.v2.0.",
-            "HLS.L30.T38QMD.2022146T072508.v2.0.",
-            "HLS.L30.T38QMD.2022147T071923.v2.0.",
-            "HLS.S30.T38QMD.2022147T071621.v2.0.",
-            "HLS.S30.T38QMD.2022150T072621.v2.0.",
-            "HLS.S30.T38QMD.2022152T071619.v2.0.",
-            "HLS.L30.T38QMD.2022154T072540.v2.0.",
-            "HLS.L30.T38QMD.2022155T071859.v2.0.",
-            "HLS.S30.T38QMD.2022155T072619.v2.0.",
-            "HLS.S30.T38QMD.2022157T071631.v2.0.",
-            "HLS.S30.T38QMD.2022160T072621.v2.0.",
-            "HLS.L30.T38QMD.2022162T072512.v2.0.",
-            "HLS.S30.T38QMD.2022162T071619.v2.0.",
-        ],
+        "38QMD": (
+            [
+                "HLS.S30.T38QMD.2022142T071619.v2.0.",
+                "HLS.S30.T38QMD.2022145T072619.v2.0.",
+                "HLS.L30.T38QMD.2022146T072508.v2.0.",
+                "HLS.L30.T38QMD.2022147T071923.v2.0.",
+                "HLS.S30.T38QMD.2022147T071621.v2.0.",
+                "HLS.S30.T38QMD.2022150T072621.v2.0.",
+                "HLS.S30.T38QMD.2022152T071619.v2.0.",
+                "HLS.L30.T38QMD.2022154T072540.v2.0.",
+                "HLS.L30.T38QMD.2022155T071859.v2.0.",
+                "HLS.S30.T38QMD.2022155T072619.v2.0.",
+                "HLS.S30.T38QMD.2022157T071631.v2.0.",
+                "HLS.S30.T38QMD.2022160T072621.v2.0.",
+                "HLS.L30.T38QMD.2022162T072512.v2.0.",
+                "HLS.S30.T38QMD.2022162T071619.v2.0.",
+            ],
+            [[], [], [], [], [], [], [], [], [], [], [], [], [], []],
+        ),
         "39QTT": [],
         "39QUT": [],
     }
@@ -284,7 +302,8 @@ def test_find_closest_tile():
     ]
     tile_queries = {k: v for k, v in zip(tile_queries_str, tile_queries)}
     query_result = find_closest_tile(tile_queries, tile_database)
-    assert list(query_result["hls_tiles"]) == [
+    hls_tiles_with_links = list(query_result["hls_tiles"])
+    assert list(hls_tiles for hls_tiles in hls_tiles_with_links) == [
         [
             "HLS.S30.T38PMB.2022160T072621.v2.0.",
             "HLS.S30.T38PMB.2022150T072621.v2.0.",

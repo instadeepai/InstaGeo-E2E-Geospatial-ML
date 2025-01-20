@@ -23,24 +23,30 @@ import json
 import os
 from typing import Any
 
+import dask.distributed
+import earthaccess
 import pandas as pd
 import rasterio
-import rasterio.features
 from absl import app, flags, logging
 from dotenv import load_dotenv
 from tqdm import tqdm
 
 from instageo.data import hls_utils, s2_utils
-from instageo.data.data_pipeline import create_and_save_chips_with_seg_maps, get_tiles
+from instageo.data.data_pipeline import (
+    MASK_DECODING_POS,
+    apply_mask,
+    create_and_save_chips_with_seg_maps,
+    get_tiles,
+)
+from instageo.data.settings import GDALOptions
 
 load_dotenv(os.path.expanduser("~/.credentials"))
-
 logging.set_verbosity(logging.INFO)
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("dataframe_path", None, "Path to the DataFrame CSV file.")
-flags.DEFINE_integer("chip_size", 224, "Size of each chip.")
+flags.DEFINE_integer("chip_size", 256, "Size of each chip.")
 flags.DEFINE_integer("src_crs", 4326, "CRS of the geo-coordinates in `dataframe_path`")
 flags.DEFINE_string(
     "output_directory",
@@ -48,7 +54,7 @@ flags.DEFINE_string(
     "Directory where the chips and segmentation maps will be saved.",
 )
 flags.DEFINE_integer(
-    "no_data_value", -1, "Value to use for no data areas in the segmentation maps."
+    "no_data_value", -9999, "Value to use for no data areas in the segmentation maps."
 )
 flags.DEFINE_integer(
     "min_count", 100, "Minimum observation counts per tile", lower_bound=1
@@ -84,11 +90,6 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
-flags.DEFINE_boolean(
-    "download_only", False, "Downloads dataset without creating chips."
-)
-flags.DEFINE_boolean("mask_cloud", False, "Perform Cloud Masking")
-flags.DEFINE_boolean("water_mask", False, "Perform Water Masking")
 flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2"], "Data source to use.")
 flags.DEFINE_integer(
     "cloud_coverage",
@@ -107,6 +108,36 @@ flags.DEFINE_integer(
     if only interested in the pixel in which the observation falls.""",
     lower_bound=0,
 )
+flags.DEFINE_enum(
+    "processing_method",
+    "cog",
+    ["cog", "download", "download-only"],
+    """Method to use to process the tiles:
+    - "cog" corresponds to creating the chips by utilizing the Cloud Optimized GeoTIFFs.
+    - "download" corresponds to downloading entire HLS tiles to be used for creating
+    the chips.
+    - "download-only" corresponds to a simple download of the tiles without further
+    processing.""",
+)
+flags.DEFINE_list(
+    "mask_types",
+    [],
+    "List of different types of masking to apply",
+)
+flags.register_validator(
+    "mask_types",
+    lambda val_list: all(v in MASK_DECODING_POS["HLS"].keys() for v in val_list),
+    message=f"Valid values are {list(MASK_DECODING_POS['HLS'].keys())}",
+)
+flags.DEFINE_enum(
+    "masking_strategy",
+    "each",
+    ["each", "any"],
+    """Method to use when applying masking:
+    - "each" for timestep-wise masking.
+    - "any" to exclude pixels if the mask is present for at least one timestep.
+    """,
+)
 
 
 def check_required_flags() -> None:
@@ -115,6 +146,16 @@ def check_required_flags() -> None:
     for flag_name in required_flags:
         if not getattr(FLAGS, flag_name):
             raise app.UsageError(f"Flag --{flag_name} is required.")
+
+
+def setup() -> None:
+    """Setup for environment to be used by Dask client.
+
+    Configures relevant GDAL options for reading COGs
+    """
+    earthaccess.login(persist=True)
+    env = rasterio.Env(**GDALOptions().model_dump())
+    env.__enter__()
 
 
 def main(argv: Any) -> None:
@@ -177,43 +218,58 @@ def main(argv: Any) -> None:
             )["tiles"].tolist()
         os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
         logging.info("Downloading HLS Tiles")
-        hls_utils.parallel_download(
-            hls_granules_to_download,
-            outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
-        )
-        if FLAGS.download_only:
+        if FLAGS.processing_method in ["download", "download-only"]:
+            logging.info("Downloading HLS Tiles")
+            hls_utils.parallel_download(
+                hls_granules_to_download,
+                outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
+            )
+        if FLAGS.processing_method == "download-only":
             return
         logging.info("Creating Chips and Segmentation Maps")
         all_chips = []
         all_seg_maps = []
         os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
         os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-        for key, tile_dict in tqdm(hls_dataset.items(), desc="Processing HLS Dataset"):
-            obsv_date_str, tile_id = key.split("_")
-            obsv_data = sub_data[
-                (sub_data["date"] == pd.to_datetime(obsv_date_str))
-                & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
-            ]
-            try:
-                chips, seg_maps = create_and_save_chips_with_seg_maps(
-                    hls_utils.open_mf_tiff_dataset,
-                    tile_dict,
-                    tile_id,
-                    obsv_data,
-                    chip_size=FLAGS.chip_size,
-                    output_directory=FLAGS.output_directory,
-                    no_data_value=FLAGS.no_data_value,
-                    src_crs=FLAGS.src_crs,
-                    mask_cloud=FLAGS.mask_cloud,
-                    water_mask=FLAGS.water_mask,
-                    window_size=FLAGS.window_size,
-                )
-                all_chips.extend(chips)
-                all_seg_maps.extend(seg_maps)
-            except rasterio.errors.RasterioIOError as e:
-                logging.error(f"Error {e} when reading dataset containing: {tile_dict}")
-            except IndexError as e:
-                logging.error(f"Error {e} when processing {key}")
+        with dask.distributed.Client() as client:
+            client.run(setup)
+            for key, hls_tile_dict in tqdm(
+                hls_dataset.items(), desc="Processing HLS Dataset"
+            ):
+                obsv_date_str, tile_id = key.split("_")
+                obsv_data = sub_data[
+                    (sub_data["date"] == pd.to_datetime(obsv_date_str))
+                    & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
+                ]
+                try:
+                    chips, seg_maps = create_and_save_chips_with_seg_maps(
+                        data_reader=(
+                            hls_utils.open_hls_cogs
+                            if FLAGS.processing_method == "cog"
+                            else hls_utils.open_mf_tiff_dataset
+                        ),
+                        mask_fn=apply_mask,
+                        processing_method=FLAGS.processing_method,
+                        tile_dict=hls_tile_dict,
+                        data_source=FLAGS.data_source,
+                        df=obsv_data,
+                        chip_size=FLAGS.chip_size,
+                        output_directory=FLAGS.output_directory,
+                        no_data_value=FLAGS.no_data_value,
+                        src_crs=FLAGS.src_crs,
+                        mask_decoder=hls_utils.decode_fmask_value,
+                        mask_types=FLAGS.mask_types,
+                        masking_strategy=FLAGS.masking_strategy,
+                        window_size=FLAGS.window_size,
+                    )
+                    all_chips.extend(chips)
+                    all_seg_maps.extend(seg_maps)
+                except rasterio.errors.RasterioIOError as e:
+                    logging.error(
+                        f"Error {e} when reading dataset containing: {hls_tile_dict}"
+                    )
+                except IndexError as e:
+                    logging.error(f"Error {e} when processing {key}")
         logging.info("Saving dataframe of chips and segmentation maps.")
         pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
             os.path.join(FLAGS.output_directory, "hls_chips_dataset.csv")
@@ -235,6 +291,7 @@ def main(argv: Any) -> None:
                 num_steps=FLAGS.num_steps,
                 temporal_step=FLAGS.temporal_step,
                 temporal_tolerance=FLAGS.temporal_tolerance,
+                cloud_coverage=FLAGS.cloud_coverage,
             )
 
             logging.info("Retrieving S2 tiles that will be downloaded.")
@@ -269,7 +326,7 @@ def main(argv: Any) -> None:
             password=os.getenv("PASSWORD"),
         )
 
-        if FLAGS.download_only:
+        if FLAGS.processing_method == "download-only":
             return
 
         logging.info("Unzipping Sentinel-2 products")
@@ -290,16 +347,19 @@ def main(argv: Any) -> None:
             ]
             try:
                 chips, seg_maps = create_and_save_chips_with_seg_maps(
-                    s2_utils.open_mf_jp2_dataset,
-                    tile_dict,
-                    tile_id,
-                    obsv_data,
+                    data_reader=s2_utils.open_mf_jp2_dataset,
+                    mask_fn=apply_mask,
+                    processing_method=FLAGS.processing_method,
+                    tile_dict=tile_dict,
+                    data_source=FLAGS.data_source,
+                    df=obsv_data,
                     chip_size=FLAGS.chip_size,
                     output_directory=FLAGS.output_directory,
                     no_data_value=FLAGS.no_data_value,
                     src_crs=FLAGS.src_crs,
-                    mask_cloud=FLAGS.mask_cloud,
-                    water_mask=FLAGS.water_mask,
+                    mask_decoder=s2_utils.create_mask_from_scl,
+                    mask_types=FLAGS.mask_types,
+                    masking_strategy=FLAGS.masking_strategy,
                     window_size=FLAGS.window_size,
                 )
                 all_chips.extend(chips)

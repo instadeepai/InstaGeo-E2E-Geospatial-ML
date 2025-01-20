@@ -23,17 +23,24 @@ import bisect
 import os
 import re
 from datetime import datetime, timedelta
+from itertools import chain
 from typing import Any
 
+import dask
+import dask.delayed
 import earthaccess
 import pandas as pd
 import rasterio
+import rioxarray as rxr
 import xarray as xr
 from absl import logging
 from rasterio.crs import CRS
-from shapely.geometry import box
 
-from instageo.data.data_pipeline import get_tile_info
+from instageo.data.data_pipeline import get_tile_info, make_valid_bbox
+
+# Block sizes for the internal tiling of HLS COGs
+BLOCKSIZE_X = 256
+BLOCKSIZE_Y = 256
 
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
@@ -55,7 +62,7 @@ def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
 
 def find_closest_tile(
     tile_queries: dict[str, tuple[str, list[str]]],
-    tile_database: dict[str, list[str]],
+    tile_database: dict[str, tuple[list[str], list[list[str]]]],
     temporal_tolerance: int = 5,
 ) -> pd.DataFrame:
     """Find Closes HLS Tile.
@@ -82,28 +89,30 @@ def find_closest_tile(
     """
     # parse dates only once at the beginning for every tile_id
     parsed_tiles_entries: Any = {}
-    select_parsed_date = lambda item: item[1]
+    select_parsed_date = lambda item: item[2]
     for tile_id in tile_database:
         parsed_tiles_entries[tile_id] = list(
             filter(
                 select_parsed_date,
                 [
-                    (entry, parse_date_from_entry(entry))
-                    for entry in tile_database[tile_id]
+                    (entry, data_links, parse_date_from_entry(entry))
+                    for entry, data_links in zip(*tile_database[tile_id])
                 ],
             )
         )
     del tile_database
 
-    query_results = {}
+    query_results: Any = {}
     for query_str, (tile_id, dates) in tile_queries.items():
         result = []
+        result_data_links = []
         if tile_id in parsed_tiles_entries:
             for date_str in dates:
                 date = pd.to_datetime(date_str)
                 year, day_of_year = date.year, date.day_of_year
                 query_date = datetime(year, 1, 1) + timedelta(days=day_of_year - 1)
                 closest_entry = None
+                closest_entry_data_links = []
                 min_diff = timedelta.max.days
 
                 index = bisect.bisect_left(
@@ -111,29 +120,40 @@ def find_closest_tile(
                 )
 
                 if index > 0:
-                    entry, before_date = parsed_tiles_entries[tile_id][index - 1]
+                    entry, data_links, before_date = parsed_tiles_entries[tile_id][
+                        index - 1
+                    ]
                     diff = abs((before_date - query_date).days)
                     if diff < min_diff:
                         closest_entry = entry
+                        closest_entry_data_links = data_links
                         min_diff = diff
 
                 if index < len(parsed_tiles_entries[tile_id]):
-                    entry, after_date = parsed_tiles_entries[tile_id][index]
+                    entry, data_links, after_date = parsed_tiles_entries[tile_id][index]
                     diff = abs((after_date - query_date).days)
                     if diff < min_diff:
                         closest_entry = entry
+                        closest_entry_data_links = data_links
                         min_diff = diff
 
                 result.append(closest_entry if min_diff <= temporal_tolerance else None)
+                result_data_links.append(
+                    closest_entry_data_links if min_diff <= temporal_tolerance else None
+                )
 
-        query_results[query_str] = result
-    query_results = pd.DataFrame(
-        {"tile_queries": query_results.keys(), "hls_tiles": query_results.values()}
+        query_results[query_str] = result, result_data_links
+
+    query_results = pd.DataFrame.from_dict(
+        query_results, orient="index", columns=["hls_tiles", "data_links"]
     )
+    query_results.index.name = "tile_queries"
     return query_results
 
 
-def decode_fmask_value(value: xr.Dataset, position: int) -> xr.Dataset:
+def decode_fmask_value(
+    value: xr.Dataset | xr.DataArray, position: int
+) -> xr.Dataset | xr.DataArray:
     """Decodes HLS v2.0 Fmask.
 
     The decoding strategy is described in Appendix A of the user manual
@@ -150,7 +170,9 @@ def decode_fmask_value(value: xr.Dataset, position: int) -> xr.Dataset:
     return quotient - ((quotient // 2) * 2)
 
 
-def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
+def retrieve_hls_metadata(
+    tile_info_df: pd.DataFrame,
+) -> dict[str, tuple[list[str], list[list[str]]]]:
     """Retrieve HLS Tiles Metadata.
 
     Given a tile_id, start_date and end_date, this function fetches all the HLS granules
@@ -163,36 +185,7 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
     Returns:
         A dictionary mapping tile_id to a list of available HLS granules.
     """
-
-    def _make_valid_bbox(
-        lon_min: float, lat_min: float, lon_max: float, lat_max: float
-    ) -> tuple[float, float, float, float]:
-        """Create a valid bounding box to search for HLS tiles.
-
-        The purpose of this function is to still be able to extract data through
-        earthaccess even given just a single observation in a tile (min_count = 1).
-        When the number of observations in a tile is 1, or if we only have aligned
-        observations, the lon_min, lat_min, lon_max, lat_max extracted from those
-        won't produce a valid bounding box. Thus, we attempt to create a small buffer
-        around the observation(s) to produce a valid bounding box.
-
-        Args:
-            lon_min (float): Minimum longitude
-            lat_min (float): Minimum latitude
-            lon_max (float): Maximum longitude
-            lat_max (float): Maximum latitude
-
-        Returns:
-            A tuple of coordinates to use for a bounding box
-
-        """
-        epsilon = 5e-5
-        if box(lon_min, lat_min, lon_max, lat_max).is_valid:
-            return lon_min, lat_min, lon_max, lat_max
-        else:
-            return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
-
-    granules_dict = {}
+    granules_dict: Any = {}
     for _, (
         tile_id,
         start_date,
@@ -204,54 +197,112 @@ def retrieve_hls_metadata(tile_info_df: pd.DataFrame) -> dict[str, list[str]]:
     ) in tile_info_df.iterrows():
         results = earthaccess.search_data(
             short_name=["HLSL30", "HLSS30"],
-            bounding_box=(_make_valid_bbox(lon_min, lat_min, lon_max, lat_max)),
+            bounding_box=(make_valid_bbox(lon_min, lat_min, lon_max, lat_max)),
             temporal=(f"{start_date}T00:00:00", f"{end_date}T23:59:59"),
         )
-        granules = pd.json_normalize(results)
+        granules = pd.json_normalize(
+            [result | {"data_links": result.data_links()} for result in results]
+        )
         assert not granules.empty, "No granules found"
         granules = granules[granules["meta.native-id"].str.contains(tile_id)]
-        granules = list(granules["meta.native-id"])
-        granules_dict[tile_id] = granules
+        granules, data_links = list(granules["meta.native-id"]), list(
+            granules["data_links"]
+        )
+        granules_dict[tile_id] = granules, data_links
     return granules_dict
 
 
 def open_mf_tiff_dataset(
-    band_files: dict[str, dict[str, str]], mask_cloud: bool, water_mask: bool
-) -> tuple[xr.Dataset, CRS]:
+    band_files: dict[str, Any], load_masks: bool
+) -> tuple[xr.Dataset, xr.Dataset | None, CRS]:
     """Open multiple TIFF files as an xarray Dataset.
 
     Args:
         band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
-        mask_cloud (bool): Perform cloud masking.
-        water_mask (bool): Perform water masking.
+        load_masks (bool): Whether or not to load the masks files.
 
     Returns:
-        (xr.Dataset, CRS): A tuple of xarray Dataset combining data from all the
-            provided TIFF files and its CRS
+        (xr.Dataset, xr.Dataset | None, CRS): A tuple of xarray Dataset combining data from all the
+            provided TIFF files, (optionally) the masks, and the CRS
     """
     band_paths = list(band_files["tiles"].values())
     bands_dataset = xr.open_mfdataset(
         band_paths,
         concat_dim="band",
         combine="nested",
+        mask_and_scale=False,  # Scaling will be applied manually
     )
+    bands_dataset.band_data.attrs["scale_factor"] = 1
     mask_paths = list(band_files["fmasks"].values())
-    mask_dataset = xr.open_mfdataset(
-        mask_paths,
-        concat_dim="band",
-        combine="nested",
+    mask_dataset = (
+        xr.open_mfdataset(
+            mask_paths,
+            concat_dim="band",
+            combine="nested",
+        )
+        if load_masks
+        else None
     )
-    if water_mask:
-        mask_water = decode_fmask_value(mask_dataset, 5)
-        mask_water = mask_water.band_data.values.any(axis=0).astype(int)
-        bands_dataset = bands_dataset.where(mask_water == 0)
-    if mask_cloud:
-        cloud_mask = decode_fmask_value(mask_dataset, 1)
-        cloud_mask = cloud_mask.band_data.values.any(axis=0).astype(int)
-        bands_dataset = bands_dataset.where(cloud_mask == 0)
     with rasterio.open(band_paths[0]) as src:
         crs = src.crs
-    return bands_dataset, crs
+    return bands_dataset, mask_dataset, crs
+
+
+@dask.delayed
+def load_cog(url: str) -> xr.DataArray:
+    """Load a COG file as an xarray DataArray.
+
+    Args:
+        url (str): COG url.
+
+    Returns:
+        xr.DataArray: An array exposing the data loaded from the COG
+    """
+    return rxr.open_rasterio(
+        url,
+        chunks=dict(band=1, x=BLOCKSIZE_X, y=BLOCKSIZE_Y),
+        lock=False,
+        mask_and_scale=False,  # Scaling will be applied manually
+    )
+
+
+def open_hls_cogs(
+    bands_infos: dict[str, Any], load_masks: bool
+) -> tuple[xr.DataArray, xr.DataArray | None, str]:
+    """Open multiple COGs as an xarray DataArray.
+
+    Args:
+        bands_infos (dict[str, Any]): A dictionary containing data links for
+        all bands and for all timesteps of interest.
+        load_masks (bool): Whether or not to load the masks COGs.
+
+    Returns:
+        (xr.DataArray, xr.DataArray | None, str): A tuple of xarray Dataset combining
+        data from all the COGs bands, (optionally) the COGs masks and the CRS used
+    """
+    cogs_urls = bands_infos["data_links"]
+    # For each timestep, this will contain a list of links for the different bands
+    # with the masks being at the last position
+
+    bands_links = list(chain.from_iterable(urls[:-1] for urls in cogs_urls))
+    masks_links = [urls[-1] for urls in cogs_urls]
+
+    all_timesteps_bands = xr.concat(
+        dask.compute(*[load_cog(link) for link in bands_links]), dim="band"
+    )
+    all_timesteps_bands.attrs["scale_factor"] = 1
+
+    # only read masks if necessary
+    all_timesteps_masks = (
+        xr.concat(dask.compute(*[load_cog(link) for link in masks_links]), dim="band")
+        if load_masks
+        else None
+    )
+    return (
+        all_timesteps_bands,
+        all_timesteps_masks,
+        all_timesteps_bands.spatial_ref.crs_wkt,
+    )
 
 
 def add_hls_granules(
@@ -278,7 +329,10 @@ def add_hls_granules(
         containing all the bands.
     """
     tiles_info, tile_queries = get_tile_info(
-        data, num_steps=num_steps, temporal_step=temporal_step
+        data,
+        num_steps=num_steps,
+        temporal_step=temporal_step,
+        temporal_tolerance=temporal_tolerance,
     )
     tile_queries_str = [
         f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
@@ -297,7 +351,7 @@ def add_hls_granules(
 
 def create_hls_dataset(
     data_with_tiles: pd.DataFrame, outdir: str
-) -> tuple[dict[str, dict[str, dict[str, str]]], set[str]]:
+) -> tuple[dict[str, dict[str, Any]], set[str]]:
     """Creates HLS Dataset.
 
     A HLS dataset is a list of dictionary mapping band names to corresponding GeoTiff
@@ -320,52 +374,52 @@ def create_hls_dataset(
     ]
     assert not data_with_tiles.empty, "No observation record with valid HLS tiles"
     hls_dataset = {}
-    granules_to_download = []
+    data_links = []
     s30_bands = ["B02", "B03", "B04", "B8A", "B11", "B12", "Fmask"]
     l30_bands = ["B02", "B03", "B04", "B05", "B06", "B07", "Fmask"]
-    for hls_tiles, obsv_date in zip(
-        data_with_tiles["hls_tiles"], data_with_tiles["date"]
-    ):
-        band_id, band_path = [], []
-        mask_id, mask_path = [], []
-        for idx, tile in enumerate(hls_tiles):
-            tile = tile.strip(".")
-            if "HLS.S30" in tile:
-                for band in s30_bands:
-                    if band == "Fmask":
-                        mask_id.append(f"{band}_{idx}")
-                        mask_path.append(
-                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
-                        )
-                    else:
-                        band_id.append(f"{band}_{idx}")
-                        band_path.append(
-                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
-                        )
-                    granules_to_download.append(
-                        f"https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSS30.020/{tile}/{tile}.{band}.tif"  # noqa
-                    )
-            else:
-                for band in l30_bands:
-                    if band == "Fmask":
-                        mask_id.append(f"{band}_{idx}")
-                        mask_path.append(
-                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
-                        )
-                    else:
-                        band_id.append(f"{band}_{idx}")
-                        band_path.append(
-                            os.path.join(outdir, "hls_tiles", f"{tile}.{band}.tif")
-                        )
-                    granules_to_download.append(
-                        f"https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/{tile}/{tile}.{band}.tif"  # noqa
-                    )
 
+    for hls_tiles, download_links, obsv_date in zip(
+        data_with_tiles["hls_tiles"],
+        data_with_tiles["data_links"],
+        data_with_tiles["date"],
+    ):
+        bands_paths = {}
+        masks_paths = {}
+        obsv_data_links = []
+        for idx, (tile, tile_download_links) in enumerate(
+            zip(hls_tiles, download_links)
+        ):
+            tile = tile.strip(".")
+            bands_of_interest = s30_bands if "HLS.S30" in tile else l30_bands
+            filtered_downloads_links = [
+                next(link for link in tile_download_links if band + ".tif" in link)
+                for band in bands_of_interest
+            ]
+            assert len(set(filtered_downloads_links)) == len(bands_of_interest)
+            bands_paths.update(
+                {
+                    f"{band}_{idx}": os.path.join(
+                        outdir, "hls_tiles", f"{tile}.{band}.tif"
+                    )
+                    for band in bands_of_interest[:-1]
+                }
+            )
+            masks_paths.update(
+                {
+                    f"{bands_of_interest[-1]}_{idx}": os.path.join(
+                        outdir, "hls_tiles", f"{tile}.{bands_of_interest[-1]}.tif"
+                    )
+                }
+            )
+            obsv_data_links.append(filtered_downloads_links)
+        data_links.extend(obsv_data_links)
         hls_dataset[f'{obsv_date.strftime("%Y-%m-%d")}_{tile.split(".")[2]}'] = {
-            "tiles": {k: v for k, v in zip(band_id, band_path)},
-            "fmasks": {k: v for k, v in zip(mask_id, mask_path)},
+            "tiles": bands_paths,
+            "fmasks": masks_paths,
+            "data_links": obsv_data_links,
         }
-    return hls_dataset, set(granules_to_download)
+
+    return hls_dataset, set(chain.from_iterable(data_links))
 
 
 def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None:
