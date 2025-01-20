@@ -676,7 +676,7 @@ def main(cfg: DictConfig) -> None:
                 mean=cfg.dataloader.mean,
                 std=cfg.dataloader.std,
                 temporal_size=cfg.dataloader.temporal_dim,
-                train=False,
+                augment=False,
             )
             prediction = sliding_window_inference(
                 hls_tile,
@@ -716,7 +716,7 @@ def main(cfg: DictConfig) -> None:
                 std=STD,
                 temporal_size=TEMPORAL_SIZE,
                 im_size=cfg.test.img_size,
-                train=False,
+                augment=False,
             ),
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,
