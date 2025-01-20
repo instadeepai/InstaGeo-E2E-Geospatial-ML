@@ -54,18 +54,18 @@ def create_and_save_chips_with_seg_maps(
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
-    Create chips and corresponding segmentation maps from a HLS tile and save them to
-    an output directory.
+    Create chips and corresponding segmentation maps from a satellite image tile and save
+    them to an output directory.
 
     Args:
-        mf_reader (callable[dict[str, Any], bool]): A multi-file reader that
+        data_reader (callable[dict[str, Any], bool]): A multi-file reader that
             accepts a dictionary of satellite image tile paths and reads it into an Xarray dataset
             or dataarray. Optionally performs masking based on the boolean mask types provided.
         mask_fn (Callable): Function to use to apply masks.
         processing_method (str): Processing method to use to create the chips and
         segmentation maps.
         tile_dict (Dict): A dict mapping band names to tile filepath.
-        data_source (str): Data source.
+        data_source (str): Data source, which can be "HLS", "S2" or "S1".
         df (pd.DataFrame): DataFrame containing the data for segmentation maps.
         chip_size (int): Size of each chip.
         output_directory (str): Directory where the chips and segmentation maps will be
