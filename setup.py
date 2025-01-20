@@ -27,6 +27,7 @@ apps_dependencies = [
     # Add dependencies specific to the apps component
     "plotly",
     "datashader==0.16.2",
+    "dask==2024.12.1",
     "matplotlib",
     "streamlit==1.31.1",
 ]
