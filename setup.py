@@ -26,7 +26,7 @@ model_dependencies = [
 apps_dependencies = [
     # Add dependencies specific to the apps component
     "plotly",
-    "datashader",
+    "datashader==0.16.2",
     "matplotlib",
     "streamlit==1.31.1",
 ]
