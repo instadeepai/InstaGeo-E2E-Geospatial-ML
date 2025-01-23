@@ -410,8 +410,11 @@ def process_s2_metadata(metadata: dict, tile_id: str) -> pd.DataFrame:
         }
         for granule in metadata["features"]
     ]
-    granules_df = pd.DataFrame(granules)
-    granules_df = granules_df[granules_df["tile_id"].str.contains(tile_id)]
+    if granules:
+        granules_df = pd.DataFrame(granules)
+        granules_df = granules_df[granules_df["tile_id"].str.contains(tile_id)]
+    else:
+        granules_df = None
     return granules_df
 
 
@@ -454,7 +457,7 @@ def retrieve_s2_metadata(
             f"&box={lon_min},{lat_min},{lon_max},{lat_max}"
         )
         response = requests.get(url)
-        if response.status_code == 200:
+        if response.status_code == 200 and response.json():
             granules_metadata = response.json()
             granules_dict[tile_id] = process_s2_metadata(granules_metadata, tile_id)
         else:

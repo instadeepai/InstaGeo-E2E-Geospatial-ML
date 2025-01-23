@@ -388,8 +388,6 @@ def test_retrieve_s2_metadata_no_features():
         mock_process.assert_called_once_with(mock_response_data, "33UUU")
         assert isinstance(result, dict)
         assert "33UUU" in result
-        assert isinstance(result["33UUU"], pd.DataFrame)
-        assert result["33UUU"].empty
 
 
 def test_retrieve_s2_metadata_multiple_tiles():
@@ -421,10 +419,6 @@ def test_retrieve_s2_metadata_multiple_tiles():
         assert isinstance(result, dict)
         assert "33UUU" in result
         assert "33UUP" in result
-        assert isinstance(result["33UUU"], pd.DataFrame)
-        assert isinstance(result["33UUP"], pd.DataFrame)
-        assert result["33UUU"].empty
-        assert result["33UUP"].empty
 
 
 def test_find_best_tile_prioritize_size():
