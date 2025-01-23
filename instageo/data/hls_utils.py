@@ -386,6 +386,7 @@ def create_hls_dataset(
         bands_paths = {}
         masks_paths = {}
         obsv_data_links = []
+        tile = None
         for idx, (tile, tile_download_links) in enumerate(
             zip(hls_tiles, download_links)
         ):
@@ -412,12 +413,13 @@ def create_hls_dataset(
                 }
             )
             obsv_data_links.append(filtered_downloads_links)
-        data_links.extend(obsv_data_links)
-        hls_dataset[f'{obsv_date.strftime("%Y-%m-%d")}_{tile.split(".")[2]}'] = {
-            "tiles": bands_paths,
-            "fmasks": masks_paths,
-            "data_links": obsv_data_links,
-        }
+        if tile:
+            data_links.extend(obsv_data_links)
+            hls_dataset[f'{obsv_date.strftime("%Y-%m-%d")}_{tile.split(".")[2]}'] = {
+                "tiles": bands_paths,
+                "fmasks": masks_paths,
+                "data_links": obsv_data_links,
+            }
 
     return hls_dataset, set(chain.from_iterable(data_links))
 
