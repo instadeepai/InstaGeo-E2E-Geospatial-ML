@@ -25,17 +25,26 @@ import os
 import subprocess
 import time
 import zipfile
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import rasterio
 import requests  # type: ignore
+import stackstac
 import xarray as xr
 from absl import logging
+from pystac.item import Item
+from pystac_client import Client, ItemSearch
 from rasterio.crs import CRS
 
-from instageo.data.data_pipeline import get_tile_info, make_valid_bbox
+from instageo.data.data_pipeline import NO_DATA_VALUES, get_tile_info, make_valid_bbox
+
+BLOCKSIZE = 1024
+API_URL = "https://earth-search.aws.element84.com/v1"
+COLLECTION = ["sentinel-2-l2a"]
+BANDS_ASSET = ["blue", "green", "red", "nir08", "swir16", "swir22"]
+SCL_ASSET = ["scl"]
 
 
 class S2AuthState:
@@ -732,3 +741,105 @@ def create_s2_dataset(
         {"tiles": tiles_to_download, "urls": urls}
     ).drop_duplicates()
     return s2_dataset, granules_to_download
+
+
+def search_and_open_s2_cogs(
+    tile_dict: dict[str, Any], load_masks: bool = False
+) -> tuple[xr.DataArray, xr.DataArray | None, str]:
+    """Searches and opens multiple S2 COGs as an xarray DataArray from given granules IDs.
+
+    Args:
+        tile_dict (dict[str, Any]): A dictionary containing granules IDs to retrieve
+        for all timesteps of interest.
+        load_masks (bool): Whether or not to load the masks COGs.
+
+    Returns:
+        (xr.DataArray, xr.DataArray | None, str): A tuple of xarray DataArray combining
+        data from all the COGs bands of interest, (optionally) the COGs masks and the
+        CRS used.
+    """
+    search = get_item_search_obj(tile_dict)
+    results = get_item_collection(search)
+
+    # Load the bands for all timesteps and stack them in a data array
+    assets_to_load = BANDS_ASSET + SCL_ASSET if load_masks else BANDS_ASSET
+    stacked_items = stackstac.stack(
+        results,
+        assets=assets_to_load,
+        chunksize=BLOCKSIZE,
+        properties=False,
+        rescale=False,
+        fill_value=NO_DATA_VALUES.get("S2"),
+    )
+
+    bands = adjust_dims(stacked_items.sel(band=BANDS_ASSET))
+    masks = adjust_dims(stacked_items.sel(band=SCL_ASSET)) if load_masks else None
+
+    bands = bands.astype(np.uint16)
+    bands.attrs["scale_factor"] = 1
+
+    return bands, masks, bands.crs
+
+
+def get_item_search_obj(tile_dict: dict[str, Any]) -> ItemSearch:
+    """Creates an ItemSearch object by utilizing the granules IDs provided.
+
+    Args:
+        tile_dict (dict[str, Any]): A dictionary containing granules IDs to retrieve
+        for all timesteps of interest.
+
+    Returns:
+       ItemSearch: A search object.
+    """
+    s2_ids = list(map(lambda path: path.split("/")[2], tile_dict["granules"]))
+    client = get_s2_pystac_client()
+    search = client.search(
+        collections=[COLLECTION], query={"s2:product_uri": {"in": s2_ids}}
+    )
+    return search
+
+
+def get_item_collection(search_obj: ItemSearch) -> list[Item]:
+    """Iterates through the elements of a search object to return a list of STAC items.
+
+    Args:
+        search_obj (ItemSearch): A search object to "browse" to retrieve
+        the items collection.
+
+    Returns:
+       list[Item]: A list of items from the search object.
+    """
+    return list(search_obj.item_collection())
+
+
+def adjust_dims(data: xr.DataArray) -> xr.DataArray:
+    """Adjusts dimensions of a dataarray.
+
+    This function stacks the "time" and "band" dims over a new "band" dim and reorders
+    the dataarray dims into ("band","y","x").
+
+    Args:
+        data (xr.DataArray): A dataarray for which dimensions need to be adjusted.
+
+    Returns:
+        xr.DataArray: A 3D xarray DataArray without 'time' dimension.
+    """
+    num_bands = data["band"].size
+    data = data.stack(time_band=("time", "band"))
+    new_bands_indices = [
+        f"{band}_{i//num_bands}"
+        for i, (_, band) in enumerate(data.coords["time_band"].values)
+    ]
+    data = data.drop_vars(["time_band", "time", "band"])
+    data.coords["time_band"] = new_bands_indices
+    data = data.rename({"time_band": "band"}).transpose("band", "y", "x")
+    return data
+
+
+def get_s2_pystac_client() -> Client:
+    """Opens a pystac_client Client instance using a predefined Sentinel-2 STAC Catalog URL.
+
+    Returns:
+        Client : A client with an established connection to the STAC Catalog.
+    """
+    return Client.open(API_URL)

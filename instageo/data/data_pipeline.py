@@ -29,6 +29,9 @@ import rioxarray as rxr
 import xarray as xr
 from shapely.geometry import Point, box
 
+# No data values
+NO_DATA_VALUES = NoDataValues().model_dump()
+
 
 def create_and_save_chips_with_seg_maps(
     mf_reader: Callable,

@@ -35,3 +35,11 @@ class GDALOptions(BaseSettings):
     GDAL_CACHEMAX: int = 1024  # 1 GB
     GDAL_SWATH_SIZE: int = 16777216  # 16 MB
     CPL_VSIL_CURL_CACHE_SIZE: int = 67108864  # 64 MB
+
+
+class NoDataValues(BaseSettings):
+    """Settings for no-data values to use for HLS, S2 and segmentation maps."""
+
+    HLS: int = -9999
+    S2: int = 0
+    SEG_MAP: int = -1

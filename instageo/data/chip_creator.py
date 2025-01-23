@@ -37,6 +37,7 @@ from tqdm import tqdm
 import instageo.data.hls_utils as hls_utils
 from instageo.data.geo_utils import (
     MASK_DECODING_POS,
+    NO_DATA_VALUES,
     apply_mask,
     open_hls_cogs,
     open_mf_tiff_dataset,
@@ -56,9 +57,6 @@ flags.DEFINE_string(
     "output_directory",
     None,
     "Directory where the chips and segmentation maps will be saved.",
-)
-flags.DEFINE_integer(
-    "no_data_value", -9999, "Value to use for no data areas in the segmentation maps."
 )
 flags.DEFINE_integer(
     "min_count", 100, "Minimum observation counts per tile", lower_bound=1
@@ -545,21 +543,20 @@ def main(argv: Any) -> None:
             )
         s2_tiles_dir = os.path.join(FLAGS.output_directory, "s2_tiles")
         os.makedirs(s2_tiles_dir, exist_ok=True)
-
-        logging.info("Downloading Sentinel-2 Tiles")
-        s2_utils.download_tile_data(
-            s2_granules_to_download,
-            s2_tiles_dir,
-            client_id=os.getenv("CLIENT_ID"),
-            username=os.getenv("USERNAME"),
-            password=os.getenv("PASSWORD"),
-        )
+        if FLAGS.processing_method in ["download", "download-only"]:
+            logging.info("Downloading Sentinel-2 Tiles")
+            s2_utils.download_tile_data(
+                s2_granules_to_download,
+                s2_tiles_dir,
+                client_id=os.getenv("CLIENT_ID"),
+                username=os.getenv("USERNAME"),
+                password=os.getenv("PASSWORD"),
+            )
+            logging.info("Unzipping Sentinel-2 products")
+            s2_utils.extract_and_delete_zip_files(s2_tiles_dir)
 
         if FLAGS.processing_method == "download-only":
             return
-
-        logging.info("Unzipping Sentinel-2 products")
-        s2_utils.extract_and_delete_zip_files(s2_tiles_dir)
 
         logging.info("Creating Chips and Segmentation Maps")
         all_chips = []
