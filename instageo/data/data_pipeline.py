@@ -29,11 +29,16 @@ import pandas as pd
 import xarray as xr
 from shapely.geometry import box
 
+from instageo.data.settings import NoDataValues
+
 # Masks decoding positions
 MASK_DECODING_POS: dict[str, dict] = {
     "HLS": {"cloud": 1, "water": 5},
     "S2": {"cloud": [8, 9], "water": [6]},
 }
+
+# No data values
+NO_DATA_VALUES = NoDataValues().model_dump()
 
 
 def create_and_save_chips_with_seg_maps(
@@ -147,7 +152,7 @@ def create_and_save_chips_with_seg_maps(
             )
         if chip.where(chip != no_data_value).count().values == 0:
             continue
-        seg_map = create_segmentation_map(chip, df, no_data_value, window_size)
+        seg_map = create_segmentation_map(chip, df, window_size)
         if seg_map.where(seg_map != no_data_value).count().values == 0:
             continue
         seg_maps.append(seg_map_name)
@@ -287,7 +292,7 @@ def get_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
 
 
 def create_segmentation_map(
-    chip: Any, df: pd.DataFrame, no_data_value: int, window_size: int
+    chip: Any, df: pd.DataFrame, window_size: int
 ) -> xr.DataArray:
     """Create a segmentation map for the chip using the DataFrame.
 
@@ -296,13 +301,14 @@ def create_segmentation_map(
             map is being created.
         df (pd.DataFrame): DataFrame containing the data to be used in the segmentation
             map.
-        no_data_value (int): Value to be used for pixels with no data.
         window_size (int): Window size to use around the observation pixel.
 
     Returns:
          xr.DataArray: The created segmentation map as an xarray DataArray.
     """
-    seg_map = xr.full_like(chip.isel(band=0), fill_value=no_data_value, dtype=np.int16)
+    seg_map = xr.full_like(
+        chip.isel(band=0), fill_value=NO_DATA_VALUES.get("SEG_MAP"), dtype=np.int16
+    )
     df = df[
         (chip["x"].min().item() <= df["geometry"].x)
         & (df["geometry"].x <= chip["x"].max().item())

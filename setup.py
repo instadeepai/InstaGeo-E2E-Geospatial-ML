@@ -15,6 +15,8 @@ data_dependencies = [
     "pydantic==2.10.4",
     "pydantic-settings==2.7.0",
     "python-dotenv==1.0.1",
+    "pystac_client==0.8.5",
+    "stackstac==0.5.1",
 ]
 model_dependencies = [
     # Add dependencies specific to the model component

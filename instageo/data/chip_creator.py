@@ -34,6 +34,7 @@ from tqdm import tqdm
 from instageo.data import hls_utils, s2_utils
 from instageo.data.data_pipeline import (
     MASK_DECODING_POS,
+    NO_DATA_VALUES,
     apply_mask,
     create_and_save_chips_with_seg_maps,
     get_tiles,
@@ -52,9 +53,6 @@ flags.DEFINE_string(
     "output_directory",
     None,
     "Directory where the chips and segmentation maps will be saved.",
-)
-flags.DEFINE_integer(
-    "no_data_value", -9999, "Value to use for no data areas in the segmentation maps."
 )
 flags.DEFINE_integer(
     "min_count", 100, "Minimum observation counts per tile", lower_bound=1
@@ -255,7 +253,7 @@ def main(argv: Any) -> None:
                         df=obsv_data,
                         chip_size=FLAGS.chip_size,
                         output_directory=FLAGS.output_directory,
-                        no_data_value=FLAGS.no_data_value,
+                        no_data_value=NO_DATA_VALUES.get("HLS"),
                         src_crs=FLAGS.src_crs,
                         mask_decoder=hls_utils.decode_fmask_value,
                         mask_types=FLAGS.mask_types,
@@ -316,58 +314,65 @@ def main(argv: Any) -> None:
             )
         s2_tiles_dir = os.path.join(FLAGS.output_directory, "s2_tiles")
         os.makedirs(s2_tiles_dir, exist_ok=True)
-
-        logging.info("Downloading Sentinel-2 Tiles")
-        s2_utils.download_tile_data(
-            s2_granules_to_download,
-            s2_tiles_dir,
-            client_id=os.getenv("CLIENT_ID"),
-            username=os.getenv("USERNAME"),
-            password=os.getenv("PASSWORD"),
-        )
+        if FLAGS.processing_method in ["download", "download-only"]:
+            logging.info("Downloading Sentinel-2 Tiles")
+            s2_utils.download_tile_data(
+                s2_granules_to_download,
+                s2_tiles_dir,
+                client_id=os.getenv("CLIENT_ID"),
+                username=os.getenv("USERNAME"),
+                password=os.getenv("PASSWORD"),
+            )
+            logging.info("Unzipping Sentinel-2 products")
+            s2_utils.extract_and_delete_zip_files(s2_tiles_dir)
 
         if FLAGS.processing_method == "download-only":
             return
-
-        logging.info("Unzipping Sentinel-2 products")
-        s2_utils.extract_and_delete_zip_files(s2_tiles_dir)
 
         logging.info("Creating Chips and Segmentation Maps")
         all_chips = []
         all_seg_maps = []
         os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
         os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-        for key, tile_dict in tqdm(
-            s2_dataset.items(), desc="Processing Sentinel-2 Dataset"
-        ):
-            obsv_date_str, tile_id = key.split("_")
-            obsv_data = sub_data[
-                (sub_data["date"] == pd.to_datetime(obsv_date_str))
-                & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
-            ]
-            try:
-                chips, seg_maps = create_and_save_chips_with_seg_maps(
-                    data_reader=s2_utils.open_mf_jp2_dataset,
-                    mask_fn=apply_mask,
-                    processing_method=FLAGS.processing_method,
-                    tile_dict=tile_dict,
-                    data_source=FLAGS.data_source,
-                    df=obsv_data,
-                    chip_size=FLAGS.chip_size,
-                    output_directory=FLAGS.output_directory,
-                    no_data_value=FLAGS.no_data_value,
-                    src_crs=FLAGS.src_crs,
-                    mask_decoder=s2_utils.create_mask_from_scl,
-                    mask_types=FLAGS.mask_types,
-                    masking_strategy=FLAGS.masking_strategy,
-                    window_size=FLAGS.window_size,
-                )
-                all_chips.extend(chips)
-                all_seg_maps.extend(seg_maps)
-            except rasterio.errors.RasterioIOError as e:
-                logging.error(f"Error {e} when reading dataset containing: {tile_dict}")
-            except IndexError as e:
-                logging.error(f"Error {e} when processing {key}")
+        with dask.distributed.Client() as client:
+            for key, tile_dict in tqdm(
+                s2_dataset.items(), desc="Processing Sentinel-2 Dataset"
+            ):
+                obsv_date_str, tile_id = key.split("_")
+                obsv_data = sub_data[
+                    (sub_data["date"] == pd.to_datetime(obsv_date_str))
+                    & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
+                ]
+                try:
+                    chips, seg_maps = create_and_save_chips_with_seg_maps(
+                        data_reader=(
+                            s2_utils.search_and_open_s2_cogs
+                            if FLAGS.processing_method == "cog"
+                            else s2_utils.open_mf_jp2_dataset
+                        ),
+                        mask_fn=apply_mask,
+                        processing_method=FLAGS.processing_method,
+                        tile_dict=tile_dict,
+                        data_source=FLAGS.data_source,
+                        df=obsv_data,
+                        chip_size=FLAGS.chip_size,
+                        output_directory=FLAGS.output_directory,
+                        no_data_value=NO_DATA_VALUES.get("S2"),
+                        src_crs=FLAGS.src_crs,
+                        mask_decoder=s2_utils.create_mask_from_scl,
+                        mask_types=FLAGS.mask_types,
+                        masking_strategy=FLAGS.masking_strategy,
+                        window_size=FLAGS.window_size,
+                    )
+                    all_chips.extend(chips)
+                    all_seg_maps.extend(seg_maps)
+                except rasterio.errors.RasterioIOError as e:
+                    logging.error(
+                        f"Error {e} when reading dataset containing: {tile_dict}"
+                    )
+                except IndexError as e:
+                    logging.error(f"Error {e} when processing {key}")
+
         logging.info("Saving dataframe of chips and segmentation maps.")
         pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
             os.path.join(FLAGS.output_directory, "s2_chips_dataset.csv")
