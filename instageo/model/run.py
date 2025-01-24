@@ -632,6 +632,7 @@ def main(cfg: DictConfig) -> None:
         trainer = pl.Trainer(accelerator=get_device())
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
+        
     elif cfg.mode == "sliding_inference":
         model = PrithviSegmentationModule.load_from_checkpoint(
             cfg.checkpoint_path,
@@ -703,6 +704,7 @@ def main(cfg: DictConfig) -> None:
                 transform=transform,
             ) as dst:
                 dst.write(prediction, 1)
+                
     # TODO: Add support for chips that are greater than image size used for training
     elif cfg.mode == "chip_inference":
         check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
