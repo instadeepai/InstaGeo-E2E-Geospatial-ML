@@ -176,7 +176,7 @@ def main(argv: Any) -> None:
         else data["date"]
     )
     FLAGS.num_steps = 1 if not FLAGS.is_time_series_task else FLAGS.num_steps
-    sub_data = get_tiles(data, min_count=FLAGS.min_count)
+    sub_data = get_tiles(data, src_crs=FLAGS.src_crs, min_count=FLAGS.min_count)
 
     if FLAGS.data_source == "HLS":
         logging.info("Using Harmonized Landsat Sentinel-2 pipeline")

@@ -19,6 +19,7 @@
 
 """InstaGeo Data pipeline Module."""
 
+import logging
 import os
 from typing import Any, Callable
 
@@ -27,6 +28,7 @@ import mgrs
 import numpy as np
 import pandas as pd
 import xarray as xr
+from pyproj import Transformer
 from shapely.geometry import box
 
 from instageo.data.settings import NoDataValues
@@ -258,7 +260,34 @@ def get_tile_info(
     return tile_info, tile_queries
 
 
-def get_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
+def reproject_coordinates(df: pd.DataFrame, source_epsg: int = 4326) -> pd.DataFrame:
+    """Reproject coordinates from the source EPSG to EPSG:4326.
+
+    This function reprojects the geo coordinates found in df dataframe to the EPSG:4326
+
+    Args:
+        df (pd.DataFrame): DataFrame containing longitude and latitude columns.
+        source_epsg (int): The EPSG code of the source CRS for invalid coordinates.
+
+    Returns:
+        pd.DataFrame: DataFrame with transformed and valid coordinates.
+    """
+    logging.info("Reprojecting coordinates to EPSG:4326...")
+    transformer = Transformer.from_crs(
+        f"EPSG:{source_epsg}", "EPSG:4326", always_xy=True
+    )
+
+    # Reproject the invalid rows
+    df[["x", "y"]] = df.apply(
+        lambda row: transformer.transform(row["x"], row["y"]), axis=1
+    )
+
+    return df
+
+
+def get_tiles(
+    data: pd.DataFrame, src_crs: int = 4326, min_count: int = 100
+) -> pd.DataFrame:
     """Retrieve Tile IDs for Geospatial Observations from Satellite Data.
 
     This function associates each geospatial observation with a tile ID based on its
@@ -272,11 +301,14 @@ def get_tiles(data: pd.DataFrame, min_count: int = 100) -> pd.DataFrame:
 
     Args:
         data: DataFrame containing geospatial observations with location coordinates.
+        src_crs (int): CRS of points in `data`
         min_count: Minimum count of observations required per tile to retain.
 
     Returns:
         A subset of observations within tiles that meet or exceed the specified `min_count`.
     """
+    if src_crs != 4326:
+        data = reproject_coordinates(data, source_epsg=src_crs)
     mgrs_object = mgrs.MGRS()
     get_mgrs_tile_id = lambda row: mgrs_object.toMGRS(
         row["y"], row["x"], MGRSPrecision=0
