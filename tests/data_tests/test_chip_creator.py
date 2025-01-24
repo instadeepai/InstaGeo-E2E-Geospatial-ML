@@ -33,7 +33,7 @@ def setup_and_teardown_output_dir():
 
 @pytest.mark.auth
 @pytest.mark.parametrize(
-    "data_source, chip_counts, tile_counts", [("HLS", 3, 21), ("S2", 2, 2)]
+    "data_source, chip_counts, tile_counts", [("HLS", 4, 28), ("S2", 3, 3)]
 )
 def test_chip_creator(
     setup_and_teardown_output_dir, data_source, chip_counts, tile_counts
