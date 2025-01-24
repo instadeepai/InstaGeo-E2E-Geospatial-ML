@@ -703,6 +703,7 @@ def main(cfg: DictConfig) -> None:
                 transform=transform,
             ) as dst:
                 dst.write(prediction, 1)
+    # TODO: Add support for chips that are greater than image size used for training
     elif cfg.mode == "chip_inference":
         check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
         output_dir = os.path.join(root_dir, "predictions")
