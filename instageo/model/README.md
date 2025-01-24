@@ -57,9 +57,9 @@ python -m instageo.model.run \
     train.batch_size=4
 ```
 
-4. **Prediction using:** 
+4. **Prediction using:**
 
-*a.* **Sliding Window Inference:** 
+*a.* **Sliding Window Inference:**
 For training we create chips from HLS tiles, this is necessary because our model can only process an input of size 224 x 224. For the purpose of inference we have a sliding window inference feature that inputs HLS tile and perform a sliding window inference on patches of size 224 x 224. This is useful because it skips the process of creating chips using the `instageo.data.chip_creator`, we only need to download HLS tiles and directly runs inference on them. We can run inference using the following command:
 
 ```bash
@@ -72,7 +72,7 @@ python -m instageo.model.run --config-name=config.yaml \
     mode=sliding_inference
 ```
 
-*b.* **Chip Inference:** 
+*b.* **Chip Inference:**
 This mode performs efficient and optimized inference on geospatial image "chips" using a pre-trained model. It processes the data in batches, makes predictions, and saves the results as TIFF files with the appropriate geospatial metadata. It uses GPU (if available) and multithreading to save files faster.
 
 *Note:* The image size used for training and chip inference must be the same (currently 224) due to preprocessing steps applied during training.
