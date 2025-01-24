@@ -38,7 +38,8 @@ pip install . #run from instageo root
     - `learning_rate`: Initial learning rate.
     - `num_epochs`: Number of training epochs.
     - `batch_size`: Batch size for training and validation.
-    - `mode`: Select training, evaluation or stats mode.
+    - `mode`: Select stats, train, eval, sliding_inference or chip_inference mode.
+
 See `configs/config.yaml` for more.
 
 2. **Dataset Preparation:** Prepare your geospatial data using the InstaGeo Chip Creator or similar and place it in the specified `root_dir`. Ensure that the csv file for each dataset has `Input` and `Label` columns corresponding to the path of the image and label relative to the `root_dir`. Additionally, ensure the data is compatible with `InstaGeoDataset`
@@ -56,7 +57,10 @@ python -m instageo.model.run \
     train.batch_size=4
 ```
 
-4. **Prediction using Sliding Window Inference:** For training we create chips from HLS tiles, this is necessary because our model can only process an input of size 224 x 224. For the purpose of inference we have a sliding window inference feature that inputs HLS tile and perform a sliding window inference on patches of size 224 x 224. This is useful because it skips the process of creating chips using the `instageo.data.chip_creator`, we only need to download HLS tiles and directly runs inference on them. We can run inference using the following command:
+4. **Prediction using:** 
+
+*a.* **Sliding Window Inference:** 
+For training we create chips from HLS tiles, this is necessary because our model can only process an input of size 224 x 224. For the purpose of inference we have a sliding window inference feature that inputs HLS tile and perform a sliding window inference on patches of size 224 x 224. This is useful because it skips the process of creating chips using the `instageo.data.chip_creator`, we only need to download HLS tiles and directly runs inference on them. We can run inference using the following command:
 
 ```bash
 python -m instageo.model.run --config-name=config.yaml \
@@ -65,8 +69,25 @@ python -m instageo.model.run --config-name=config.yaml \
     train.batch_size=16 \
     test.stride=224 \
     checkpoint_path='path-to-checkpoint' \
-    mode=predict
+    mode=sliding_inference
 ```
+
+*b.* **Chip Inference:** 
+This mode performs efficient and optimized inference on geospatial image "chips" using a pre-trained model. It processes the data in batches, makes predictions, and saves the results as TIFF files with the appropriate geospatial metadata. It uses GPU (if available) and multithreading to save files faster.
+
+*Note:* The image size used for training and chip inference must be the same (currently 224) due to preprocessing steps applied during training.
+
+```bash
+python -m instageo.model.run --config-name=config.yaml \
+    root_dir='path-to-root_dir-containing-hls_dataset.json' \
+    test_filepath='hls_dataset.json' \
+    train.batch_size=16 \
+    test.stride=224 \
+    checkpoint_path='path-to-checkpoint' \
+    mode=chip_inference
+```
+
+
 
 5. **Example (Flood Mapping):**
 [Sen1Floods11](https://github.com/cloudtostreet/Sen1Floods11) is a geospatial dataset of 10m Sentinel-2 imagery for flood detection.
@@ -120,7 +141,7 @@ When the saved checkpoint is evaluated on the test set, you should have results 
 6. **Example (Multi-Temporal Crop Classification):**
 [Multi-Temporal Crop Classification](https://huggingface.co/datasets/ibm-nasa-geospatial/multi-temporal-crop-classification) contains Harmonized Landsat-Sentinel (HLS) imagery spanning various land cover and crop type classes throughout the Contiguous United States, captured during the year 2022. The classification labels used in this dataset are based on the Crop Data Layer (CDL) provided by the United States Department of Agriculture (USDA).
 
-- Data: Download the Multi-Temporal Crop Classification data splits using the following command
+- Data: Download the Multi-Temporal Crop Classification data splits using the following command (~13GB)
 
 ```bash
 gsutil -m cp -r gs://instageo/data/multi-temporal-crop-classification .
@@ -179,7 +200,7 @@ When the saved checkpoint is evaluated on the test set, you should have results 
 7. **Example (Desert Locust Breeding Ground Prediction):**
 Desert Locusts Breeding Ground Prediction using HLS dataset. Observation records of breeding grounds are sourced from [UN-FAO Locust Hub](https://locust-hub-hqfao.hub.arcgis.com/) and used to download HLS tiles used for creating chips and segmentation maps.
 
-- Data: The resulting chips and segmentation maps created using `instageo.chip_creator` can be downloaded using the following command:
+- Data: The resulting chips and segmentation maps created using `instageo.chip_creator` can be downloaded using the following command (~15GB)
 ```bash
 gsutil -m cp -r gs://instageo/data/locust_breeding .
 ```
