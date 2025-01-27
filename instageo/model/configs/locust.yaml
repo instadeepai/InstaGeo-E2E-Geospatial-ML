@@ -4,6 +4,7 @@ valid_filepath: null
 train_filepath: null
 test_filepath: null
 checkpoint_path: null
+output_dir: null
 mode: train # train or eval
 
 train:

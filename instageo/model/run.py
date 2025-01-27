@@ -708,7 +708,7 @@ def main(cfg: DictConfig) -> None:
     # TODO: Add support for chips that are greater than image size used for training
     elif cfg.mode == "chip_inference":
         check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
-        output_dir = os.path.join(root_dir, "predictions")
+        output_dir = os.path.join(cfg.output_dir, "predictions")
         os.makedirs(output_dir, exist_ok=True)
         test_dataset = InstaGeoDataset(
             filename=test_filepath,
