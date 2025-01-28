@@ -576,10 +576,10 @@ def main(cfg: DictConfig) -> None:
         checkpoint_callback = ModelCheckpoint(
             monitor="val_mIoU",
             dirpath=hydra_out_dir,
-            filename="instageo_epoch-{epoch:02d}-val_iou-{val_mIoU:.2f}",
+            filename="instageo_best_checkpoint",
             auto_insert_metric_name=False,
             mode="max",
-            save_top_k=3,
+            save_top_k=1,
         )
 
         logger = TensorBoardLogger(hydra_out_dir, name="instageo")
