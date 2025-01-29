@@ -348,7 +348,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             reduce_to_zero (bool): Reduces the label index to start from Zero.
             replace_label (Tuple): Tuple of value to replace and the replacement value.
             constant_multiplier (float): Constant multiplier for image.
-            include_filenames (bool): Flag that determines whether to retuturn filenames.
+            include_filenames (bool): Flag that determines whether to return filenames.
 
         """
         self.input_root = input_root
