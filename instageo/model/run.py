@@ -43,7 +43,7 @@ from instageo.model.dataloader import (
     process_data,
     process_test,
 )
-from instageo.model.infer_utils import sliding_window_inference
+from instageo.model.infer_utils import chip_inference, sliding_window_inference
 from instageo.model.model import PrithviSeg
 
 pl.seed_everything(seed=1042, workers=True)
@@ -85,11 +85,8 @@ def get_device() -> str:
     return device
 
 
-def custom_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-    """Test DataLoader Collate Function.
-
-    This function is a convenient wrapper around the PyTorch DataLoader class,
-    allowing for easy setup of various DataLoader parameters.
+def eval_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Evaluation DataLoader Collate Function.
 
     Args:
         batch (Tuple[Tensor]): A list of tuples containing features and labels.
@@ -97,9 +94,24 @@ def custom_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.T
     Returns:
         Tuple of (x,y) concatenated into separate tensors
     """
-    data = torch.cat([a[0] for a in batch], 0)
-    labels = torch.cat([a[1] for a in batch], 0)
+    data = torch.cat([a[0][0] for a in batch], 0)
+    labels = torch.cat([a[0][1] for a in batch], 0)
     return data, labels
+
+
+def infer_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Inference DataLoader Collate Function.
+
+    Args:
+        batch (Tuple[Tensor]): A list of tuples containing features and labels.
+
+    Returns:
+        Tuple of (x,y) concatenated into separate tensors
+    """
+    data = torch.stack([a[0][0] for a in batch], 0)
+    labels = [a[0][1] for a in batch]
+    filepaths = [a[1] for a in batch]
+    return (data, labels), filepaths
 
 
 def create_dataloader(
@@ -142,6 +154,7 @@ class PrithviSegmentationModule(pl.LightningModule):
 
     def __init__(
         self,
+        image_size: int = 224,
         learning_rate: float = 1e-4,
         freeze_backbone: bool = True,
         num_classes: int = 2,
@@ -156,6 +169,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         segmentation.
 
         Args:
+            image_size (int): Size of input image.
             num_classes (int): Number of classes for segmentation.
             temporal_step (int): Number of temporal steps for multi-temporal input.
             learning_rate (float): Learning rate for the optimizer.
@@ -166,6 +180,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         """
         super().__init__()
         self.net = PrithviSeg(
+            image_size=image_size,
             num_classes=num_classes,
             temporal_step=temporal_step,
             freeze_backbone=freeze_backbone,
@@ -548,6 +563,7 @@ def main(cfg: DictConfig) -> None:
             valid_dataset, batch_size=batch_size, shuffle=False, num_workers=1
         )
         model = PrithviSegmentationModule(
+            image_size=IM_SIZE,
             learning_rate=cfg.train.learning_rate,
             freeze_backbone=cfg.model.freeze_backbone,
             num_classes=cfg.model.num_classes,
@@ -597,12 +613,14 @@ def main(cfg: DictConfig) -> None:
             reduce_to_zero=cfg.dataloader.reduce_to_zero,
             no_data_value=cfg.dataloader.no_data_value,
             constant_multiplier=cfg.dataloader.constant_multiplier,
+            include_filenames=True,
         )
         test_loader = create_dataloader(
-            test_dataset, batch_size=batch_size, collate_fn=custom_collate_fn
+            test_dataset, batch_size=batch_size, collate_fn=eval_collate_fn
         )
         model = PrithviSegmentationModule.load_from_checkpoint(
             checkpoint_path,
+            image_size=IM_SIZE,
             learning_rate=cfg.train.learning_rate,
             freeze_backbone=cfg.model.freeze_backbone,
             num_classes=cfg.model.num_classes,
@@ -614,9 +632,11 @@ def main(cfg: DictConfig) -> None:
         trainer = pl.Trainer(accelerator=get_device())
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
-    elif cfg.mode == "predict":
+
+    elif cfg.mode == "sliding_inference":
         model = PrithviSegmentationModule.load_from_checkpoint(
             cfg.checkpoint_path,
+            image_size=IM_SIZE,
             learning_rate=cfg.train.learning_rate,
             freeze_backbone=cfg.model.freeze_backbone,
             num_classes=cfg.model.num_classes,
@@ -657,7 +677,7 @@ def main(cfg: DictConfig) -> None:
                 mean=cfg.dataloader.mean,
                 std=cfg.dataloader.std,
                 temporal_size=cfg.dataloader.temporal_dim,
-                train=False,
+                augment=False,
             )
             prediction = sliding_window_inference(
                 hls_tile,
@@ -684,6 +704,45 @@ def main(cfg: DictConfig) -> None:
                 transform=transform,
             ) as dst:
                 dst.write(prediction, 1)
+
+    # TODO: Add support for chips that are greater than image size used for training
+    elif cfg.mode == "chip_inference":
+        check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
+        output_dir = os.path.join(root_dir, "predictions")
+        os.makedirs(output_dir, exist_ok=True)
+        test_dataset = InstaGeoDataset(
+            filename=test_filepath,
+            input_root=root_dir,
+            preprocess_func=partial(
+                process_and_augment,
+                mean=MEAN,
+                std=STD,
+                temporal_size=TEMPORAL_SIZE,
+                im_size=cfg.test.img_size,
+                augment=False,
+            ),
+            bands=BANDS,
+            replace_label=cfg.dataloader.replace_label,
+            reduce_to_zero=cfg.dataloader.reduce_to_zero,
+            no_data_value=cfg.dataloader.no_data_value,
+            constant_multiplier=cfg.dataloader.constant_multiplier,
+            include_filenames=True,
+        )
+        test_loader = create_dataloader(
+            test_dataset, batch_size=batch_size, collate_fn=infer_collate_fn
+        )
+        model = PrithviSegmentationModule.load_from_checkpoint(
+            checkpoint_path,
+            image_size=IM_SIZE,
+            learning_rate=cfg.train.learning_rate,
+            freeze_backbone=cfg.model.freeze_backbone,
+            num_classes=cfg.model.num_classes,
+            temporal_step=cfg.dataloader.temporal_dim,
+            class_weights=cfg.train.class_weights,
+            ignore_index=cfg.train.ignore_index,
+            weight_decay=cfg.train.weight_decay,
+        )
+        chip_inference(test_loader, output_dir, model, device=get_device())
 
 
 if __name__ == "__main__":

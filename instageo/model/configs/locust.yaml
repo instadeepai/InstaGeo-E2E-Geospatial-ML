@@ -39,7 +39,7 @@ dataloader:
       2398.52685546875,
       2292.96435546875,
     ]
-  img_size: 224
+  img_size: 256
   temporal_dim: 3
   replace_label: [-9999, -1]
   reduce_to_zero: False
@@ -47,7 +47,7 @@ dataloader:
   constant_multiplier: 1.0
 
 test:
-  img_size: 224
-  crop_size: 224
-  stride: 224
+  img_size: 256
+  crop_size: 256
+  stride: 256
   mask_cloud: False

@@ -103,7 +103,7 @@ def process_and_augment(
     std: List[float],
     temporal_size: int = 1,
     im_size: int = 224,
-    train: bool = True,
+    augment: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Process and augment the given images and labels.
 
@@ -113,7 +113,7 @@ def process_and_augment(
         mean (List[float]): The mean of each channel in the image
         std (List[float]): The standard deviation of each channel in the image
         temporal_size: The number of temporal steps
-        train: To identify training mode.
+        augment: Flag to perform augmentations in training mode.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A tuple of tensors representing the processed
@@ -125,7 +125,7 @@ def process_and_augment(
     ims = [Image.fromarray(im) for im in ims]
     if y is not None:
         label = Image.fromarray(y.copy().squeeze())
-    if train:
+    if augment:
         ims, label = random_crop_and_flip(ims, label, im_size)
     ims, label = normalize_and_convert_to_tensor(ims, label, mean, std, temporal_size)
     return ims, label
@@ -196,7 +196,7 @@ def process_test(
         mean=mean,
         std=std,
         temporal_size=temporal_size,
-        train=False,
+        augment=False,
     )
 
     img_crops, mask_crops = [], []
@@ -292,7 +292,7 @@ def process_data(
     return arr_x, arr_y
 
 
-def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str]]:
+def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str | None]]:
     """Load data file paths from a CSV file.
 
     Args:
@@ -305,9 +305,12 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str]]:
     """
     file_paths = []
     data = pd.read_csv(fname)
+    label_present = True if "Label" in data.columns else False
     for _, row in data.iterrows():
         im_path = os.path.join(input_root, row["Input"])
-        mask_path = os.path.join(input_root, row["Label"])
+        mask_path = (
+            None if not label_present else os.path.join(input_root, row["Label"])
+        )
         if os.path.exists(im_path):
             try:
                 with rasterio.open(im_path) as src:
@@ -332,6 +335,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         reduce_to_zero: bool,
         constant_multiplier: float,
         bands: List[int] | None = None,
+        include_filenames: bool = False,
     ):
         """Dataset Class for loading and preprocessing the dataset.
 
@@ -344,6 +348,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             reduce_to_zero (bool): Reduces the label index to start from Zero.
             replace_label (Tuple): Tuple of value to replace and the replacement value.
             constant_multiplier (float): Constant multiplier for image.
+            include_filenames (bool): Flag that determines whether to return filenames.
 
         """
         self.input_root = input_root
@@ -354,6 +359,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         self.replace_label = replace_label
         self.reduce_to_zero = reduce_to_zero
         self.constant_multiplier = constant_multiplier
+        self.include_filenames = include_filenames
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Retrieves a sample from dataset.
@@ -375,7 +381,10 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             bands=self.bands,
             constant_multiplier=self.constant_multiplier,
         )
-        return self.preprocess_func(arr_x, arr_y)
+        if self.include_filenames:
+            return self.preprocess_func(arr_x, arr_y), im_fname
+        else:
+            return self.preprocess_func(arr_x, arr_y)
 
     def __len__(self) -> int:
         """Return length of dataset."""

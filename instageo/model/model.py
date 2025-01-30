@@ -121,7 +121,11 @@ class PrithviSeg(nn.Module):
     """Prithvi Segmentation Model."""
 
     def __init__(
-        self, temporal_step: int = 1, num_classes: int = 2, freeze_backbone: bool = True
+        self,
+        temporal_step: int = 1,
+        image_size: int = 224,
+        num_classes: int = 2,
+        freeze_backbone: bool = True,
     ) -> None:
         """Initialize the PrithviSeg model.
 
@@ -131,6 +135,7 @@ class PrithviSeg(nn.Module):
 
         Args:
             temporal_step (int): Size of temporal dimension.
+            image_size (int): Size of input image.
             num_classes (int): Number of target classes.
             freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
         """
@@ -154,6 +159,7 @@ class PrithviSeg(nn.Module):
         model_args = model_config["model_args"]
 
         model_args["num_frames"] = temporal_step
+        model_args["img_size"] = image_size
         self.model_args = model_args
         # instantiate model
         model = ViTEncoder(**model_args)
@@ -165,6 +171,9 @@ class PrithviSeg(nn.Module):
             for key, value in checkpoint.items()
             if key.startswith("encoder.")
         }
+        filtered_checkpoint_state_dict["pos_embed"] = torch.zeros(
+            1, (temporal_step * (image_size // 16) ** 2 + 1), 768
+        )
         _ = model.load_state_dict(filtered_checkpoint_state_dict)
 
         self.prithvi_100M_backbone = model
