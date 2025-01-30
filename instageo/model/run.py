@@ -85,11 +85,8 @@ def get_device() -> str:
     return device
 
 
-def custom_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-    """Test DataLoader Collate Function.
-
-    This function is a convenient wrapper around the PyTorch DataLoader class,
-    allowing for easy setup of various DataLoader parameters.
+def eval_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Evaluation DataLoader Collate Function.
 
     Args:
         batch (Tuple[Tensor]): A list of tuples containing features and labels.
@@ -97,8 +94,8 @@ def custom_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.T
     Returns:
         Tuple of (x,y) concatenated into separate tensors
     """
-    data = torch.cat([a[0] for a in batch], 0)
-    labels = torch.cat([a[1] for a in batch], 0)
+    data = torch.cat([a[0][0] for a in batch], 0)
+    labels = torch.cat([a[0][1] for a in batch], 0)
     return data, labels
 
 def eval_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
@@ -113,6 +110,21 @@ def eval_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Ten
     data = torch.cat([a[0][0] for a in batch], 0)
     labels = torch.cat([a[0][1] for a in batch], 0)
     return data, labels
+
+
+def infer_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Inference DataLoader Collate Function.
+
+    Args:
+        batch (Tuple[Tensor]): A list of tuples containing features and labels.
+
+    Returns:
+        Tuple of (x,y) concatenated into separate tensors
+    """
+    data = torch.stack([a[0][0] for a in batch], 0)
+    labels = [a[0][1] for a in batch]
+    filepaths = [a[1] for a in batch]
+    return (data, labels), filepaths
 
 
 def infer_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
@@ -648,9 +660,11 @@ def main(cfg: DictConfig) -> None:
         trainer = pl.Trainer(accelerator=get_device())
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
-    elif cfg.mode == "predict":
+
+    elif cfg.mode == "sliding_inference":
         model = PrithviSegmentationModule.load_from_checkpoint(
             cfg.checkpoint_path,
+            image_size=IM_SIZE,
             learning_rate=cfg.train.learning_rate,
             freeze_backbone=cfg.model.freeze_backbone,
             num_classes=cfg.model.num_classes,
@@ -691,7 +705,7 @@ def main(cfg: DictConfig) -> None:
                 mean=cfg.dataloader.mean,
                 std=cfg.dataloader.std,
                 temporal_size=cfg.dataloader.temporal_dim,
-                train=False,
+                augment=False,
             )
             prediction = sliding_window_inference(
                 hls_tile,
