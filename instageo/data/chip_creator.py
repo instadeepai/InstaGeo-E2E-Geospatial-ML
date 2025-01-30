@@ -21,6 +21,7 @@
 
 import json
 import os
+from functools import partial
 from typing import Any
 
 import dask.distributed
@@ -37,6 +38,7 @@ from instageo.data.data_pipeline import (
     NO_DATA_VALUES,
     apply_mask,
     create_and_save_chips_with_seg_maps,
+    get_pystac_client,
     get_tiles,
 )
 from instageo.data.settings import GDALOptions
@@ -334,6 +336,7 @@ def main(argv: Any) -> None:
         all_seg_maps = []
         os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
         os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
+        s2_pystac_client = get_pystac_client(s2_utils.API_URL)
         with dask.distributed.Client() as client:
             for key, tile_dict in tqdm(
                 s2_dataset.items(), desc="Processing Sentinel-2 Dataset"
@@ -346,7 +349,7 @@ def main(argv: Any) -> None:
                 try:
                     chips, seg_maps = create_and_save_chips_with_seg_maps(
                         data_reader=(
-                            s2_utils.search_and_open_s2_cogs
+                            partial(s2_utils.search_and_open_s2_cogs, s2_pystac_client)
                             if FLAGS.processing_method == "cog"
                             else s2_utils.open_mf_jp2_dataset
                         ),

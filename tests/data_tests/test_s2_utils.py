@@ -354,8 +354,7 @@ def test_retrieve_s2_metadata_api_error():
 
         mock_get.assert_called_once()
         assert isinstance(result, dict)
-        assert "33UUU" in result
-        assert result["33UUU"] is None
+        assert "33UUU" not in result
 
 
 def test_retrieve_s2_metadata_no_features():

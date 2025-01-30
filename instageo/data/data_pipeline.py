@@ -21,14 +21,17 @@
 
 import logging
 import os
+from functools import partial
 from typing import Any, Callable
 
 import geopandas as gpd
 import mgrs
 import numpy as np
 import pandas as pd
+import planetary_computer
 import xarray as xr
 from pyproj import Transformer
+from pystac_client import Client
 from shapely.geometry import box
 
 from instageo.data.settings import NoDataValues
@@ -44,7 +47,7 @@ NO_DATA_VALUES = NoDataValues().model_dump()
 
 
 def create_and_save_chips_with_seg_maps(
-    data_reader: Callable,
+    data_reader: Callable | partial,
     mask_fn: Callable,
     processing_method: str,
     tile_dict: dict[str, Any],
@@ -65,7 +68,7 @@ def create_and_save_chips_with_seg_maps(
     them to an output directory.
 
     Args:
-        data_reader (callable[dict[str, Any], bool]): A multi-file reader that
+        data_reader (callable[dict[str, Any], bool] | functools.partial): A multi-file reader that
             accepts a dictionary of satellite image tile paths and reads it into an Xarray dataset
             or dataarray. Optionally performs masking based on the boolean mask types provided.
         mask_fn (Callable): Function to use to apply masks.
@@ -414,3 +417,15 @@ def make_valid_bbox(
         return lon_min, lat_min, lon_max, lat_max
     else:
         return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
+
+
+def get_pystac_client(url: str) -> Client:
+    """Opens a pystac_client Client instance using a STAC Catalog URL.
+
+    Args:
+        url (str): STAC Catalog URL.
+
+    Returns:
+        Client : A client with an established connection to the STAC Catalog.
+    """
+    return Client.open(url, modifier=planetary_computer.sign_inplace)
