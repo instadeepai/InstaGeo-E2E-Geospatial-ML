@@ -177,7 +177,8 @@ def retrieve_hls_metadata(
         granules = pd.json_normalize(
             [result | {"data_links": result.data_links()} for result in results]
         )
-        assert not granules.empty, "No granules found"
+        if granules.empty:
+            continue
         granules = granules[granules["meta.native-id"].str.contains(tile_id)]
         granules, data_links = list(granules["meta.native-id"]), list(
             granules["data_links"]

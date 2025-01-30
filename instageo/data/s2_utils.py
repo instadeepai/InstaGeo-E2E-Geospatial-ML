@@ -25,6 +25,7 @@ import os
 import subprocess
 import time
 import zipfile
+from datetime import datetime
 from typing import Any, List, Optional, Tuple
 
 import numpy as np
@@ -37,14 +38,15 @@ from absl import logging
 from pystac.item import Item
 from pystac_client import Client, ItemSearch
 from rasterio.crs import CRS
+from tqdm import tqdm
 
 from instageo.data.data_pipeline import NO_DATA_VALUES, get_tile_info, make_valid_bbox
 
-BLOCKSIZE = 1024
-API_URL = "https://earth-search.aws.element84.com/v1"
+BLOCKSIZE = 512
+API_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 COLLECTION = ["sentinel-2-l2a"]
-BANDS_ASSET = ["blue", "green", "red", "nir08", "swir16", "swir22"]
-SCL_ASSET = ["scl"]
+BANDS_ASSET = ["B02", "B03", "B04", "B8A", "B11", "B12"]
+SCL_ASSET = ["SCL"]
 
 
 class S2AuthState:
@@ -335,9 +337,8 @@ def open_mf_jp2_dataset(
     """
     band_paths = []
     scl_paths = []
-    bands_needed = ["B02", "B03", "B04", "B8A", "B11", "B12"]
     for granule in band_files["granules"]:
-        for band in bands_needed:
+        for band in BANDS_ASSET:
             pattern = os.path.join(
                 granule, "GRANULE/*", "IMG_DATA/R20m", f"*_{band}_20m.jp2"
             )
@@ -443,7 +444,11 @@ def retrieve_s2_metadata(
         lon_max,
         lat_min,
         lat_max,
-    ) in tile_info_df.iterrows():
+    ) in tqdm(
+        tile_info_df.iterrows(),
+        desc="Retrieving Sentinel-2 Metadata",
+        total=len(tile_info_df),
+    ):
         lon_min, lat_min, lon_max, lat_max = make_valid_bbox(
             lon_min, lat_min, lon_max, lat_max
         )
@@ -460,8 +465,6 @@ def retrieve_s2_metadata(
         if response.status_code == 200 and response.json():
             granules_metadata = response.json()
             granules_dict[tile_id] = process_s2_metadata(granules_metadata, tile_id)
-        else:
-            granules_dict[tile_id] = None
     return granules_dict
 
 
@@ -494,7 +497,7 @@ def find_best_tile(
     """
     query_results = []
     for query_str, (tile_id, dates) in tile_queries.items():
-        if tile_id not in tile_database:
+        if (tile_id not in tile_database) or (tile_database[tile_id] is None):
             query_results.append(
                 {
                     "tile_queries": query_str,
@@ -747,11 +750,12 @@ def create_s2_dataset(
 
 
 def search_and_open_s2_cogs(
-    tile_dict: dict[str, Any], load_masks: bool = False
+    client: Client, tile_dict: dict[str, Any], load_masks: bool = False
 ) -> tuple[xr.DataArray, xr.DataArray | None, str]:
     """Searches and opens multiple S2 COGs as an xarray DataArray from given granules IDs.
 
     Args:
+        client (pystac_client.Client): pystac_client client to use to perform the search.
         tile_dict (dict[str, Any]): A dictionary containing granules IDs to retrieve
         for all timesteps of interest.
         load_masks (bool): Whether or not to load the masks COGs.
@@ -761,8 +765,8 @@ def search_and_open_s2_cogs(
         data from all the COGs bands of interest, (optionally) the COGs masks and the
         CRS used.
     """
-    search = get_item_search_obj(tile_dict)
-    results = get_item_collection(search)
+    search_objs = get_item_search_objs(client, tile_dict)
+    results = get_item_collection(search_objs)
 
     # Load the bands for all timesteps and stack them in a data array
     assets_to_load = BANDS_ASSET + SCL_ASSET if load_masks else BANDS_ASSET
@@ -784,35 +788,48 @@ def search_and_open_s2_cogs(
     return bands, masks, bands.crs
 
 
-def get_item_search_obj(tile_dict: dict[str, Any]) -> ItemSearch:
-    """Creates an ItemSearch object by utilizing the granules IDs provided.
+def get_item_search_objs(client: Client, tile_dict: dict[str, Any]) -> List[ItemSearch]:
+    """Creates a list of ItemSearch objects by utilizing the granules IDs provided.
 
     Args:
+        client (pystac_client.Client): pystac_client client to use to perform the search.
         tile_dict (dict[str, Any]): A dictionary containing granules IDs to retrieve
         for all timesteps of interest.
 
     Returns:
-       ItemSearch: A search object.
+       List[ItemSearch]: A list of search objects.
     """
     s2_ids = list(map(lambda path: path.split("/")[2], tile_dict["granules"]))
-    client = get_s2_pystac_client()
-    search = client.search(
-        collections=[COLLECTION], query={"s2:product_uri": {"in": s2_ids}}
-    )
-    return search
+    dates = [
+        datetime.strptime(id.split("_")[2].split("T")[0], "%Y%m%d").strftime("%Y-%m-%d")
+        for id in s2_ids
+    ]
+    tile = s2_ids[0].split("_")[5][1:]
+    search_objs = [
+        client.search(
+            collections=[COLLECTION],
+            datetime=date,
+            query={
+                "s2:mgrs_tile": {"eq": tile},
+            },
+        )
+        for date in dates
+    ]
+
+    return search_objs
 
 
-def get_item_collection(search_obj: ItemSearch) -> list[Item]:
-    """Iterates through the elements of a search object to return a list of STAC items.
+def get_item_collection(search_objs: List[ItemSearch]) -> List[Item]:
+    """Iterates through search objects to return a list of STAC items.
 
     Args:
-        search_obj (ItemSearch): A search object to "browse" to retrieve
+        search_objs (ItemSearch): Search objects to "browse" to retrieve
         the items collection.
 
     Returns:
-       list[Item]: A list of items from the search object.
+       List[Item]: A list of items from the search objects.
     """
-    return list(search_obj.item_collection())
+    return [list(search_obj.item_collection())[0] for search_obj in search_objs]
 
 
 def adjust_dims(data: xr.DataArray) -> xr.DataArray:
@@ -837,12 +854,3 @@ def adjust_dims(data: xr.DataArray) -> xr.DataArray:
     data.coords["time_band"] = new_bands_indices
     data = data.rename({"time_band": "band"}).transpose("band", "y", "x")
     return data
-
-
-def get_s2_pystac_client() -> Client:
-    """Opens a pystac_client Client instance using a predefined Sentinel-2 STAC Catalog URL.
-
-    Returns:
-        Client : A client with an established connection to the STAC Catalog.
-    """
-    return Client.open(API_URL)
