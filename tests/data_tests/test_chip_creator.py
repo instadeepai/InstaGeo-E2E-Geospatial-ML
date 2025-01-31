@@ -55,6 +55,8 @@ def test_chip_creator(
         "30",
         "--num_steps",
         "1",
+        "--data_source",
+        data_source,
         "--masking_strategy",
         "any",
         "--mask_types",
@@ -67,7 +69,7 @@ def test_chip_creator(
     chips = os.listdir(os.path.join(output_directory, "chips"))
     seg_maps = os.listdir(os.path.join(output_directory, "seg_maps"))
     assert len(chips) == len(seg_maps)
-    assert len(chips) == 4
+    assert len(chips) == chip_counts
     chip_path = os.path.join(output_directory, "chips", chips[0])
     seg_map_path = os.path.join(output_directory, "seg_maps", seg_maps[0])
     chip = xr.open_dataset(chip_path)
@@ -84,7 +86,7 @@ def test_chip_creator(
                 )
             )
         )
-        == 28
+        == tile_counts
     )
 
 
@@ -109,6 +111,9 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
         "1",
         "--processing_method",
         "download-only",
+        "True",
+        "--data_source",
+        "HLS",
     ]
     FLAGS(argv)
     chip_creator.main("None")

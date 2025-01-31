@@ -7,62 +7,66 @@ import pytest
 import xarray as xr
 from shapely.geometry import Point
 
-from instageo.data.geo_utils import apply_mask, decode_fmask_value, open_mf_tiff_dataset
+from instageo.data.data_pipeline import get_chip_coords, get_tile_info, get_tiles
 
 
-def test_open_mf_tiff_dataset():
-    band_files = {
-        "tiles": {
-            "band1": "tests/data/sample.tif",
-            "band2": "tests/data/sample.tif",
-        },
-        "fmasks": {
-            "band1": "tests/data/fmask.tif",
-            "band2": "tests/data/fmask.tif",
-        },
-    }
-
-    result, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
-    assert isinstance(result, xr.Dataset)
-    assert isinstance(crs, CRS)
-    assert crs == 32613
-    assert result["band_data"].shape == (2, 224, 224)
-
-
-def test_open_mf_tiff_dataset_cloud_mask():
-    band_files = {
-        "tiles": {
-            "band1": "tests/data/sample.tif",
-            "band2": "tests/data/sample.tif",
-        },
-        "fmasks": {
-            "band1": "tests/data/fmask.tif",
-            "band2": "tests/data/fmask.tif",
-        },
-    }
-    result_no_mask, _, crs = open_mf_tiff_dataset(band_files, load_masks=False)
-    num_points = result_no_mask.band_data.count().values.item()
-    result_with_mask, mask_ds, crs = open_mf_tiff_dataset(band_files, load_masks=True)
-    result_with_mask = apply_mask(
-        result_with_mask,
-        mask_ds.band_data,
-        -1,
-        masking_strategy="any",
+@pytest.fixture
+def observation_data():
+    data = pd.DataFrame(
+        {
+            "date": {
+                0: "2022-06-08",
+                1: "2022-06-08",
+                2: "2022-06-08",
+                3: "2022-06-08",
+                4: "2022-06-09",
+                5: "2022-06-09",
+                6: "2022-06-09",
+                7: "2022-06-08",
+                8: "2022-06-09",
+                9: "2022-06-09",
+            },
+            "x": {
+                0: 44.48,
+                1: 44.48865,
+                2: 46.437787,
+                3: 49.095545,
+                4: -0.1305,
+                5: 44.6216,
+                6: 49.398908,
+                7: 44.451435,
+                8: 49.435228,
+                9: 44.744167,
+            },
+            "y": {
+                0: 15.115617,
+                1: 15.099767,
+                2: 14.714659,
+                3: 16.066929,
+                4: 28.028967,
+                5: 16.16195,
+                6: 16.139727,
+                7: 15.209633,
+                8: 16.151837,
+                9: 15.287778,
+            },
+            "year": {
+                0: 2022,
+                1: 2022,
+                2: 2022,
+                3: 2022,
+                4: 2022,
+                5: 2022,
+                6: 2022,
+                7: 2022,
+                8: 2022,
+                9: 2022,
+            },
+        }
     )
-    fmask = xr.open_dataset("tests/data/fmask.tif")
-    cloud_mask = decode_fmask_value(fmask, 1)
-    num_clouds = cloud_mask.where(cloud_mask == 1).band_data.count().values.item()
-    assert (
-        result_with_mask.band_data.where(result_with_mask.band_data != -1)
-        .count()
-        .values.item()
-        == num_points - 2 * num_clouds
-    )
-
-    assert isinstance(result_with_mask, xr.Dataset)
-    assert isinstance(crs, CRS)
-    assert crs == 32613
-    assert result_with_mask["band_data"].shape == (2, 224, 224)
+    data["date"] = pd.to_datetime(data["date"])
+    data["input_features_date"] = data["date"]
+    return data
 
 
 @pytest.fixture

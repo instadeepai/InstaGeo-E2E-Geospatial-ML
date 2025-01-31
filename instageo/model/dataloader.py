@@ -238,7 +238,7 @@ def get_raster_data(
         np.ndarray: Numpy array representing the processed data.
     """
     if isinstance(fname, dict):
-        data, mask, crs = open_mf_tiff_dataset(fname, mask_cloud)
+        data, mask, crs = open_mf_tiff_dataset(fname, load_masks=False)
         data = data.fillna(no_data_value)
         data = data.band_data.values
     else:
