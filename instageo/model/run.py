@@ -98,34 +98,6 @@ def eval_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Ten
     labels = torch.cat([a[0][1] for a in batch], 0)
     return data, labels
 
-def eval_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-    """Evaluation DataLoader Collate Function.
-
-    Args:
-        batch (Tuple[Tensor]): A list of tuples containing features and labels.
-
-    Returns:
-        Tuple of (x,y) concatenated into separate tensors
-    """
-    data = torch.cat([a[0][0] for a in batch], 0)
-    labels = torch.cat([a[0][1] for a in batch], 0)
-    return data, labels
-
-
-def infer_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-    """Inference DataLoader Collate Function.
-
-    Args:
-        batch (Tuple[Tensor]): A list of tuples containing features and labels.
-
-    Returns:
-        Tuple of (x,y) concatenated into separate tensors
-    """
-    data = torch.stack([a[0][0] for a in batch], 0)
-    labels = [a[0][1] for a in batch]
-    filepaths = [a[1] for a in batch]
-    return (data, labels), filepaths
-
 
 def infer_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
     """Inference DataLoader Collate Function.
