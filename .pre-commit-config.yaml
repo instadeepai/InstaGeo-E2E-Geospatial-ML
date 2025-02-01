@@ -13,7 +13,7 @@
 #   codespell: Checks for common misspellings.
 
 
-default_stages: ["pre-commit", "commit-msg", "pre-push"]
+default_stages: ["commit", "commit-msg", "push"]
 default_language_version:
   python: python3.10
 
@@ -83,18 +83,14 @@ repos:
     hooks:
       - id: pydocstyle
         name: Checking docstring style.
-        args:
-          [
-            "--convention=google",
-            "--match=^((?!test).)*$",
-          ]
+        args: ["--convention=google", "--match=^((?!test).)*$"]
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
+    rev: v2.2.6
     hooks:
       - id: codespell
         name: codespell
         description: Checks for common misspellings in text files.
-        entry: codespell -L fallow
+        args: ["--skip=*.json,*.csv", "--ignore-words=.codespell-ignore.txt"]
         language: python
         types: [text]
