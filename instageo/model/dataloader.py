@@ -32,7 +32,7 @@ from absl import logging
 from PIL import Image
 from torchvision import transforms
 
-from instageo.data.geo_utils import open_mf_tiff_dataset
+from instageo.data.hls_utils import open_mf_tiff_dataset
 
 
 def random_crop_and_flip(
@@ -222,6 +222,7 @@ def get_raster_data(
     bands: List[int] | None = None,
     no_data_value: int | None = -9999,
     mask_cloud: bool = True,
+    water_mask: bool = False,
 ) -> np.ndarray:
     """Load and process raster data from a file.
 
@@ -231,12 +232,13 @@ def get_raster_data(
         bands (List[int]): Index of bands to select from array.
         no_data_value (int | None): NODATA value in image raster.
         mask_cloud (bool): Perform cloud masking.
+        water_mask (bool): Perform water masking.
 
     Returns:
         np.ndarray: Numpy array representing the processed data.
     """
     if isinstance(fname, dict):
-        data, _ = open_mf_tiff_dataset(fname, mask_cloud)
+        data, mask, crs = open_mf_tiff_dataset(fname, load_masks=False)
         data = data.fillna(no_data_value)
         data = data.band_data.values
     else:
@@ -244,6 +246,14 @@ def get_raster_data(
             data = src.read()
     if (not is_label) and bands:
         data = data[bands, ...]
+    # For some reasons, some few HLS tiles are not scaled in v2.0.
+    # In the following lines, we find and scale them
+    bands = []
+    for band in data:
+        if band.max() > 10:
+            band *= 0.0001
+        bands.append(band)
+    data = np.stack(bands, axis=0)
     return data
 
 
@@ -279,6 +289,7 @@ def process_data(
         bands=bands,
         no_data_value=no_data_value,
         mask_cloud=mask_cloud,
+        water_mask=False,
     )
     arr_x = arr_x * constant_multiplier
     if mask_fname:
@@ -348,7 +359,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             reduce_to_zero (bool): Reduces the label index to start from Zero.
             replace_label (Tuple): Tuple of value to replace and the replacement value.
             constant_multiplier (float): Constant multiplier for image.
-            include_filenames (bool): Flag that determines whether to retuturn filenames.
+            include_filenames (bool): Flag that determines whether to return filenames.
 
         """
         self.input_root = input_root

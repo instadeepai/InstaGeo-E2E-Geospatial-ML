@@ -18,7 +18,7 @@ InstaGeo is geospatial deep learning Python package designed to facilitate geosp
 To get started with InstaGeo, ensure you have Python installed on your system. Then, execute the following command in your terminal or command prompt to install InstaGeo:
 
 ```bash
-pip install git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git
+pip install instageo
 ```
 This command will download and install the latest version of InstaGeo along with its required dependencies.
 
@@ -180,4 +180,6 @@ streamlit run app.py
 
 We welcome contributions to InstaGeo. Please follow the [contribution guidelines](./CONTRIBUTING.md) for submitting pull requests and reporting issues to help us improve the package.
 
-<!-- ## License -->
+## License
+
+This project is licensed under the [CC BY-NC-SA 4.0](LICENSE).
