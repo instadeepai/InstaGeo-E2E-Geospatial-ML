@@ -43,16 +43,37 @@ HLS data is hosted on LP DAAC and requires authentication to access it. Create a
 ## Usage
 
 ### Command-line Arguments
-- `--dataframe_path`: Path to the DataFrame CSV file containing geolocated observation records. (required)
-- `--chip_size`: Size of each chip. (default: 224)
+
+- `--dataframe_path`: Path to the DataFrame CSV file. (required)
+- `--chip_size`: Size of each chip. (default: 256)
+- `--src_crs`: CRS of the geo-coordinates in dataframe_path. (default: 4326)
 - `--output_directory`: Directory where the chips and segmentation maps will be saved. (required)
-- `--no_data_value`: Value to use for no data pixels in the segmentation maps. (default: -1)
-- `--src_crs`: Coordinate Reference System (CRS) of the geographical coordinates in `dataframe_path`. (default: 4326)
-- `--min_count`: Minimum records that is desired per granule. This is useful for cotroling sparsity. (default: 1)
-- `--num_steps`: Number of temporal steps for creating data. For static data, this value should be set to 1 (default: 1)
-- `--temporal_step`: Size of each temporal step in days (default: 30)
-- `--temporal_tolerance`: Number of days to be tolerated when searching for closest HLS granules. (default: 3)
-- `--download_only`: Downloads only HLS tiles when set to True. (default: False)
+- `--min_count`: Minimum observation counts per tile, this is useful for controlling sparsity. (default: 100, minimum: 1)
+- `--shift_to_month_start`: Indicates whether to shift the observation date to the beginning of the month. (default: True)
+- `--is_time_series_task`: Indicates whether the task is a time series one. If True, data will be retrieved before the observation date. (default: True)
+- `--num_steps`: Number of temporal steps. If is_time_series_task is True, an attempt will be made to retrieve *num_steps* chips prior to the observation date. (default: 3, minimum: 1)
+- `--temporal_step`: Temporal step size in days. Used when fetching time-series data up to temporal_step days before the observation date. (default: 30)
+- `--temporal_tolerance`: Tolerance (in days) used when searching for the closest tile. (default: 5)
+- `--data_source`: Data source to use. Options: HLS, S2. (default: HLS)
+- `--cloud_coverage`: Percentage of cloud cover to use. Accepted values: 0-100. (default: 10)
+- `--window_size`: Defines the size of the window around the observation pixel. A value of 1 creates a 3×3 pixel window centered on the observation. (default: 0, minimum: 0)
+- `--processing_method`: Method to use for processing tiles.(default: cog) Options:
+
+    \- **"cog"**: Uses Cloud Optimized GeoTIFFs (COGs) to create chips.
+
+    \- **"download"**: Downloads entire tiles for chip creation.
+
+    \- **"download-only"**: Downloads tiles without further processing.
+
+- `--mask_types`: List of different types of masking to apply. (default: [])
+- `--masking_strategy`: Strategy for applying masking.(default: each) Options:
+
+    \- **"each"**: Timestep-wise masking.
+
+    \- **"any"**: Excludes pixels if the mask is present in at least one timestep.
+
+
+
 
 
 ### Running the Module
@@ -69,7 +90,7 @@ Replace `<hls_tile_path>`, `<path_to_dataframe_csv>`, `<chip_size>`, `<output_di
 python chip_creator.py --dataframe_path="/path/to/data.csv" --chip_size=224 --output_directory="/path/to/output" --no_data_value=-1 --src_crs 4326
 ```
 
-This command will process the HLS tile, segment it into chips of size 224x224, create segmentation maps based on the provided DataFrame, and save the output in the specified directory.
+This command will process the tile, segment it into chips of size 224x224, create segmentation maps based on the provided DataFrame, and save the output in the specified directory.
 
 Run this command to test using an example observation record.
 
