@@ -13,7 +13,7 @@ See `requirements.txt`
 - Accepts both temporal and non-temporal inputs
 - Custom models with [Prithvi_100M](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M) backbone
 - Training, Validation and Inference runs
-- Sliding window inference for inference on expansive HLS tiles, which measure 3660 x 3660 pixels
+- Sliding window inference for inference on expansive tiles, which measure 3660 x 3660 pixels
 - Reproducible training pipeline
 - Command-line flags for easy configuration of training parameters.
 
@@ -60,12 +60,12 @@ python -m instageo.model.run \
 4. **Prediction using:**
 
 *a.* **Sliding Window Inference:**
-For training we create chips from HLS tiles, this is necessary because our model can only process an input of size 224 x 224. For the purpose of inference we have a sliding window inference feature that inputs HLS tile and perform a sliding window inference on patches of size 224 x 224. This is useful because it skips the process of creating chips using the `instageo.data.chip_creator`, we only need to download HLS tiles and directly runs inference on them. We can run inference using the following command:
+For training we create chips from tiles, this is necessary because our model can only process an input of size 224 x 224. For the purpose of inference we have a sliding window inference feature that inputs tile and perform a sliding window inference on patches of size 224 x 224. This is useful because it skips the process of creating chips using the `instageo.data.chip_creator`, we only need to download tiles and directly runs inference on them. We can run inference using the following command:
 
 ```bash
 python -m instageo.model.run --config-name=config.yaml \
-    root_dir='path-to-root_dir-containing-hls_dataset.json' \
-    test_filepath='hls_dataset.json' \
+    root_dir='path-to-root_dir-containing-dataset.json' \
+    test_filepath='dataset.json' \
     train.batch_size=16 \
     test.stride=224 \
     checkpoint_path='path-to-checkpoint' \
@@ -79,8 +79,8 @@ This mode performs efficient and optimized inference on geospatial image "chips"
 
 ```bash
 python -m instageo.model.run --config-name=config.yaml \
-    root_dir='path-to-root_dir-containing-hls_dataset.json' \
-    test_filepath='hls_dataset.json' \
+    root_dir='path-to-root_dir-containing-dataset.json' \
+    test_filepath='dataset.json' \
     train.batch_size=16 \
     test.stride=224 \
     checkpoint_path='path-to-checkpoint' \

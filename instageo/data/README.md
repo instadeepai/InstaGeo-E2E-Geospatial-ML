@@ -109,14 +109,14 @@ The CLIENT_ID must remain cdse-public.
 To run the module, use the following command in the terminal:
 
 ```bash
-python chip_creator.py --dataframe_path="<path_to_dataframe_csv>" --chip_size=<chip_size> --output_directory="<output_directory>" --no_data_value=<no_data_value> --src_crs=<source_crs>
+python chip_creator.py --dataframe_path="<path_to_dataframe_csv>" --chip_size=<chip_size> --output_directory="<output_directory>"  --src_crs=<source_crs>
 ```
 
-Replace `<hls_tile_path>`, `<path_to_dataframe_csv>`, `<chip_size>`, `<output_directory>`, `<no_data_value>` `<source_crs>` and `<destination_crs>`  with appropriate values.
+Replace `<tile_path>`, `<path_to_dataframe_csv>`, `<chip_size>`, `<output_directory>`, `<source_crs>` and `<destination_crs>`  with appropriate values.
 
 ### Example with HLS
 ```bash
-python chip_creator.py --dataframe_path="/path/to/data.csv" --chip_size=224 --output_directory="/path/to/output" --no_data_value=-1 --src_crs 4326
+python chip_creator.py --dataframe_path="/path/to/data.csv" --chip_size=224 --output_directory="/path/to/output"  --src_crs=4326
 ```
 
 This command will process the tile, segment it into chips of size 224x224, create segmentation maps based on the provided DataFrame, and save the output in the specified directory.
@@ -129,7 +129,6 @@ python -m "instageo.data.chip_creator" \
     --output_directory="." \
     --min_count=4 \
     --chip_size=512 \
-    --no_data_value=-1 \
     --temporal_tolerance=3 \
     --temporal_step=30 \
     --num_steps=3
@@ -143,8 +142,7 @@ python -m "instageo.data.chip_creator" \
      --output_directory="." \
      --min_count=4 \
      --chip_size=512 \
-     --no_data_value=-1 \
-     --temporal_tolerance=3 \
+     --temporal_tolerance=7 \
      --temporal_step=30 \
      --num_steps=3 \
      --data_source=S2
