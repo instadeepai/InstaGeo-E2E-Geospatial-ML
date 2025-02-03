@@ -2,16 +2,14 @@ import os
 import pathlib
 import shutil
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 from absl import flags
-from shapely.geometry import Point
 
 from instageo.data import chip_creator
-from instageo.data.chip_creator import app, check_required_flags, get_chip_coords
+from instageo.data.chip_creator import app, check_required_flags
 
 FLAGS = flags.FLAGS
 
@@ -33,30 +31,13 @@ def setup_and_teardown_output_dir():
         pass
 
 
-def test_get_chip_coords():
-    df = pd.read_csv("tests/data/sample_4326.csv")
-    df = gpd.GeoDataFrame(df, geometry=[Point(xy) for xy in zip(df.x, df.y)])
-    df.set_crs(epsg=4326, inplace=True)
-    df = df.to_crs(crs=32613)
-
-    ds = xr.open_dataset("tests/data/HLS.S30.T38PMB.2022145T072619.v2.0.B02.tif")
-    chip_coords = get_chip_coords(df, ds, 64)
-    assert chip_coords == [
-        (2, 0),
-        (0, 3),
-        (2, 2),
-        (0, 3),
-        (2, 0),
-        (3, 2),
-        (2, 3),
-        (0, 3),
-        (2, 3),
-        (1, 2),
-    ]
-
-
 @pytest.mark.auth
-def test_chip_creator(setup_and_teardown_output_dir):
+@pytest.mark.parametrize(
+    "data_source, chip_counts, tile_counts", [("HLS", 4, 28), ("S2", 3, 3)]
+)
+def test_chip_creator(
+    setup_and_teardown_output_dir, data_source, chip_counts, tile_counts
+):
     output_directory = "/tmp/csv_chip_creator"
     argv = [
         "chip_creator",
@@ -68,21 +49,27 @@ def test_chip_creator(setup_and_teardown_output_dir):
         "4",
         "--chip_size",
         "512",
-        "--no_data_value",
-        "-1",
         "--temporal_tolerance",
         "1",
         "--temporal_step",
         "30",
         "--num_steps",
         "1",
+        "--data_source",
+        data_source,
+        "--masking_strategy",
+        "any",
+        "--mask_types",
+        "water",
+        "--processing_method",
+        "download",
     ]
     FLAGS(argv)
     chip_creator.main("None")
     chips = os.listdir(os.path.join(output_directory, "chips"))
     seg_maps = os.listdir(os.path.join(output_directory, "seg_maps"))
     assert len(chips) == len(seg_maps)
-    assert len(chips) == 3
+    assert len(chips) == chip_counts
     chip_path = os.path.join(output_directory, "chips", chips[0])
     seg_map_path = os.path.join(output_directory, "seg_maps", seg_maps[0])
     chip = xr.open_dataset(chip_path)
@@ -93,11 +80,13 @@ def test_chip_creator(setup_and_teardown_output_dir):
     assert np.unique(seg_map.band_data).size > 1
     assert (
         len(
-            pd.read_csv(os.path.join(output_directory, "granules_to_download.csv"))[
-                "tiles"
-            ].tolist()
+            pd.read_csv(
+                os.path.join(
+                    output_directory, f"{data_source.lower()}_granules_to_download.csv"
+                )
+            )
         )
-        == 21
+        == tile_counts
     )
 
 
@@ -114,22 +103,68 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
         "4",
         "--chip_size",
         "512",
-        "--no_data_value",
-        "-1",
         "--temporal_tolerance",
         "1",
         "--temporal_step",
         "30",
         "--num_steps",
         "1",
-        "--download_only",
+        "--processing_method",
+        "download-only",
+        "True",
+        "--data_source",
+        "HLS",
     ]
     FLAGS(argv)
     chip_creator.main("None")
     assert os.path.exists(os.path.join(output_directory, "hls_dataset.json"))
-    assert os.path.exists(os.path.join(output_directory, "granules_to_download.csv"))
+    assert os.path.exists(
+        os.path.join(output_directory, "hls_granules_to_download.csv")
+    )
     assert not os.path.exists(os.path.join(output_directory, "chips"))
     assert not os.path.exists(os.path.join(output_directory, "seg_maps"))
+
+
+@pytest.mark.auth
+def test_chip_creator_cog(setup_and_teardown_output_dir):
+    output_directory = "/tmp/csv_chip_creator"
+    argv = [
+        "chip_creator",
+        "--dataframe_path",
+        os.path.join(os.path.dirname(test_root), "data/test_breeding_data.csv"),
+        "--output_directory",
+        output_directory,
+        "--min_count",
+        "4",
+        "--chip_size",
+        "512",
+        "--temporal_tolerance",
+        "1",
+        "--temporal_step",
+        "30",
+        "--num_steps",
+        "1",
+        "--masking_strategy",
+        "any",
+        "--mask_types",
+        "water",
+        "--processing_method",
+        "cog",
+    ]
+    FLAGS(argv)
+    chip_creator.main("None")
+    chips = os.listdir(os.path.join(output_directory, "chips"))
+    seg_maps = os.listdir(os.path.join(output_directory, "seg_maps"))
+    assert len(chips) == len(seg_maps)
+    assert len(chips) == 4
+    chip_path = os.path.join(output_directory, "chips", chips[0])
+    seg_map_path = os.path.join(output_directory, "seg_maps", seg_maps[0])
+    chip = xr.open_dataset(chip_path)
+    seg_map = xr.open_dataset(seg_map_path)
+    assert chip.band_data.shape == (6, 512, 512)
+    assert np.unique(chip.band_data).size > 1
+    assert seg_map.band_data.shape == (1, 512, 512)
+    assert np.unique(seg_map.band_data).size > 1
 
 
 def test_missing_flags_raises_error():

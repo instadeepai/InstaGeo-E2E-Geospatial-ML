@@ -136,11 +136,10 @@ dmypy.json
 # Experiment results
 outputs/
 
-
 *.pyc
 __pycache__/
 *lightning_logs
 *prithvi/
+*.ipynb
 nul/
-notebooks/
-!notebooks/*.ipynb
+!*InstaGeo_Demo.ipynb
