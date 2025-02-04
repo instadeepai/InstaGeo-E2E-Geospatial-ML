@@ -19,6 +19,9 @@
 
 """Utils for Raster Visualisation."""
 
+import alphashape
+from shapely.geometry import MultiPoint
+
 import datashader as ds
 import datashader.transfer_functions as tf
 import matplotlib.cm
@@ -39,39 +42,39 @@ epsg3857_to_epsg4326 = Transformer.from_crs(3857, 4326, always_xy=True)
 MIN_ZOOM = 5
 
 
-def calculate_zoom(lats: list[float], lons: list[float]) -> float:
-    """Calculates the appropriate zoom level for a map given latitude and longitude extents.
+# def calculate_zoom(lats: list[float], lons: list[float]) -> float:
+#     """Calculates the appropriate zoom level for a map given latitude and longitude extents.
 
-    This function estimates the zoom level needed to display a region defined by its
-    latitude and longitude boundaries on a map.  It assumes a Mercator projection
-    (used by Mapbox and similar web mapping libraries).
+#     This function estimates the zoom level needed to display a region defined by its
+#     latitude and longitude boundaries on a map.  It assumes a Mercator projection
+#     (used by Mapbox and similar web mapping libraries).
 
-    Args:
-        lats: A list of latitudes defining the region.
-        lons: A list of longitudes defining the region.
+#     Args:
+#         lats: A list of latitudes defining the region.
+#         lons: A list of longitudes defining the region.
 
-    Returns:
-        float: The estimated zoom level. Returns 0 if no lats or lons are provided.
-    """
-    if not lats or not lons:
-        return 0
+#     Returns:
+#         float: The estimated zoom level. Returns 0 if no lats or lons are provided.
+#     """
+#     if not lats or not lons:
+#         return 0
 
-    max_lat, min_lat = max(lats), min(lats)
-    max_lon, min_lon = max(lons), min(lons)
+#     max_lat, min_lat = max(lats), min(lats)
+#     max_lon, min_lon = max(lons), min(lons)
 
-    # Calculate latitude and longitude spans
-    lat_diff = max_lat - min_lat
-    lon_diff = max_lon - min_lon
+#     # Calculate latitude and longitude spans
+#     lat_diff = max_lat - min_lat
+#     lon_diff = max_lon - min_lon
 
-    # Estimate zoom based on both latitude and longitude ranges.
-    # This calculation is based on approximate formulas for Mercator projection
-    # and world dimensions in pixels at different zoom levels.  You can fine-tune
-    # the constant factors (15 and 22) if needed for your specific map display.
-    zoom_lat = 8 - math.log2(lat_diff)
-    zoom_lon = 10 - math.log2(lon_diff)
+#     # Estimate zoom based on both latitude and longitude ranges.
+#     # This calculation is based on approximate formulas for Mercator projection
+#     # and world dimensions in pixels at different zoom levels.  You can fine-tune
+#     # the constant factors (15 and 22) if needed for your specific map display.
+#     zoom_lat = 8 - math.log2(lat_diff)
+#     zoom_lon = 10 - math.log2(lon_diff)
 
-    # Choose the more restrictive zoom level (the smaller one) to fit the entire area
-    return max(MIN_ZOOM, min(zoom_lat, zoom_lon))
+#     # Choose the more restrictive zoom level (the smaller one) to fit the entire area
+#     return max(MIN_ZOOM, min(zoom_lat, zoom_lon))
 
 
 def get_crs(filepath: str) -> CRS:
@@ -184,24 +187,45 @@ def create_map_with_geotiff_tiles(
 
     clusters = []
     sites = []
+    all_lats = []
+    all_lons = []
+    crs = "EPSG:4326"
     for tile in tiles_to_overlay:
         if tile.endswith(".tif") or tile.endswith(".tiff"):
-            xarr_dataset, crs = read_geotiff_to_xarray(tile)
-            gpd_sites = get_activated_coords(xarr_dataset, threshold=0.5)
+            xarr_dataset, _ = read_geotiff_to_xarray(tile)
+            gpd_sites = get_activated_coords(xarr_dataset, threshold=0.5, coarsen=5)
             cluster = clusterize_prediction(gpd_sites)
+            cluster = cluster.to_crs(crs)
+            gpd_sites = gpd_sites.to_crs(crs)
 
             clusters.append(cluster)
             sites.append(gpd_sites)
+            all_lats.extend(gpd_sites.geometry.y)
+            all_lons.extend(gpd_sites.geometry.x)
 
-    # Calculate center
-    fig = folium.Map((0, 0))
-
-    if len(clusters) > 0:
+    all_sites = pd.concat(sites)  # Combine all site GeoDataFrames
+    bounds = all_sites.total_bounds
+    center_lon = (bounds[0] + bounds[2]) / 2
+    center_lat = (bounds[1] + bounds[3]) / 2
+    fig = folium.Map(location=[center_lat, center_lon])  # Set initial map center
+    if clusters:
         all_clusters = pd.concat(clusters)
-
-        all_sites = pd.concat(sites)
-        fig = all_sites.explore(m=fig)
-        fig = all_clusters.explore(m=fig, column="count", cmap="YlOrRd")
+        # all_clusters = all_clusters[all_clusters.geometry.area > 0]
+        all_clusters["density"] = all_clusters["count"] / all_clusters.geometry.area
+        all_clusters = all_clusters.sort_values(by="density")
+        all_sites = all_sites.to_crs(crs)
+        all_clusters = all_clusters.to_crs(crs)
+        fig = all_sites.explore(m=fig, color="black")
+        fig = all_clusters.explore(
+            m=fig,
+            column="density",
+            scheme="NaturalBreaks",
+            k=5,
+            cmap="YlOrRd",
+            # m=fig,
+            # column="density",
+            # cmap="YlOrRd",
+        )
 
     folium.LayerControl().add_to(fig)
 
@@ -209,7 +233,7 @@ def create_map_with_geotiff_tiles(
 
 
 def get_activated_coords(
-    xarr_dataset: xr.DataArray, threshold: float, coarsen: int = 30
+    xarr_dataset: xr.DataArray, threshold: float, coarsen: int = 5
 ) -> gpd.GeoDataFrame:
     # Apply where() to replace values below the threshold with NaN
     coarsen_xarr = xarr_dataset.coarsen(x=coarsen, y=coarsen, boundary="trim").mean()
@@ -220,7 +244,7 @@ def get_activated_coords(
         filtered_xarr.stack(point=["x", "y"]).dropna("point").point.values
     )
 
-    sites = pd.Series(activated_coords).apply(pd.Series)
+    sites = pd.Series(activated_coords).apply(pd.Series)  # slow
     sites.columns = ["x", "y"]
 
     return gpd.GeoDataFrame(
@@ -232,28 +256,36 @@ def get_activated_coords(
 
 def clusterize_prediction(
     gpd_sites: gpd.GeoDataFrame,
-    distance_threshold: float = 1e4,
-    linkage: str = "complete",
+    distance_threshold: float = 1e3,
+    linkage: str = "single",
 ) -> gpd.GeoDataFrame:
     clustering = AgglomerativeClustering(
-        n_clusters=None, distance_threshold=distance_threshold, linkage=linkage
+        n_clusters=None,
+        distance_threshold=distance_threshold,
+        linkage=linkage,
     )
     gpd_sites["cluster"] = clustering.fit_predict(gpd_sites[["x", "y"]])
 
     cluster_geometry = gpd_sites.groupby("cluster").agg(
-        {"geometry": [combine_coords, "count"]}
-    )["geometry"]
+        {
+            "geometry": lambda x: combine_coords(x, distance_threshold),
+            "x": "size",
+        }  # Adding the size aggregation
+    )
 
+    cluster_geometry = cluster_geometry.rename(
+        columns={"x": "count", "combine_coords": "geometry"}
+    )  # Correctly setting the column name
     cluster_geometry = gpd.GeoDataFrame(
-        geometry=cluster_geometry["combine_coords"],
+        geometry=cluster_geometry["geometry"],
         data=cluster_geometry["count"],
-        crs=gpd_sites.crs,
+        crs=gpd_sites.crs,  # Setting the crs
     )
 
     return cluster_geometry
 
 
-def combine_coords(x):
-    polygon = unary_union(list(x))
-    cv = polygon.convex_hull
-    return cv
+def combine_coords(x, distance_threshold):
+    polygon = unary_union(list(x.buffer(distance_threshold / 2)))
+    # cv = polygon.convex_hull
+    return polygon

@@ -24,6 +24,7 @@ interactive map.
 """
 
 import xarray as xr
+from streamlit_folium import st_folium
 
 import glob
 import json
@@ -31,7 +32,7 @@ import os
 from pathlib import Path
 from instageo.apps.reporting import (
     generate_high_density_report,
-    format_report,
+    # format_report,
     send_email,
 )
 import streamlit as st
@@ -65,7 +66,7 @@ def generate_map(
         tiles_to_consider = [
             tile
             for tile in prediction_tiles
-            if os.path.basename(tile).split("_")[1][1:] in country_tiles
+            if os.path.basename(tile).split("_")[3][1:] in country_tiles
         ]
 
         if not tiles_to_consider:
@@ -83,7 +84,7 @@ def generate_map(
 
 def main() -> None:
     """Instageo Serve Main Entry Point."""
-    predictions_path = str(Path(__file__).parent / "predictions")
+    predictions_path = str(Path(__file__).parent / "predictions_new")
     st.set_page_config(
         page_title="Locust busters", page_icon=":cricket:", layout="wide"
     )
@@ -105,23 +106,31 @@ def main() -> None:
         country_codes = st.sidebar.multiselect(
             "ISO 3166-1 Alpha-2 Country Codes:",
             options=list(countries_to_tiles_map.keys()),
-            default=["CD", "TZ", "UG", "RW"],
+            default=["OM", "SA"],
         )
-        year = st.sidebar.number_input("Select Year", 2023, 2024)
-        month = st.sidebar.number_input("Select Month", 1, 12)
+        year = st.sidebar.number_input("Select Year", 2020, 2024)  # PLEASE USE 2021
+        month = st.sidebar.number_input("Select Month", 1, 12)  # PLEASE USE 6
 
-    st.markdown(
-        """
-        <style>
-        .plotly-graph-div {  /* This targets the Plotly chart container */
-            height: 90vh; /* Use 90% of the viewport height */
-            margin-top: -60px; /* optional: tweak top margin if needed after stretching */
-            margin-bottom: 10px; /* optional: tweak bottom margin if needed */
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    # st.markdown(
+    #     """
+    # <style>
+    #     .st-cf > div:first-child,  /* Override Streamlit column padding */
+    #     .st-cf > div:first-child > div:first-child {
+    #         padding: 0;
+    #     }
+    #     [data-testid="stHorizontalBlock"] > div:first-child { /* Override horizontal block padding */
+    #         padding: 0;
+    #     }
+    #     [data-testid="stFiframe"] {  /* Set iframe height to 80vh */
+    #         height: 80vh !important;
+    #         width: 100% !important;
+    #         position: relative; /* Ensure correct positioning within column */
+    #     }
+
+    # </style>
+    # """,
+    #     unsafe_allow_html=True,
+    # )
     if st.sidebar.button("Generate Map"):
         country_tiles = [
             tile
@@ -129,21 +138,22 @@ def main() -> None:
             for tile in countries_to_tiles_map.get(country_code, [])
         ]
         fig = generate_map(predictions_path, year, month, country_tiles)
-        folium_static(fig, width=1000)
+        folium_static(fig)
+        # st_folium(fig, width="100%", height=600)
         if send_report and user_email:
             with st.spinner("Generating and sending report..."):
-                report, map_image_path = generate_high_density_report(
+                map_image_path = generate_high_density_report(
                     # folium map
                     # save folium map
                     fig=fig,
                     # rasters=rasters,
-                    threshold=0.8,
+                    # threshold=0.8,
                 )
-                formatted_report = format_report(report, map_image_path)
+                # formatted_report = format_report(report, map_image_path)
                 if send_email(
                     user_email,
                     "High-Density Report",
-                    formatted_report,
+                    # formatted_report,
                     img_path=map_image_path,
                 ):
                     st.success("Report sent successfully!")
@@ -155,7 +165,7 @@ def main() -> None:
                     st.error("Error sending report.")
     else:  # this is to init an empty map
         fig = folium.Map((0, 0))
-        folium_static(fig, width=1000)
+        folium_static(fig)
 
 
 if __name__ == "__main__":
