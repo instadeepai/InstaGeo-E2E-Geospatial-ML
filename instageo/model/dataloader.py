@@ -285,50 +285,99 @@ def get_raster_data(
     return data
 
 
+import os
+import random
+from functools import partial
+from typing import Any, Callable, List, Tuple
+
+import numpy as np
+import pandas as pd
+import rasterio
+import torch
+import xarray as xr
+from absl import logging
+from PIL import Image
+from rasterio.crs import CRS
+from torchvision import transforms
+
+# Function to compute spectral indices
+def compute_indices(image):
+    """Compute NDVI, EVI, NDWI, and NDSI from Sentinel-2 bands."""
+    B2, B3, B4, B8, B11, B12 = image  # Extract spectral bands
+
+    NDVI = (B8 - B4) / (B8 + B4 + 1e-6)
+    EVI = 2.5 * (B8 - B4) / (B8 + 6 * B4 - 7.5 * B2 + 1 + 1e-6)
+    NDWI = (B3 - B8) / (B3 + B8 + 1e-6)
+    NDSI = (B11 - B8) / (B11 + B8 + 1e-6)
+
+    return np.stack([NDVI, EVI, NDWI, NDSI], axis=0)
+
+# Function to compute temporal differences
+def compute_differences(current, previous):
+    """Compute ΔNDVI and ΔNDWI (temporal changes)."""
+    delta_NDVI = current[0] - previous[0]
+    delta_NDWI = current[2] - previous[2]
+    return np.stack([delta_NDVI, delta_NDWI], axis=0)
+
+# Updated function to process images and compute new features
+def process_image(image_series):
+    """
+    Process a temporal sequence of images by computing spectral indices and temporal differences.
+
+    Args:
+        image_series (np.ndarray): Shape (T, 6, H, W), where T=3 time steps, 6 spectral bands.
+
+    Returns:
+        np.ndarray: Processed image with new feature channels (12, H, W).
+    """
+    indices_series = [compute_indices(img) for img in image_series]  # Compute indices for all time steps
+
+    # Compute temporal differences
+    differences = [compute_differences(indices_series[i], indices_series[i-1]) for i in range(1, len(indices_series))]
+
+    # Final input: last time-step spectral bands + last computed indices + last computed differences
+    final_input = np.concatenate([image_series[2], indices_series[2], differences[-1]], axis=0)  # Shape: (12, H, W)
+
+    return final_input
+
+# Modify process_data to apply transformations
 def process_data(
     im_fname: str,
     mask_fname: str | None = None,
     no_data_value: int | None = -9999,
-    reduce_to_zero: bool = False,
-    replace_label: Tuple | None = None,
     bands: List[int] | None = None,
-    constant_multiplier: float = 1.0,
     mask_cloud: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Process image and mask data from filenames.
+    """
+    Process image and mask data, including spectral indices and temporal differences.
 
     Args:
-        im_fname (str): Filename for the image data.
-        mask_fname (str | None): Filename for the mask data.
-        bands (List[int]): Indices of bands to select from array.
-        no_data_value (int | None): NODATA value in image raster.
-        reduce_to_zero (bool): Reduces the label index to start from Zero.
-        replace_label (Tuple): Tuple of value to replace and the replacement value.
-        constant_multiplier (float): Constant multiplier for image.
-        mask_cloud (bool): Perform cloud masking.
+        im_fname (str): Filename for image data.
+        mask_fname (str | None): Filename for mask data.
+        bands (List[int] | None): List of selected bands.
+        no_data_value (int | None): No-data value.
+        mask_cloud (bool): Whether to apply cloud masking.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray]: A tuple of numpy arrays representing the processed
-        image and mask data.
+        Tuple[np.ndarray, np.ndarray]: Processed image (12 bands) and mask.
     """
-    arr_x = get_raster_data(
-        im_fname,
-        is_label=False,
-        bands=bands,
-        no_data_value=no_data_value,
-        mask_cloud=mask_cloud,
-        water_mask=False,
-    )
-    arr_x = arr_x * constant_multiplier
+    # Load image time-series (T, C, H, W)
+    arr_x = get_raster_data(im_fname, is_label=False, bands=bands, no_data_value=no_data_value, mask_cloud=mask_cloud)
+    
+    # Ensure shape is (T, 6, H, W) before processing
+    assert arr_x.shape[0] == 3 and arr_x.shape[1] == 6, "Expected shape (3, 6, H, W)"
+
+    # Compute new input features (12 bands)
+    arr_x = process_image(arr_x)
+
+    # Load label mask if available
     if mask_fname:
         arr_y = get_raster_data(mask_fname)
-        if replace_label:
-            arr_y = np.where(arr_y == replace_label[0], replace_label[1], arr_y)
-        if reduce_to_zero:
-            arr_y -= 1
     else:
         arr_y = None
+
     return arr_x, arr_y
+
 
 
 def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str | None]]:
