@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 predictions/
+predictions_new/
 # C extensions
 *.so
 
