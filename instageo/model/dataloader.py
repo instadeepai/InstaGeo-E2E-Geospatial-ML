@@ -19,270 +19,6 @@
 
 """Dataloader Module."""
 
-import os
-import random
-from functools import partial
-from typing import Any, Callable, List, Tuple
-
-import numpy as np
-import pandas as pd
-import rasterio
-import torch
-import xarray as xr
-from absl import logging
-from PIL import Image
-from rasterio.crs import CRS
-from torchvision import transforms
-
-
-def open_mf_tiff_dataset(
-    band_files: dict[str, Any], load_masks: bool
-) -> tuple[xr.Dataset, xr.Dataset | None, CRS]:
-    """Open multiple TIFF files as an xarray Dataset.
-
-    Args:
-        band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
-        load_masks (bool): Whether or not to load the masks files.
-
-    Returns:
-        (xr.Dataset, xr.Dataset | None, CRS): A tuple of xarray Dataset combining data from all the
-            provided TIFF files, (optionally) the masks, and the CRS
-    """
-    band_paths = list(band_files["tiles"].values())
-    bands_dataset = xr.open_mfdataset(
-        band_paths,
-        concat_dim="band",
-        combine="nested",
-        mask_and_scale=False,  # Scaling will be applied manually
-    )
-    bands_dataset.band_data.attrs["scale_factor"] = 1
-    mask_paths = list(band_files["fmasks"].values())
-    mask_dataset = (
-        xr.open_mfdataset(
-            mask_paths,
-            concat_dim="band",
-            combine="nested",
-        )
-        if load_masks
-        else None
-    )
-    with rasterio.open(band_paths[0]) as src:
-        crs = src.crs
-    return bands_dataset, mask_dataset, crs
-
-
-def random_crop_and_flip(
-    ims: List[Image.Image], label: Image.Image, im_size: int
-) -> Tuple[List[Image.Image], Image.Image]:
-    """Apply random cropping and flipping transformations to the given images and label.
-
-    Args:
-        ims (List[Image.Image]): List of PIL Image objects representing the images.
-        label (Image.Image): A PIL Image object representing the label.
-
-    Returns:
-        Tuple[List[Image.Image], Image.Image]: A tuple containing the transformed list of
-        images and label.
-    """
-    i, j, h, w = transforms.RandomCrop.get_params(ims[0], (im_size, im_size))
-
-    ims = [transforms.functional.crop(im, i, j, h, w) for im in ims]
-    label = transforms.functional.crop(label, i, j, h, w)
-
-    if random.random() > 0.5:
-        ims = [transforms.functional.hflip(im) for im in ims]
-        label = transforms.functional.hflip(label)
-
-    if random.random() > 0.5:
-        ims = [transforms.functional.vflip(im) for im in ims]
-        label = transforms.functional.vflip(label)
-
-    return ims, label
-
-
-def normalize_and_convert_to_tensor(
-    ims: List[Image.Image],
-    label: Image.Image | None,
-    mean: List[float],
-    std: List[float],
-    temporal_size: int = 1,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Normalize the images and label and convert them to PyTorch tensors.
-
-    Args:
-        ims (List[Image.Image]): List of PIL Image objects representing the images.
-        label (Image.Image | None): A PIL Image object representing the label.
-        mean (List[float]): The mean of each channel in the image
-        std (List[float]): The standard deviation of each channel in the image
-        temporal_size: The number of temporal steps
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: A tuple of tensors representing the normalized
-        images and label.
-    """
-    norm = transforms.Normalize(mean, std)
-    ims_tensor = torch.stack([transforms.ToTensor()(im).squeeze() for im in ims])
-    _, h, w = ims_tensor.shape
-    ims_tensor = ims_tensor.reshape([temporal_size, -1, h, w])  # T*C,H,W -> T,C,H,W
-    ims_tensor = torch.stack([norm(im) for im in ims_tensor]).permute(
-        [1, 0, 2, 3]
-    )  # T,C,H,W -> C,T,H,W
-    if label:
-        label = torch.from_numpy(np.array(label)).squeeze()
-    return ims_tensor, label
-
-
-def process_and_augment(
-    x: np.ndarray,
-    y: np.ndarray | None,
-    mean: List[float],
-    std: List[float],
-    temporal_size: int = 1,
-    im_size: int = 224,
-    augment: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Process and augment the given images and labels.
-
-    Args:
-        x (np.ndarray): Numpy array representing the images.
-        y (np.ndarray): Numpy array representing the label.
-        mean (List[float]): The mean of each channel in the image
-        std (List[float]): The standard deviation of each channel in the image
-        temporal_size: The number of temporal steps
-        augment: Flag to perform augmentations in training mode.
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: A tuple of tensors representing the processed
-        and augmented images and label.
-    """
-    ims = x.copy()
-    label = None
-    # convert to PIL for easier transforms
-    ims = [Image.fromarray(im) for im in ims]
-    if y is not None:
-        label = Image.fromarray(y.copy().squeeze())
-    if augment:
-        ims, label = random_crop_and_flip(ims, label, im_size)
-    ims, label = normalize_and_convert_to_tensor(ims, label, mean, std, temporal_size)
-    return ims, label
-
-
-def crop_array(
-    arr: np.ndarray, left: int, top: int, right: int, bottom: int
-) -> np.ndarray:
-    """Crop Numpy Image.
-
-    Crop a given array (image) using specified left, top, right, and bottom indices.
-
-    This function supports cropping both grayscale (2D) and color (3D) images.
-
-    Args:
-        arr (np.ndarray): The input array (image) to be cropped.
-        left (int): The left boundary index for cropping.
-        top (int): The top boundary index for cropping.
-        right (int): The right boundary index for cropping.
-        bottom (int): The bottom boundary index for cropping.
-
-    Returns:
-        np.ndarray: The cropped portion of the input array (image).
-
-    Raises:
-        ValueError: If the input array is not 2D or 3D.
-    """
-    if len(arr.shape) == 2:  # Grayscale image (2D array)
-        return arr[top:bottom, left:right]
-    elif len(arr.shape) == 3:  # Color image (3D array)
-        return arr[:, top:bottom, left:right]
-    elif len(arr.shape) == 4:  # Color image (3D array)
-        return arr[:, :, top:bottom, left:right]
-    else:
-        raise ValueError("Input array must be a 2D, 3D or 4D array")
-
-
-def process_test(
-    x: np.ndarray,
-    y: np.ndarray,
-    mean: List[float],
-    std: List[float],
-    temporal_size: int = 1,
-    img_size: int = 512,
-    crop_size: int = 224,
-    stride: int = 224,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Process and augment test data.
-
-    Args:
-        x (np.ndarray): Input image array.
-        y (np.ndarray): Corresponding mask array.
-        mean (List[float]): Mean values for normalization.
-        std: (List[float]): Standard deviation values for normalization.
-        temporal_size (int, optional): Temporal dimension size. Defaults to 1.
-        img_size (int, optional): Size of the input images. Defaults to
-            512.
-        crop_size (int, optional): Size of the crops to be extracted from the
-            images. Defaults to 224.
-        stride (int, optional): Stride for cropping. Defaults to 224.
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Tuple of tensors containing the processed
-            images and masks.
-    """
-    preprocess_func = partial(
-        process_and_augment,
-        mean=mean,
-        std=std,
-        temporal_size=temporal_size,
-        augment=False,
-    )
-
-    img_crops, mask_crops = [], []
-    width, height = img_size, img_size
-
-    for top in range(0, height - crop_size + 1, stride):
-        for left in range(0, width - crop_size + 1, stride):
-            bottom = top + crop_size
-            right = left + crop_size
-
-            img_crops.append(crop_array(x, left, top, right, bottom))
-            mask_crops.append(crop_array(y, left, top, right, bottom))
-
-    samples = [preprocess_func(x, y) for x, y in zip(img_crops, mask_crops)]
-    imgs = torch.stack([sample[0] for sample in samples])
-    labels = torch.stack([sample[1] for sample in samples])
-    return imgs, labels
-
-
-def get_raster_data(
-    fname: str | dict[str, dict[str, str]],
-    is_label: bool = True,
-    bands: List[int] | None = None,
-    no_data_value: int | None = -9999,
-    mask_cloud: bool = True,
-    water_mask: bool = False,
-) -> np.ndarray:
-    """Load and process raster data from a file.
-
-    Args:
-        fname (str): Filename to load data from.
-        is_label (bool): Whether the file is a label file.
-        bands (List[int]): Index of bands to select from array.
-        no_data_value (int | None): NODATA value in image raster.
-        mask_cloud (bool): Perform cloud masking.
-        water_mask (bool): Perform water masking.
-
-    Returns:
-        np.ndarray: Numpy array representing the processed data.
-    """
-    if isinstance(fname, dict):
-        data, mask, crs = open_mf_tiff_dataset(fname, load_masks=False)
-        data = data.fillna(no_data_value)
-        data = data.band_data.values
-    else:
-        with rasterio.open(fname) as src:
-            data = src.read()
-    if (not is_label) and bands:
-        data = data[bands, ...]
-    return data
 
 
 import os
@@ -295,15 +31,15 @@ import pandas as pd
 import rasterio
 import torch
 import xarray as xr
-from absl import logging
 from PIL import Image
 from rasterio.crs import CRS
 from torchvision import transforms
+from torch.utils.data import Dataset
 
-# Function to compute spectral indices
+# Function to compute vegetation and soil indices
 def compute_indices(image):
     """Compute NDVI, EVI, NDWI, and NDSI from Sentinel-2 bands."""
-    B2, B3, B4, B8, B11, B12 = image  # Extract spectral bands
+    B2, B3, B4, B8, B11, B12 = image
 
     NDVI = (B8 - B4) / (B8 + B4 + 1e-6)
     EVI = 2.5 * (B8 - B4) / (B8 + 6 * B4 - 7.5 * B2 + 1 + 1e-6)
@@ -319,58 +55,33 @@ def compute_differences(current, previous):
     delta_NDWI = current[2] - previous[2]
     return np.stack([delta_NDVI, delta_NDWI], axis=0)
 
-# Updated function to process images and compute new features
+# Function to process image time-series
 def process_image(image_series):
-    """
-    Process a temporal sequence of images by computing spectral indices and temporal differences.
-
-    Args:
-        image_series (np.ndarray): Shape (T, 6, H, W), where T=3 time steps, 6 spectral bands.
-
-    Returns:
-        np.ndarray: Processed image with new feature channels (12, H, W).
-    """
-    indices_series = [compute_indices(img) for img in image_series]  # Compute indices for all time steps
-
-    # Compute temporal differences
+    indices_series = [compute_indices(img) for img in image_series]
     differences = [compute_differences(indices_series[i], indices_series[i-1]) for i in range(1, len(indices_series))]
 
-    # Final input: last time-step spectral bands + last computed indices + last computed differences
-    final_input = np.concatenate([image_series[2], indices_series[2], differences[-1]], axis=0)  # Shape: (12, H, W)
+    final_input = np.concatenate([image_series[2], indices_series[2], differences[-1]], axis=0)
+    return final_input  # Shape: (12, H, W)
 
-    return final_input
+# Function to load and process raster data
+def get_raster_data(fname, is_label=True, bands=None, no_data_value=-9999):
+    if isinstance(fname, dict):
+        data, _, _ = open_mf_tiff_dataset(fname, load_masks=False)
+        data = data.fillna(no_data_value).band_data.values
+    else:
+        with rasterio.open(fname) as src:
+            data = src.read()
+    if not is_label and bands:
+        data = data[bands, ...]
+    return data
 
-# Modify process_data to apply transformations
-def process_data(
-    im_fname: str,
-    mask_fname: str | None = None,
-    no_data_value: int | None = -9999,
-    bands: List[int] | None = None,
-    mask_cloud: bool = False,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Process image and mask data, including spectral indices and temporal differences.
-
-    Args:
-        im_fname (str): Filename for image data.
-        mask_fname (str | None): Filename for mask data.
-        bands (List[int] | None): List of selected bands.
-        no_data_value (int | None): No-data value.
-        mask_cloud (bool): Whether to apply cloud masking.
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: Processed image (12 bands) and mask.
-    """
-    # Load image time-series (T, C, H, W)
-    arr_x = get_raster_data(im_fname, is_label=False, bands=bands, no_data_value=no_data_value, mask_cloud=mask_cloud)
-    
-    # Ensure shape is (T, 6, H, W) before processing
+# Function to process image and mask
+def process_data(im_fname, mask_fname=None, bands=None, no_data_value=-9999):
+    arr_x = get_raster_data(im_fname, is_label=False, bands=bands, no_data_value=no_data_value)
     assert arr_x.shape[0] == 3 and arr_x.shape[1] == 6, "Expected shape (3, 6, H, W)"
 
-    # Compute new input features (12 bands)
     arr_x = process_image(arr_x)
 
-    # Load label mask if available
     if mask_fname:
         arr_y = get_raster_data(mask_fname)
     else:
@@ -378,27 +89,73 @@ def process_data(
 
     return arr_x, arr_y
 
+# Function for data augmentation
+def random_crop_and_flip(ims, label, im_size):
+    i, j, h, w = transforms.RandomCrop.get_params(ims[0], (im_size, im_size))
+    ims = [transforms.functional.crop(im, i, j, h, w) for im in ims]
+    label = transforms.functional.crop(label, i, j, h, w) if label is not None else None
 
+    if random.random() > 0.5:
+        ims = [transforms.functional.hflip(im) for im in ims]
+        label = transforms.functional.hflip(label) if label is not None else None
 
-def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str | None]]:
-    """Load data file paths from a CSV file.
+    if random.random() > 0.5:
+        ims = [transforms.functional.vflip(im) for im in ims]
+        label = transforms.functional.vflip(label) if label is not None else None
 
-    Args:
-        fname (str): Filename of the CSV file.
-        input_root (str): Root directory for input images and labels.
+    return ims, label
 
-    Returns:
-        List[Tuple[str, str]]: A list of tuples, each containing file paths for input
-        image and label image.
-    """
+# Function to normalize images and convert to tensor
+def normalize_and_convert_to_tensor(ims, label, mean, std):
+    norm = transforms.Normalize(mean, std)
+    ims_tensor = torch.stack([transforms.ToTensor()(im).squeeze() for im in ims])
+    ims_tensor = torch.stack([norm(im) for im in ims_tensor])
+    
+    if label is not None:
+        label = torch.from_numpy(np.array(label)).squeeze()
+    
+    return ims_tensor, label
+
+# Main processing function
+def process_and_augment(x, y, mean, std, im_size=224, augment=True):
+    ims = [Image.fromarray(im) for im in x]
+    label = Image.fromarray(y.squeeze()) if y is not None else None
+
+    if augment:
+        ims, label = random_crop_and_flip(ims, label, im_size)
+
+    ims, label = normalize_and_convert_to_tensor(ims, label, mean, std)
+    return ims, label
+
+# PyTorch Dataset class
+class InstaGeoDataset(Dataset):
+    def __init__(self, filename, input_root, preprocess_func, bands=None, include_filenames=False):
+        self.input_root = input_root
+        self.preprocess_func = preprocess_func
+        self.bands = bands
+        self.file_paths = load_data_from_csv(filename, input_root)
+        self.include_filenames = include_filenames
+
+    def __len__(self):
+        return len(self.file_paths)
+
+    def __getitem__(self, idx):
+        im_fname, mask_fname = self.file_paths[idx]
+        arr_x, arr_y = process_data(im_fname, mask_fname, bands=self.bands)
+
+        if self.include_filenames:
+            return self.preprocess_func(arr_x, arr_y), im_fname
+        else:
+            return self.preprocess_func(arr_x, arr_y)
+
+# Function to load data from CSV
+def load_data_from_csv(fname, input_root):
     file_paths = []
     data = pd.read_csv(fname)
-    label_present = True if "Label" in data.columns else False
+    label_present = "Label" in data.columns
     for _, row in data.iterrows():
         im_path = os.path.join(input_root, row["Input"])
-        mask_path = (
-            None if not label_present else os.path.join(input_root, row["Label"])
-        )
+        mask_path = None if not label_present else os.path.join(input_root, row["Label"])
         if os.path.exists(im_path):
             try:
                 with rasterio.open(im_path) as src:
@@ -406,74 +163,4 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str | Non
                 file_paths.append((im_path, mask_path))
             except Exception as e:
                 logging.error(e)
-                continue
     return file_paths
-
-
-class InstaGeoDataset(torch.utils.data.Dataset):
-    """InstaGeo PyTorch Dataset for Loading and Handling HLS Data."""
-
-    def __init__(
-        self,
-        filename: str,
-        input_root: str,
-        preprocess_func: Callable,
-        no_data_value: int | None,
-        replace_label: Tuple,
-        reduce_to_zero: bool,
-        constant_multiplier: float,
-        bands: List[int] | None = None,
-        include_filenames: bool = False,
-    ):
-        """Dataset Class for loading and preprocessing the dataset.
-
-        Args:
-            filename (str): Filename of the CSV file containing data paths.
-            input_root (str): Root directory for input images and labels.
-            preprocess_func (Callable): Function to preprocess the data.
-            bands (List[int]): Indices of bands to select from array.
-            no_data_value (int | None): NODATA value in image raster.
-            reduce_to_zero (bool): Reduces the label index to start from Zero.
-            replace_label (Tuple): Tuple of value to replace and the replacement value.
-            constant_multiplier (float): Constant multiplier for image.
-            include_filenames (bool): Flag that determines whether to return filenames.
-
-        """
-        self.input_root = input_root
-        self.preprocess_func = preprocess_func
-        self.bands = bands
-        self.file_paths = load_data_from_csv(filename, input_root)
-        self.no_data_value = no_data_value
-        self.replace_label = replace_label
-        self.reduce_to_zero = reduce_to_zero
-        self.constant_multiplier = constant_multiplier
-        self.include_filenames = include_filenames
-
-    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Retrieves a sample from dataset.
-
-        Args:
-            i (int): Sample index to retrieve.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]: A tuple of tensors representing the
-            processed images and label.
-        """
-        im_fname, mask_fname = self.file_paths[i]
-        arr_x, arr_y = process_data(
-            im_fname,
-            mask_fname,
-            no_data_value=self.no_data_value,
-            replace_label=self.replace_label,
-            reduce_to_zero=self.reduce_to_zero,
-            bands=self.bands,
-            constant_multiplier=self.constant_multiplier,
-        )
-        if self.include_filenames:
-            return self.preprocess_func(arr_x, arr_y), im_fname
-        else:
-            return self.preprocess_func(arr_x, arr_y)
-
-    def __len__(self) -> int:
-        """Return length of dataset."""
-        return len(self.file_paths)
