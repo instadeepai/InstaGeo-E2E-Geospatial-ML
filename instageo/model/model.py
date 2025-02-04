@@ -116,7 +116,6 @@ class Norm2D(nn.Module):
         x = x.permute(0, 3, 1, 2).contiguous()
         return x
 
-
 class PrithviSeg(nn.Module):
     def __init__(self, temporal_step=3, image_size=224, num_classes=2, freeze_backbone=True):
         super().__init__()
@@ -168,6 +167,9 @@ class PrithviSeg(nn.Module):
             nn.Conv2d(96, num_classes, kernel_size=1)  # Final segmentation output
         )
 
+        # **Fix: Final Upsampling to Match Ground Truth (256x256)**
+        self.final_upsample = nn.Upsample(size=(256, 256), mode="bilinear", align_corners=True)
+
     def upsample_block(self, in_channels, out_channels):
         return nn.Sequential(
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
@@ -188,5 +190,7 @@ class PrithviSeg(nn.Module):
         reshaped_features = self.temporal_merge(reshaped_features)  # Merge temporal steps into 1 feature map
 
         out = self.decoder(reshaped_features)
-        return out
 
+        # **Fix: Ensure Output Matches Target Mask Size**
+        out = self.final_upsample(out)  # Upsample to (batch_size, num_classes, 256, 256)
+        return out
