@@ -26,6 +26,7 @@ import plotly.graph_objects as go
 import rasterio
 import xarray as xr
 from pyproj import CRS, Transformer
+from instageo.apps.utils.consts import MAP_STYLE
 
 epsg3857_to_epsg4326 = Transformer.from_crs(3857, 4326, always_xy=True)
 
@@ -143,8 +144,9 @@ def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> go.Figure:
     """
     fig = go.Figure(go.Scattermapbox())
     fig.update_layout(
-        mapbox_style="open-street-map",
+        mapbox_style=(MAP_STYLE if MAP_STYLE else "open-street-map"),
         mapbox=dict(center=go.layout.mapbox.Center(lat=0, lon=20), zoom=2.0),
+        autosize=True
     )
     fig.update_layout(margin={"r": 0, "t": 40, "l": 0, "b": 0})
     mapbox_layers = []

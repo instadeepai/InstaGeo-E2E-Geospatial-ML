@@ -32,6 +32,7 @@ import streamlit as st
 
 from instageo import INSTAGEO_APPS_PATH
 from instageo.apps.viz import create_map_with_geotiff_tiles
+from instageo.apps.utils.styles import general_styles
 
 
 def generate_map(
@@ -73,13 +74,7 @@ def generate_map(
 def main() -> None:
     """Instageo Serve Main Entry Point."""
     st.set_page_config(layout="wide")
-    st.title("InstaGeo Serve")
-
-    st.sidebar.subheader(
-        "This application enables the visualisation of GeoTIFF files on an interactive map.",
-        divider="rainbow",
-    )
-    st.sidebar.header("Settings")
+    general_styles()
     with open(
         INSTAGEO_APPS_PATH / "utils/country_code_to_mgrs_tiles.json"
     ) as json_file:
