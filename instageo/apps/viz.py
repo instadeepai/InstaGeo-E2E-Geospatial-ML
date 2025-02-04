@@ -27,6 +27,7 @@ import rasterio
 import xarray as xr
 from pyproj import CRS, Transformer
 import math
+import numpy as np
 
 epsg3857_to_epsg4326 = Transformer.from_crs(3857, 4326, always_xy=True)
 MIN_ZOOM = 5
@@ -60,8 +61,8 @@ def calculate_zoom(lats: list[float], lons: list[float]) -> float:
     # This calculation is based on approximate formulas for Mercator projection
     # and world dimensions in pixels at different zoom levels.  You can fine-tune
     # the constant factors (15 and 22) if needed for your specific map display.
-    zoom_lat = 5 - math.log2(lat_diff)
-    zoom_lon = 8 - math.log2(lon_diff)
+    zoom_lat = 8 - math.log2(lat_diff)
+    zoom_lon = 10 - math.log2(lon_diff)
 
     # Choose the more restrictive zoom level (the smaller one) to fit the entire area
     return max(MIN_ZOOM, min(zoom_lat, zoom_lon))
@@ -157,6 +158,7 @@ def add_raster_to_plotly_figure(
     return img, coordinates
 
 
+# @lru_cache(maxsize=32)
 def read_geotiff_to_xarray(filepath: str) -> tuple[xr.Dataset, CRS]:
     """Read a GeoTIFF file into an xarray Dataset.
 
@@ -169,23 +171,27 @@ def read_geotiff_to_xarray(filepath: str) -> tuple[xr.Dataset, CRS]:
     return xr.open_dataset(filepath).sel(band=1), get_crs(filepath)
 
 
-def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> go.Figure:
+def create_map_with_geotiff_tiles(
+    tiles_to_overlay: list[str],
+) -> tuple[go.Figure, dict[str, xr.Dataset]]:
     """Create a map with multiple GeoTIFF tiles overlaid, centered on the tiles' extent."""
 
     fig = go.Figure(go.Scattermapbox())
     mapbox_layers = []
     all_lats = []
     all_lons = []
+    all_rasters = {}
 
     for tile in tiles_to_overlay:
         if tile.endswith(".tif") or tile.endswith(".tiff"):
             xarr_dataset, crs = read_geotiff_to_xarray(tile)
             img, coordinates = add_raster_to_plotly_figure(xarr_dataset, crs)
+            coordinates_np = np.array(coordinates)
+            all_rasters[tile] = xarr_dataset
 
             # Extract lat/lon from coordinates
-            for lon, lat in coordinates:
-                all_lons.append(lon)
-                all_lats.append(lat)
+            all_lons.extend(coordinates_np[:, 0])
+            all_lats.extend(coordinates_np[:, 1])
 
             mapbox_layers.append(
                 {"sourcetype": "image", "source": img, "coordinates": coordinates}
@@ -214,4 +220,4 @@ def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> go.Figure:
         )
 
     fig.update_layout(mapbox_layers=mapbox_layers)
-    return fig
+    return fig, all_rasters
