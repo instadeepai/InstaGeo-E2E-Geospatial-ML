@@ -35,7 +35,10 @@ from instageo.apps.viz import create_map_with_geotiff_tiles
 
 
 def generate_map(
-    directory: str, year: int, month: int, country_tiles: list[str]
+    directory: str,
+    year: int,
+    month: int,
+    country_tiles: list[str],
 ) -> None:
     """Generate the plotly map.
 
@@ -99,8 +102,8 @@ def main() -> None:
 
     if st.sidebar.button("Generate Map"):
         country_tiles = countries_to_tiles_map[country_code]
-        generate_map(directory, year, month, country_tiles)
-    else:
+        generate_map(str(Path(__file__).parent / directory), year, month, country_tiles)
+    else:  # this is to init an empty map
         st.plotly_chart(
             create_map_with_geotiff_tiles(tiles_to_overlay=[]), use_container_width=True
         )

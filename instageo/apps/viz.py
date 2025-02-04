@@ -26,8 +26,45 @@ import plotly.graph_objects as go
 import rasterio
 import xarray as xr
 from pyproj import CRS, Transformer
+import math
 
 epsg3857_to_epsg4326 = Transformer.from_crs(3857, 4326, always_xy=True)
+MIN_ZOOM = 5
+
+
+def calculate_zoom(lats: list[float], lons: list[float]) -> float:
+    """Calculates the appropriate zoom level for a map given latitude and longitude extents.
+
+    This function estimates the zoom level needed to display a region defined by its
+    latitude and longitude boundaries on a map.  It assumes a Mercator projection
+    (used by Mapbox and similar web mapping libraries).
+
+    Args:
+        lats: A list of latitudes defining the region.
+        lons: A list of longitudes defining the region.
+
+    Returns:
+        float: The estimated zoom level. Returns 0 if no lats or lons are provided.
+    """
+    if not lats or not lons:
+        return 0
+
+    max_lat, min_lat = max(lats), min(lats)
+    max_lon, min_lon = max(lons), min(lons)
+
+    # Calculate latitude and longitude spans
+    lat_diff = max_lat - min_lat
+    lon_diff = max_lon - min_lon
+
+    # Estimate zoom based on both latitude and longitude ranges.
+    # This calculation is based on approximate formulas for Mercator projection
+    # and world dimensions in pixels at different zoom levels.  You can fine-tune
+    # the constant factors (15 and 22) if needed for your specific map display.
+    zoom_lat = 5 - math.log2(lat_diff)
+    zoom_lon = 8 - math.log2(lon_diff)
+
+    # Choose the more restrictive zoom level (the smaller one) to fit the entire area
+    return max(MIN_ZOOM, min(zoom_lat, zoom_lon))
 
 
 def get_crs(filepath: str) -> CRS:
@@ -91,11 +128,14 @@ def add_raster_to_plotly_figure(
     # cause of this behavior is that 'Mapbox supports the popular Web Mercator
     # projection, and does not support any other projections.'
     (
-        coords_lon_min,
-        coords_lon_max,
-    ), (
-        coords_lat_min,
-        coords_lat_max,
+        (
+            coords_lon_min,
+            coords_lon_max,
+        ),
+        (
+            coords_lat_min,
+            coords_lat_max,
+        ),
     ) = epsg3857_to_epsg4326.transform(
         [coords_lon_min, coords_lon_max], [coords_lat_min, coords_lat_max]
     )
@@ -130,33 +170,48 @@ def read_geotiff_to_xarray(filepath: str) -> tuple[xr.Dataset, CRS]:
 
 
 def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> go.Figure:
-    """Create a map with multiple GeoTIFF tiles overlaid.
+    """Create a map with multiple GeoTIFF tiles overlaid, centered on the tiles' extent."""
 
-    This function reads GeoTIFF files from a specified directory and overlays them on a
-    Plotly map.
-
-    Args:
-        tiles_to_overlay (list[str]): Path to tiles to overlay on map.
-
-    Returns:
-        Figure: A Plotly figure with overlaid GeoTIFF tiles.
-    """
     fig = go.Figure(go.Scattermapbox())
-    fig.update_layout(
-        mapbox_style="open-street-map",
-        mapbox=dict(center=go.layout.mapbox.Center(lat=0, lon=20), zoom=2.0),
-    )
-    fig.update_layout(margin={"r": 0, "t": 40, "l": 0, "b": 0})
     mapbox_layers = []
+    all_lats = []
+    all_lons = []
+
     for tile in tiles_to_overlay:
         if tile.endswith(".tif") or tile.endswith(".tiff"):
             xarr_dataset, crs = read_geotiff_to_xarray(tile)
-            img, coordinates = add_raster_to_plotly_figure(
-                xarr_dataset, crs, "band_data", scale=1.0
-            )
+            img, coordinates = add_raster_to_plotly_figure(xarr_dataset, crs)
+
+            # Extract lat/lon from coordinates
+            for lon, lat in coordinates:
+                all_lons.append(lon)
+                all_lats.append(lat)
+
             mapbox_layers.append(
                 {"sourcetype": "image", "source": img, "coordinates": coordinates}
             )
-    # Overlay the resulting image
+
+    # Calculate center and zoom based on all tile extents
+    if all_lats and all_lons:  # Check if any tiles were added
+        center_lat = (min(all_lats) + max(all_lats)) / 2
+        center_lon = (min(all_lons) + max(all_lons)) / 2
+        fig.update_layout(
+            mapbox=dict(
+                style="open-street-map",  # Or "satellite", "satellite-streets", etc.
+                center=go.layout.mapbox.Center(lat=center_lat, lon=center_lon),
+                #  Adjust zoom as needed based on data extent
+                zoom=calculate_zoom(
+                    all_lats, all_lons
+                ),  # Or calculate zoom based on lat/lon range if you want to automate it further
+            ),
+            margin={"r": 0, "t": 40, "l": 0, "b": 0},
+        )
+    else:  # Default center and zoom if no tiles are provided
+        fig.update_layout(
+            mapbox_style="open-street-map",
+            mapbox=dict(center=go.layout.mapbox.Center(lat=0, lon=20), zoom=2.0),
+            margin={"r": 0, "t": 40, "l": 0, "b": 0},
+        )
+
     fig.update_layout(mapbox_layers=mapbox_layers)
     return fig
