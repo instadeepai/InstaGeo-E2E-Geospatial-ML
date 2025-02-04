@@ -28,6 +28,12 @@ import xarray as xr
 from pyproj import CRS, Transformer
 import math
 import numpy as np
+import geopandas as gpd
+import pandas as pd
+from sklearn.cluster import AgglomerativeClustering
+from shapely.ops import unary_union
+import folium
+
 
 epsg3857_to_epsg4326 = Transformer.from_crs(3857, 4326, always_xy=True)
 MIN_ZOOM = 5
@@ -176,48 +182,78 @@ def create_map_with_geotiff_tiles(
 ) -> tuple[go.Figure, dict[str, xr.Dataset]]:
     """Create a map with multiple GeoTIFF tiles overlaid, centered on the tiles' extent."""
 
-    fig = go.Figure(go.Scattermapbox())
-    mapbox_layers = []
-    all_lats = []
-    all_lons = []
-    all_rasters = {}
-
+    clusters = []
+    sites = []
     for tile in tiles_to_overlay:
         if tile.endswith(".tif") or tile.endswith(".tiff"):
             xarr_dataset, crs = read_geotiff_to_xarray(tile)
-            img, coordinates = add_raster_to_plotly_figure(xarr_dataset, crs)
-            coordinates_np = np.array(coordinates)
-            all_rasters[tile] = xarr_dataset
+            gpd_sites = get_activated_coords(xarr_dataset, threshold=0.5)
+            cluster = clusterize_prediction(gpd_sites)
 
-            # Extract lat/lon from coordinates
-            all_lons.extend(coordinates_np[:, 0])
-            all_lats.extend(coordinates_np[:, 1])
+            clusters.append(cluster)
+            sites.append(gpd_sites)
 
-            mapbox_layers.append(
-                {"sourcetype": "image", "source": img, "coordinates": coordinates}
-            )
+    # Calculate center
+    fig = folium.Map((0, 0))
 
-    # Calculate center and zoom based on all tile extents
-    if all_lats and all_lons:  # Check if any tiles were added
-        center_lat = (min(all_lats) + max(all_lats)) / 2
-        center_lon = (min(all_lons) + max(all_lons)) / 2
-        fig.update_layout(
-            mapbox=dict(
-                style="open-street-map",  # Or "satellite", "satellite-streets", etc.
-                center=go.layout.mapbox.Center(lat=center_lat, lon=center_lon),
-                #  Adjust zoom as needed based on data extent
-                zoom=calculate_zoom(
-                    all_lats, all_lons
-                ),  # Or calculate zoom based on lat/lon range if you want to automate it further
-            ),
-            margin={"r": 0, "t": 40, "l": 0, "b": 0},
-        )
-    else:  # Default center and zoom if no tiles are provided
-        fig.update_layout(
-            mapbox_style="open-street-map",
-            mapbox=dict(center=go.layout.mapbox.Center(lat=0, lon=20), zoom=2.0),
-            margin={"r": 0, "t": 40, "l": 0, "b": 0},
-        )
+    if len(clusters) > 0:
+        all_clusters = pd.concat(clusters)
 
-    fig.update_layout(mapbox_layers=mapbox_layers)
-    return fig, all_rasters
+        all_sites = pd.concat(sites)
+        fig = all_sites.explore(m=fig)
+        fig = all_clusters.explore(m=fig, column="count", cmap="YlOrRd")
+
+    folium.LayerControl().add_to(fig)
+
+    return fig
+
+
+def get_activated_coords(
+    xarr_dataset: xr.DataArray, threshold: float, coarsen: int = 30
+) -> gpd.GeoDataFrame:
+    # Apply where() to replace values below the threshold with NaN
+    coarsen_xarr = xarr_dataset.coarsen(x=coarsen, y=coarsen, boundary="trim").mean()
+    filtered_xarr = coarsen_xarr.where(coarsen_xarr > threshold)
+
+    # Get coordinates where the values are above the threshold
+    activated_coords = (
+        filtered_xarr.stack(point=["x", "y"]).dropna("point").point.values
+    )
+
+    sites = pd.Series(activated_coords).apply(pd.Series)
+    sites.columns = ["x", "y"]
+
+    return gpd.GeoDataFrame(
+        data=sites,
+        geometry=gpd.points_from_xy(sites["x"], sites["y"]),
+        crs=filtered_xarr.rio.crs,
+    )
+
+
+def clusterize_prediction(
+    gpd_sites: gpd.GeoDataFrame,
+    distance_threshold: float = 1e4,
+    linkage: str = "complete",
+) -> gpd.GeoDataFrame:
+    clustering = AgglomerativeClustering(
+        n_clusters=None, distance_threshold=distance_threshold, linkage=linkage
+    )
+    gpd_sites["cluster"] = clustering.fit_predict(gpd_sites[["x", "y"]])
+
+    cluster_geometry = gpd_sites.groupby("cluster").agg(
+        {"geometry": [combine_coords, "count"]}
+    )["geometry"]
+
+    cluster_geometry = gpd.GeoDataFrame(
+        geometry=cluster_geometry["combine_coords"],
+        data=cluster_geometry["count"],
+        crs=gpd_sites.crs,
+    )
+
+    return cluster_geometry
+
+
+def combine_coords(x):
+    polygon = unary_union(list(x))
+    cv = polygon.convex_hull
+    return cv

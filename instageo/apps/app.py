@@ -35,17 +35,16 @@ from instageo.apps.reporting import (
     send_email,
 )
 import streamlit as st
+import folium
 
 from instageo import INSTAGEO_APPS_PATH
 from instageo.apps.viz import create_map_with_geotiff_tiles
+from streamlit_folium import folium_static
 
 
 # @st.cache_data
 def generate_map(
-    directory: str,
-    year: int,
-    month: int,
-    country_tiles: list[str],
+    directory: str, year: int, month: int, country_tiles: list[str]
 ) -> list[xr.Dataset]:
     """Generate the plotly map.
 
@@ -74,12 +73,12 @@ def generate_map(
                 "No GeoTIFF files found for the given year, month, and country."
             )
 
-        fig, rasters = create_map_with_geotiff_tiles(tiles_to_consider)
-        st.session_state.fig = fig
-        st.plotly_chart(fig, use_container_width=True)
-        return rasters
+        fig = create_map_with_geotiff_tiles(tiles_to_consider)
+        return fig
+
     except (ValueError, FileNotFoundError, Exception) as e:
         st.error(f"An error occurred: {str(e)}")
+        return folium.Map((0, 0))
 
 
 def main() -> None:
@@ -129,14 +128,15 @@ def main() -> None:
             for country_code in country_codes
             for tile in countries_to_tiles_map.get(country_code, [])
         ]
-        rasters = generate_map(predictions_path, year, month, country_tiles)
+        fig = generate_map(predictions_path, year, month, country_tiles)
+        folium_static(fig, width=1000)
         if send_report and user_email:
             with st.spinner("Generating and sending report..."):
                 report, map_image_path = generate_high_density_report(
                     # folium map
                     # save folium map
-                    fig=st.session_state.fig,
-                    rasters=rasters,
+                    fig=fig,
+                    # rasters=rasters,
                     threshold=0.8,
                 )
                 formatted_report = format_report(report, map_image_path)
@@ -154,9 +154,8 @@ def main() -> None:
                 else:
                     st.error("Error sending report.")
     else:  # this is to init an empty map
-        fig, _ = create_map_with_geotiff_tiles(tiles_to_overlay=[])
-        st.session_state.fig = fig
-        st.plotly_chart(fig, use_container_width=True)
+        fig = folium.Map((0, 0))
+        folium_static(fig, width=1000)
 
 
 if __name__ == "__main__":
