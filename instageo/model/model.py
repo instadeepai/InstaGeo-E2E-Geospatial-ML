@@ -118,20 +118,10 @@ class Norm2D(nn.Module):
 
 
 class PrithviSeg(nn.Module):
-    """Improved Prithvi Segmentation Model with Advanced Decoder & Spectral Indices."""
-
-    def __init__(self, temporal_step: int = 1, image_size: int = 224, num_classes: int = 2, freeze_backbone: bool = True):
-        """Initialize the PrithviSeg model with better segmentation and feature extraction.
-
-        Args:
-            temporal_step (int): Number of temporal steps (time series images).
-            image_size (int): Input image size.
-            num_classes (int): Number of segmentation classes.
-            freeze_backbone (bool): Whether to freeze the ViT encoder backbone.
-        """
+    def __init__(self, temporal_step=3, image_size=224, num_classes=2, freeze_backbone=True):
         super().__init__()
 
-        # Load pretrained Prithvi model
+        # Load Pretrained Weights
         weights_dir = Path.home() / ".instageo" / "prithvi"
         weights_dir.mkdir(parents=True, exist_ok=True)
         weights_path = weights_dir / "Prithvi_EO_V1_100M.pt"
@@ -143,40 +133,42 @@ class PrithviSeg(nn.Module):
         checkpoint = torch.load(weights_path, map_location="cpu")
         with open(cfg_path) as f:
             model_config = yaml.safe_load(f)
-        
+
         model_args = model_config["model_args"]
         model_args["num_frames"] = temporal_step
         model_args["img_size"] = image_size
         self.model_args = model_args
 
-        # Load Vision Transformer (ViT) Encoder
+        # Load ViT Encoder
         model = ViTEncoder(**model_args)
         if freeze_backbone:
             for param in model.parameters():
                 param.requires_grad = False
 
-        # Filter state dictionary
         filtered_checkpoint_state_dict = {
             key[len("encoder.") :]: value
             for key, value in checkpoint.items()
             if key.startswith("encoder.")
         }
-        filtered_checkpoint_state_dict["pos_embed"] = torch.zeros(1, (temporal_step * (image_size // 16) ** 2 + 1), 768)
+        filtered_checkpoint_state_dict["pos_embed"] = torch.zeros(
+            1, (temporal_step * (image_size // 16) ** 2 + 1), 768
+        )
         _ = model.load_state_dict(filtered_checkpoint_state_dict)
 
         self.prithvi_100M_backbone = model
 
-        # Improved Decoder: U-Net Style with Bilinear Upsampling and Skip Connections
+        # **Fix: Reduce Temporal Dimension before Decoder**
+        self.temporal_merge = nn.Conv2d(temporal_step * 768, 768, kernel_size=1)
+
+        # Improved U-Net Decoder
         self.decoder = nn.Sequential(
-            self.upsample_block(768, 384),  # 14x14 → 28x28
-            self.upsample_block(384, 192),  # 28x28 → 56x56
-            self.upsample_block(192, 96),   # 56x56 → 112x112
-            self.upsample_block(96, 48),    # 112x112 → 224x224
-            nn.Conv2d(48, num_classes, kernel_size=1)  # Final segmentation layer
+            self.upsample_block(768, 384),  # 32x32 → 64x64
+            self.upsample_block(384, 192),  # 64x64 → 128x128
+            self.upsample_block(192, 96),   # 128x128 → 256x256
+            nn.Conv2d(96, num_classes, kernel_size=1)  # Final segmentation output
         )
 
     def upsample_block(self, in_channels, out_channels):
-        """Upsampling block using bilinear interpolation and convolution layers."""
         return nn.Sequential(
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
@@ -185,11 +177,16 @@ class PrithviSeg(nn.Module):
         )
 
     def forward(self, img):
-        """Forward pass with improved decoder."""
         features = self.prithvi_100M_backbone(img)
         reshaped_features = features[:, 1:, :]
-        feature_img_side_length = int(np.sqrt(reshaped_features.shape[1] // self.model_args["num_frames"]))
-        reshaped_features = reshaped_features.permute(0, 2, 1).reshape(features.shape[0], -1, feature_img_side_length, feature_img_side_length)
+        feature_img_side_length = int((reshaped_features.shape[1] // self.model_args["num_frames"]) ** 0.5)
+
+        # **Fix: Merge Temporal Dimension (2304 → 768 channels)**
+        reshaped_features = reshaped_features.permute(0, 2, 1).reshape(
+            features.shape[0], -1, feature_img_side_length, feature_img_side_length
+        )
+        reshaped_features = self.temporal_merge(reshaped_features)  # Merge temporal steps into 1 feature map
+
         out = self.decoder(reshaped_features)
         return out
 
