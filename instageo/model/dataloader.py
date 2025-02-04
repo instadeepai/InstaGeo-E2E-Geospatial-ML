@@ -227,7 +227,7 @@ def process_test(x, y, mean, std, temporal_size=1, img_size=512, crop_size=224, 
 
 # PyTorch Dataset class
 class InstaGeoDataset(Dataset):
-    def __init__(self, filename, input_root, preprocess_func, bands=None, include_filenames=False):
+    def __init__(self, filename, input_root, preprocess_func, bands=None, include_filenames=False, replace_label=None):
         self.input_root = input_root
         self.preprocess_func = preprocess_func
         self.bands = bands
