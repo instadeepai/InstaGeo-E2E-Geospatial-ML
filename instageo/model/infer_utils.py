@@ -29,7 +29,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from instageo.model.dataloader import crop_array
+from instageo.model.old_dataloader import crop_array
 
 
 def sliding_window_inference(

@@ -37,14 +37,14 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from instageo.model.dataloader import (
+from instageo.model.old_dataloader import (
     InstaGeoDataset,
     process_and_augment,
     process_data,
     process_test,
 )
 from instageo.model.infer_utils import chip_inference, sliding_window_inference
-from instageo.model.model import PrithviSeg
+from instageo.model.old_model import PrithviSeg
 
 pl.seed_everything(seed=1042, workers=True)
 torch.backends.cudnn.deterministic = True
