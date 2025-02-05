@@ -115,21 +115,19 @@ def create_map_with_geotiff_tiles(
             all_lats.extend(gpd_sites.geometry.y)
             all_lons.extend(gpd_sites.geometry.x)
 
-    all_sites = pd.concat(sites)
+    all_sites = gpd.GeoDataFrame(pd.concat(sites), geometry="geometry")
     bounds = all_sites.total_bounds
     center_lon = (bounds[0] + bounds[2]) / 2
     center_lat = (bounds[1] + bounds[3]) / 2
 
     fig = folium.Map(
         location=[center_lat, center_lon],
-        zoom_start=calculate_zoom(all_lats, all_lons),  # use bounds
+        zoom_start=calculate_zoom(all_lats, all_lons),
     )
 
     if clusters:
         all_clusters = pd.concat(clusters)
         all_clusters["density"] = all_clusters["count"] / all_clusters.geometry.area
-
-        # quantiles = all_clusters["density"].quantile([0.2, 0.4, 0.6, 0.8])
         thresholds = [0, 10000, 20000, 70000, 200000, float("inf")]
         risk_levels = ["very low", "low", "medium", "high", "very high"]
 
@@ -158,7 +156,7 @@ def create_map_with_geotiff_tiles(
         )
 
     folium.LayerControl().add_to(fig)
-    return fig
+    return fig, all_clusters
 
 
 def get_activated_coords(

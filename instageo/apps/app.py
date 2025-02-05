@@ -16,6 +16,7 @@
 #
 # For more details, see https://creativecommons.org/licenses/by-nc-sa/4.0/
 # ------------------------------------------------------------------------------
+# Edited 5.2.2025 by LocustBusters (Lorenzo FURLAN, Alexis VIOLEAU, Victor XING, Kais CHEIKH)
 
 """InstaGeo Serve Module.
 
@@ -39,30 +40,32 @@ import streamlit as st
 import folium
 
 from instageo import INSTAGEO_APPS_PATH
-from instageo.apps.utils.countries import get_available_countries
+from instageo.apps.utils.countries import (
+    get_available_countries,
+    get_latest_forecast_year_month,
+)
 from instageo.apps.viz import create_map_with_geotiff_tiles
 
 
-# @st.cache_data
-def generate_map(  # add a better legend
-    directory: str, year: int, month: int, country_tiles: list[str]
+def generate_map(
+    full_predictions_path: str, country_tiles: list[str]
 ) -> list[xr.Dataset]:
     """Generate the plotly map.
 
     Arguments:
-        directory (str): Directory containing GeoTiff files.
-        year (int): Selected year.
-        month (int): Selected month formatted as an integer in the range 1-12.
+        full_predictions_path (str): Directory containing GeoTiff files.
         country_tiles (list[str]): List of MGRS tiles for the selected country.
 
     Returns:
         None.
     """
     try:
-        if not directory or not Path(directory).is_dir():
+        if (
+            not full_predictions_path or not Path(full_predictions_path).is_dir()
+        ):  # redudant
             raise ValueError("Invalid directory path.")
 
-        prediction_tiles = glob.glob(os.path.join(directory, f"{year}/{month}/*.tif"))
+        prediction_tiles = glob.glob(os.path.join(full_predictions_path, "*.tif"))
         tiles_to_consider = [
             tile
             for tile in prediction_tiles
@@ -83,8 +86,12 @@ def generate_map(  # add a better legend
 
 
 def main() -> None:
-    """Instageo Serve Main Entry Point."""
+    """Instageo Serve Main Entry Point, edited by LocustBusters"""
     predictions_path = str(Path(__file__).parent / "predictions_new")
+    with open(
+        INSTAGEO_APPS_PATH / "utils/country_name_to_mgrs_tiles.json"
+    ) as json_file:
+        countries_to_tiles_map = json.load(json_file)
     st.set_page_config(
         page_title="Locust busters", page_icon=":cricket:", layout="wide"
     )
@@ -102,34 +109,38 @@ def main() -> None:
             margin: 0 auto; /* Center the map horizontally */
         }
         .block-container {  /* Streamlit's main container */
-             padding-top: 1.7rem; /* Reduce top padding for more map space*/
+             padding-top: 1.6rem; /* Reduce top padding for more map space*/
              padding-bottom: 1rem; /* Reduce top padding for more map space*/
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    user_email = st.sidebar.text_input(
-        "Enter your email for the report (optional):"
-    )  # add list email
+    user_emails = st.sidebar.text_area(
+        "Enter recipient emails for the report (comma-separated):"
+    )
     send_report = st.sidebar.checkbox("Send me a risk report")
     st.sidebar.header("Settings")
-    with open(
-        INSTAGEO_APPS_PATH / "utils/country_name_to_mgrs_tiles.json"
-    ) as json_file:
-        countries_to_tiles_map = json.load(json_file)
+    forecast_option = st.sidebar.radio("Select Forecast:", ("Latest", "Specific Date"))
 
     with st.sidebar.container():
-        year = st.sidebar.number_input("Select Year", 2020, 2024)  # PLEASE USE 2021
-        month = st.sidebar.number_input("Select Month", 1, 12)  # PLEASE USE 6
-
-        available_countries = get_available_countries(predictions_path, year, month)
+        if forecast_option == "Latest":
+            year, month = get_latest_forecast_year_month(predictions_path)
+            full_predictions_path = os.path.join(
+                predictions_path, "Latest", year, month
+            )
+        elif forecast_option == "Specific Date":
+            year = st.sidebar.number_input("Select Year", 2020, 2024)
+            month = st.sidebar.number_input("Select Month", 1, 12)
+            full_predictions_path = os.path.join(
+                predictions_path, str(year), str(month)
+            )
+        available_countries = get_available_countries(full_predictions_path)
 
         if available_countries:
             country_codes = st.sidebar.multiselect(
-                "ISO 3166-1 Alpha-2 Country Codes:",
+                "Countries available for inspection:",
                 options=available_countries,
-                default=available_countries[6],  # Defaults to first two available
             )
         else:
             st.sidebar.warning("No data available for the selected year and month.")
@@ -141,26 +152,50 @@ def main() -> None:
             for country_code in country_codes
             for tile in countries_to_tiles_map.get(country_code, [])
         ]
-        fig = generate_map(predictions_path, year, month, country_tiles)
-        st_folium(fig, width="100%", height=600, returned_objects=[])
-        if send_report and user_email:
-            with st.spinner("Generating and sending report..."):
-                map_image_path = generate_high_density_report(fig=fig)
-                if send_email(
-                    user_email,
-                    "Desert Locust Risk Report",
-                    img_path=map_image_path,
-                ):
-                    st.success("Report sent successfully!")
-                    try:  # clean up map
+        fig, all_clusters = generate_map(full_predictions_path, country_tiles)
+        st_folium(fig, width="100%", height=550, returned_objects=[])
+        if send_report and user_emails:
+            email_list = [
+                email.strip() for email in user_emails.split(",") if email.strip()
+            ]
+            if not email_list:
+                st.error("Please enter valid email addresses.")
+            else:
+                with st.spinner("Generating and sending report..."):
+                    map_image_path, report_text = generate_high_density_report(
+                        fig=fig,
+                        all_clusters=all_clusters,
+                        year=year,
+                        month=month,
+                    )
+                    success_count = 0
+                    for email in email_list:
+                        if send_email(
+                            email,
+                            "Desert Locust Risk Report",
+                            map_image_path,
+                            report_text,
+                            year,
+                            month,
+                        ):
+                            success_count += 1
+                        else:
+                            st.error(f"Error sending email to {email}")
+
+                    try:
                         os.remove(map_image_path)
-                    except Exception as e:
-                        print(e)
-                else:
-                    st.error("Error sending report.")
-    else:  # this is to init an empty map
+                    except Exception:
+                        pass
+
+                    if success_count == len(email_list):
+                        st.success("Report sent successfully to all recipients!")
+                    elif success_count > 0:
+                        st.warning(
+                            f"Report sent successfully to {success_count} out of {len(email_list)} recipients."
+                        )
+    else:
         fig = folium.Map((10, 35), zoom_start=3)
-        st_folium(fig, width="100%", height=600, returned_objects=[])
+        st_folium(fig, width="100%", height=550, returned_objects=[])
 
 
 if __name__ == "__main__":
