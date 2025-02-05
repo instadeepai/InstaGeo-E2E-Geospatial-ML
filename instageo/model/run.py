@@ -37,7 +37,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from instageo.model.dataloader import (
+from instageo.model.old_dataloader import (
     InstaGeoDataset,
     process_and_augment,
     process_data,

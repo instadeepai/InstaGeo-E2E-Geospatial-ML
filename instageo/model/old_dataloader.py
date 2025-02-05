@@ -34,6 +34,35 @@ from PIL import Image
 from rasterio.crs import CRS
 from torchvision import transforms
 
+def compute_indices(image):
+    """Compute NDVI, EVI, NDWI, and NDSI from Sentinel-2 bands."""
+    B2, B3, B4, B8, B11, B12 = image
+
+    NDVI = (B8 - B4) / (B8 + B4 + 1e-6)
+    EVI = 2.5 * (B8 - B4) / (B8 + 6 * B4 - 7.5 * B2 + 1 + 1e-6)
+    NDWI = (B3 - B8) / (B3 + B8 + 1e-6)
+    NDSI = (B11 - B8) / (B11 + B8 + 1e-6)
+
+    return np.stack([NDVI, EVI, NDWI, NDSI], axis=0)
+
+def compute_differences(current, previous):
+    """Compute ∆NDVI and ∆NDWI (temporal changes)."""
+    delta_NDVI = current[0] - previous[0]
+    delta_NDWI = current[2] - previous[2]
+    return np.stack([delta_NDVI, delta_NDWI], axis=0)
+
+def process_image(image_series):
+    """
+    Process an input time-series image with indices and differences.
+    image_series = (3, 6, H, W) -> 3 time-steps, 6 spectral bands
+    Returns (18, H, W) replacing original bands with computed indices and differences and reshaping.
+    """
+    indices_series = [compute_indices(img) for img in image_series]
+    differences = [compute_differences(indices_series[i], indices_series[i-1]) for i in range(1, len(indices_series))]
+    processed_bands = [np.concatenate([indices_series[i], differences[i-1]], axis=0) for i in range(1, 3)]
+    processed_bands.insert(0, np.concatenate([indices_series[0], np.zeros_like(differences[0])], axis=0))  # First timestep has no difference
+    final_input = np.concatenate(processed_bands, axis=0)  # Reshape to (18, H, W)
+    return final_input
 
 def open_mf_tiff_dataset(
     band_files: dict[str, Any], load_masks: bool
@@ -252,37 +281,30 @@ def process_test(
     return imgs, labels
 
 
-def get_raster_data(
-    fname: str | dict[str, dict[str, str]],
-    is_label: bool = True,
-    bands: List[int] | None = None,
-    no_data_value: int | None = -9999,
-    mask_cloud: bool = True,
-    water_mask: bool = False,
-) -> np.ndarray:
-    """Load and process raster data from a file.
-
-    Args:
-        fname (str): Filename to load data from.
-        is_label (bool): Whether the file is a label file.
-        bands (List[int]): Index of bands to select from array.
-        no_data_value (int | None): NODATA value in image raster.
-        mask_cloud (bool): Perform cloud masking.
-        water_mask (bool): Perform water masking.
-
-    Returns:
-        np.ndarray: Numpy array representing the processed data.
-    """
+def get_raster_data(fname, is_label=True, bands=None, no_data_value=-9999, mask_cloud=True, water_mask=False):
+    """Load and process raster data from a file."""
     if isinstance(fname, dict):
-        data, mask, crs = open_mf_tiff_dataset(fname, load_masks=False)
-        data = data.fillna(no_data_value)
-        data = data.band_data.values
+        data, _, _ = open_mf_tiff_dataset(fname, load_masks=False)
+        data = data.fillna(no_data_value).band_data.values
     else:
         with rasterio.open(fname) as src:
             data = src.read()
-    if (not is_label) and bands:
+
+    if not is_label and bands:
         data = data[bands, ...]
+
+    print(f"Before processing {data.shape}")
+    # Fix: Ensure the shape is (3, 6, H, W)
+    if data.shape[0] == 18:  
+        data = data.reshape(3, 6, data.shape[1], data.shape[2])  
+    
+    # Call process_image to replace the original 6 bands
+    if not is_label:
+        data = process_image(data)  # Now returns (6, H, W), replacing the old bands
+    print(f"After processing {data.shape}")
     return data
+
+
 
 
 def process_data(
@@ -428,3 +450,4 @@ class InstaGeoDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         """Return length of dataset."""
         return len(self.file_paths)
+

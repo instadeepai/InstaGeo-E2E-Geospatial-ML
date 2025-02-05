@@ -6,7 +6,7 @@ import pytest
 import torch
 from PIL import Image
 
-from instageo.model.dataloader import (
+from instageo.model.old_dataloader import (
     InstaGeoDataset,
     crop_array,
     get_raster_data,
