@@ -55,12 +55,12 @@ def process_image(image_series):
     """
     Process an input time-series image with indices and differences.
     image_series = (3, 6, H, W) -> 3 time-steps, 6 spectral bands
-    Returns (12, H, W) with computed indices and differences.
+    Returns (6, H, W) replacing original bands with computed indices and differences.
     """
     indices_series = [compute_indices(img) for img in image_series]
     differences = [compute_differences(indices_series[i], indices_series[i-1]) for i in range(1, len(indices_series))]
-    final_input = np.concatenate([image_series[2], indices_series[2], differences[-1]], axis=0)
-    return final_input  # (12, H, W)
+    final_input = np.concatenate([indices_series[2], differences[-1]], axis=0)  # Only return computed bands (6, H, W)
+    return final_input
 
 def open_mf_tiff_dataset(
     band_files: dict[str, Any], load_masks: bool
