@@ -279,38 +279,30 @@ def process_test(
     return imgs, labels
 
 
-def get_raster_data(
-    fname: str | dict[str, dict[str, str]],
-    is_label: bool = True,
-    bands: List[int] | None = None,
-    no_data_value: int | None = -9999,
-    mask_cloud: bool = True,
-    water_mask: bool = False,
-) -> np.ndarray:
-    """Load and process raster data from a file.
-
-    Args:
-        fname (str): Filename to load data from.
-        is_label (bool): Whether the file is a label file.
-        bands (List[int]): Index of bands to select from array.
-        no_data_value (int | None): NODATA value in image raster.
-        mask_cloud (bool): Perform cloud masking.
-        water_mask (bool): Perform water masking.
-
-    Returns:
-        np.ndarray: Numpy array representing the processed data.
-    """
+def get_raster_data(fname, is_label=True, bands=None, no_data_value=-9999, mask_cloud=True, water_mask=False):
+    """Load and process raster data from a file."""
     if isinstance(fname, dict):
-        data, mask, crs = open_mf_tiff_dataset(fname, load_masks=False)
-        data = data.fillna(no_data_value)
-        data = data.band_data.values
+        data, _, _ = open_mf_tiff_dataset(fname, load_masks=False)
+        data = data.fillna(no_data_value).band_data.values
     else:
         with rasterio.open(fname) as src:
             data = src.read()
-    print(f"get_raster_data DEBUG : Le shape de data est : {data.shape}" )
-    if (not is_label) and bands:
+
+    if not is_label and bands:
         data = data[bands, ...]
+
+
+    # Fix: Ensure the shape is (3, 6, H, W)
+    if data.shape[0] == 18:  
+        data = data.reshape(3, 6, data.shape[1], data.shape[2])  
+    
+    
+    # Call process_image to replace the original 6 bands
+    if not is_label:
+        data = process_image(data)  # Now returns (6, H, W), replacing the old bands
+    
     return data
+
 
 
 
@@ -357,7 +349,6 @@ def process_data(
             arr_y -= 1
     else:
         arr_y = None
-    print(f"BEFORE DEBUG : Le shape de x arr_x est : {arr_x.shape}" )
     return arr_x, arr_y
 
 
