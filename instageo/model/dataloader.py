@@ -314,6 +314,9 @@ def get_raster_data(
 def process_data(im_fname, mask_fname=None, no_data_value=-9999, reduce_to_zero=False, replace_label=None, bands=None, constant_multiplier=1.0, mask_cloud=False):
     """Process image and mask data, replacing original bands with computed features."""
     arr_x = get_raster_data(im_fname, is_label=False, bands=bands, no_data_value=no_data_value, mask_cloud=mask_cloud)
+
+    print(f"DEBUG: Loaded arr_x.shape = {arr_x.shape}")  # <-- Add this for debugging
+
     assert arr_x.shape[0] == 3 and arr_x.shape[1] == 6, "Expected shape (3, 6, H, W)"
 
     arr_x = process_image(arr_x)  # Apply transformations
@@ -328,6 +331,7 @@ def process_data(im_fname, mask_fname=None, no_data_value=-9999, reduce_to_zero=
         arr_y = None
 
     return arr_x, arr_y
+
 
 
 
