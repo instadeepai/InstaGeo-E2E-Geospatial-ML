@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from instageo.model.model import download_file
+from instageo.model.old_model import download_file
 
 
 def test_download_file_success(tmp_path):

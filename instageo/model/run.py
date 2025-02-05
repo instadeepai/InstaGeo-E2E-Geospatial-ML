@@ -44,7 +44,7 @@ from instageo.model.dataloader import (
     process_test,
 )
 from instageo.model.infer_utils import chip_inference, sliding_window_inference
-from instageo.model.model import PrithviSeg
+from instageo.model.old_model import PrithviSeg
 
 pl.seed_everything(seed=1042, workers=True)
 torch.backends.cudnn.deterministic = True
