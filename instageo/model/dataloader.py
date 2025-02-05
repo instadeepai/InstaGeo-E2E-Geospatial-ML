@@ -311,16 +311,43 @@ def get_raster_data(
         data = data[bands, ...]
     return data
 
-def process_data(im_fname, mask_fname=None, no_data_value=-9999, reduce_to_zero=False, replace_label=None, bands=None, constant_multiplier=1.0, mask_cloud=False):
-    """Process image and mask data, replacing original bands with computed features."""
-    arr_x = get_raster_data(im_fname, is_label=False, bands=bands, no_data_value=no_data_value, mask_cloud=mask_cloud)
 
-    print(f"DEBUG: Loaded arr_x.shape = {arr_x.shape}")  # <-- Add this for debugging
 
-    assert arr_x.shape[0] == 3 and arr_x.shape[1] == 6, "Expected shape (3, 6, H, W)"
+def process_data(
+    im_fname: str,
+    mask_fname: str | None = None,
+    no_data_value: int | None = -9999,
+    reduce_to_zero: bool = False,
+    replace_label: Tuple | None = None,
+    bands: List[int] | None = None,
+    constant_multiplier: float = 1.0,
+    mask_cloud: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Process image and mask data from filenames.
 
-    arr_x = process_image(arr_x)  # Apply transformations
+    Args:
+        im_fname (str): Filename for the image data.
+        mask_fname (str | None): Filename for the mask data.
+        bands (List[int]): Indices of bands to select from array.
+        no_data_value (int | None): NODATA value in image raster.
+        reduce_to_zero (bool): Reduces the label index to start from Zero.
+        replace_label (Tuple): Tuple of value to replace and the replacement value.
+        constant_multiplier (float): Constant multiplier for image.
+        mask_cloud (bool): Perform cloud masking.
 
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: A tuple of numpy arrays representing the processed
+        image and mask data.
+    """
+    arr_x = get_raster_data(
+        im_fname,
+        is_label=False,
+        bands=bands,
+        no_data_value=no_data_value,
+        mask_cloud=mask_cloud,
+        water_mask=False,
+    )
+    arr_x = arr_x * constant_multiplier
     if mask_fname:
         arr_y = get_raster_data(mask_fname)
         if replace_label:
@@ -329,10 +356,8 @@ def process_data(im_fname, mask_fname=None, no_data_value=-9999, reduce_to_zero=
             arr_y -= 1
     else:
         arr_y = None
-
+    print(f"DEBUG : Le shape de x arr_x est : {arr_x.shape}" )
     return arr_x, arr_y
-
-
 
 
 def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str | None]]:
