@@ -39,6 +39,7 @@ import streamlit as st
 import folium
 
 from instageo import INSTAGEO_APPS_PATH
+from instageo.apps.utils.countries import get_available_countries
 from instageo.apps.viz import create_map_with_geotiff_tiles
 
 
@@ -98,10 +99,10 @@ def main() -> None:
         <style>
         .st-folium {  /* Target the streamlit-folium container */
             width: 100%;
-            height: 85vh; /* Use viewport height for map height */
             margin: 0 auto; /* Center the map horizontally */
         }
         .block-container {  /* Streamlit's main container */
+             padding-top: 1.7rem; /* Reduce top padding for more map space*/
              padding-bottom: 1rem; /* Reduce top padding for more map space*/
         }
         </style>
@@ -114,18 +115,25 @@ def main() -> None:
     send_report = st.sidebar.checkbox("Send me a risk report")
     st.sidebar.header("Settings")
     with open(
-        INSTAGEO_APPS_PATH / "utils/country_code_to_mgrs_tiles.json"
+        INSTAGEO_APPS_PATH / "utils/country_name_to_mgrs_tiles.json"
     ) as json_file:
         countries_to_tiles_map = json.load(json_file)
 
     with st.sidebar.container():
-        country_codes = st.sidebar.multiselect(
-            "ISO 3166-1 Alpha-2 Country Codes:",
-            options=list(countries_to_tiles_map.keys()),
-            default=["OM", "SA"],  # IN very big, #SD with 7
-        )
         year = st.sidebar.number_input("Select Year", 2020, 2024)  # PLEASE USE 2021
         month = st.sidebar.number_input("Select Month", 1, 12)  # PLEASE USE 6
+
+        available_countries = get_available_countries(predictions_path, year, month)
+
+        if available_countries:
+            country_codes = st.sidebar.multiselect(
+                "ISO 3166-1 Alpha-2 Country Codes:",
+                options=available_countries,
+                default=available_countries[6],  # Defaults to first two available
+            )
+        else:
+            st.sidebar.warning("No data available for the selected year and month.")
+            country_codes = []
 
     if st.sidebar.button("Generate Map"):
         country_tiles = [
@@ -134,7 +142,7 @@ def main() -> None:
             for tile in countries_to_tiles_map.get(country_code, [])
         ]
         fig = generate_map(predictions_path, year, month, country_tiles)
-        st_folium(fig, width="100%", returned_objects=[])
+        st_folium(fig, width="100%", height=600, returned_objects=[])
         if send_report and user_email:
             with st.spinner("Generating and sending report..."):
                 map_image_path = generate_high_density_report(fig=fig)
@@ -151,8 +159,8 @@ def main() -> None:
                 else:
                     st.error("Error sending report.")
     else:  # this is to init an empty map
-        fig = folium.Map((0, 0))
-        st_folium(fig, width="100%", returned_objects=[])
+        fig = folium.Map((10, 35), zoom_start=3)
+        st_folium(fig, width="100%", height=600, returned_objects=[])
 
 
 if __name__ == "__main__":

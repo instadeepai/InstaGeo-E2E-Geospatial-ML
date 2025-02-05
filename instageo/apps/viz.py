@@ -129,8 +129,8 @@ def create_map_with_geotiff_tiles(
         all_clusters = pd.concat(clusters)
         all_clusters["density"] = all_clusters["count"] / all_clusters.geometry.area
 
-        quantiles = all_clusters["density"].quantile([0.2, 0.4, 0.6, 0.8])
-        thresholds = [0] + quantiles.tolist() + [float("inf")]
+        # quantiles = all_clusters["density"].quantile([0.2, 0.4, 0.6, 0.8])
+        thresholds = [0, 10000, 20000, 70000, 200000, float("inf")]
         risk_levels = ["very low", "low", "medium", "high", "very high"]
 
         all_clusters["risk"] = pd.cut(
