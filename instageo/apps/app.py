@@ -40,11 +40,10 @@ import folium
 
 from instageo import INSTAGEO_APPS_PATH
 from instageo.apps.viz import create_map_with_geotiff_tiles
-from streamlit_folium import folium_static
 
 
 # @st.cache_data
-def generate_map(
+def generate_map(  # add a better legend
     directory: str, year: int, month: int, country_tiles: list[str]
 ) -> list[xr.Dataset]:
     """Generate the plotly map.
@@ -94,8 +93,25 @@ def main() -> None:
         "This application enables the visualisation of GeoTIFF files on an interactive map. You can also receive an alert report",
         divider="rainbow",
     )
-    user_email = st.sidebar.text_input("Enter your email for the report (optional):")
-    send_report = st.sidebar.checkbox("Send me a high-density report")
+    st.markdown(
+        """
+        <style>
+        .st-folium {  /* Target the streamlit-folium container */
+            width: 100%;
+            height: 85vh; /* Use viewport height for map height */
+            margin: 0 auto; /* Center the map horizontally */
+        }
+        .block-container {  /* Streamlit's main container */
+             padding-bottom: 1rem; /* Reduce top padding for more map space*/
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    user_email = st.sidebar.text_input(
+        "Enter your email for the report (optional):"
+    )  # add list email
+    send_report = st.sidebar.checkbox("Send me a risk report")
     st.sidebar.header("Settings")
     with open(
         INSTAGEO_APPS_PATH / "utils/country_code_to_mgrs_tiles.json"
@@ -106,31 +122,11 @@ def main() -> None:
         country_codes = st.sidebar.multiselect(
             "ISO 3166-1 Alpha-2 Country Codes:",
             options=list(countries_to_tiles_map.keys()),
-            default=["OM", "SA"],
+            default=["OM", "SA"],  # IN very big, #SD with 7
         )
         year = st.sidebar.number_input("Select Year", 2020, 2024)  # PLEASE USE 2021
         month = st.sidebar.number_input("Select Month", 1, 12)  # PLEASE USE 6
 
-    # st.markdown(
-    #     """
-    # <style>
-    #     .st-cf > div:first-child,  /* Override Streamlit column padding */
-    #     .st-cf > div:first-child > div:first-child {
-    #         padding: 0;
-    #     }
-    #     [data-testid="stHorizontalBlock"] > div:first-child { /* Override horizontal block padding */
-    #         padding: 0;
-    #     }
-    #     [data-testid="stFiframe"] {  /* Set iframe height to 80vh */
-    #         height: 80vh !important;
-    #         width: 100% !important;
-    #         position: relative; /* Ensure correct positioning within column */
-    #     }
-
-    # </style>
-    # """,
-    #     unsafe_allow_html=True,
-    # )
     if st.sidebar.button("Generate Map"):
         country_tiles = [
             tile
@@ -138,22 +134,13 @@ def main() -> None:
             for tile in countries_to_tiles_map.get(country_code, [])
         ]
         fig = generate_map(predictions_path, year, month, country_tiles)
-        folium_static(fig)
-        # st_folium(fig, width="100%", height=600)
+        st_folium(fig, width="100%", returned_objects=[])
         if send_report and user_email:
             with st.spinner("Generating and sending report..."):
-                map_image_path = generate_high_density_report(
-                    # folium map
-                    # save folium map
-                    fig=fig,
-                    # rasters=rasters,
-                    # threshold=0.8,
-                )
-                # formatted_report = format_report(report, map_image_path)
+                map_image_path = generate_high_density_report(fig=fig)
                 if send_email(
                     user_email,
-                    "High-Density Report",
-                    # formatted_report,
+                    "Desert Locust Risk Report",
                     img_path=map_image_path,
                 ):
                     st.success("Report sent successfully!")
@@ -165,7 +152,7 @@ def main() -> None:
                     st.error("Error sending report.")
     else:  # this is to init an empty map
         fig = folium.Map((0, 0))
-        folium_static(fig)
+        st_folium(fig, width="100%", returned_objects=[])
 
 
 if __name__ == "__main__":
