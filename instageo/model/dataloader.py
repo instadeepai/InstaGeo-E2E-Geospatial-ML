@@ -307,6 +307,7 @@ def get_raster_data(
     else:
         with rasterio.open(fname) as src:
             data = src.read()
+    print(f"get_raster_data DEBUG : Le shape de data est : {data.shape}" )
     if (not is_label) and bands:
         data = data[bands, ...]
     return data
@@ -356,7 +357,7 @@ def process_data(
             arr_y -= 1
     else:
         arr_y = None
-    print(f"DEBUG : Le shape de x arr_x est : {arr_x.shape}" )
+    print(f"BEFORE DEBUG : Le shape de x arr_x est : {arr_x.shape}" )
     return arr_x, arr_y
 
 
