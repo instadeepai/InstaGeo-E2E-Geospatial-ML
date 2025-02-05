@@ -129,6 +129,8 @@ def normalize_and_convert_to_tensor(
     )  # T,C,H,W -> C,T,H,W
     if label:
         label = torch.from_numpy(np.array(label)).squeeze()
+        label = torch.where(label == -1, torch.tensor(0), torch.tensor(1))
+
     return ims_tensor, label
 
 

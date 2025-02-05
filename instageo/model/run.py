@@ -571,6 +571,7 @@ def main(cfg: DictConfig) -> None:
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
+            num_classes=1
         )
         hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         checkpoint_callback = ModelCheckpoint(

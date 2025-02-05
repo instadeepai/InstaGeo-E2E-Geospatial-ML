@@ -30,6 +30,7 @@ import torch.nn as nn
 import yaml  # type: ignore
 from absl import logging
 
+from instageo.model.unet import UNet
 from instageo.model.Prithvi import ViTEncoder
 
 
