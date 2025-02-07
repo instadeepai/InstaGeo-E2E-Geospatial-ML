@@ -26,7 +26,7 @@ import plotly.graph_objects as go
 import rasterio
 import xarray as xr
 from pyproj import CRS, Transformer
-from instageo.apps.utils.consts import MAP_STYLE
+from instageo.apps.utils.consts import MAP_STYLE,TILE_SERVER_URL
 
 epsg3857_to_epsg4326 = Transformer.from_crs(3857, 4326, always_xy=True)
 
@@ -161,4 +161,39 @@ def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> go.Figure:
             )
     # Overlay the resulting image
     fig.update_layout(mapbox_layers=mapbox_layers)
+    return fig
+
+
+def create_map_with_geotiff_url(url: str) -> go.Figure:
+    """Create a map with multiple GeoTIFF tiles overlaid.
+
+    This function reads GeoTIFF files from a specified directory and overlays them on a
+    Plotly map.
+
+    Args:
+        tiles_to_overlay (list[str]): Path to tiles to overlay on map.
+
+    Returns:
+        Figure: A Plotly figure with overlaid GeoTIFF tiles.
+    """
+    fig = go.Figure(go.Scattermapbox())
+    fig.update_layout(
+        mapbox_style=(MAP_STYLE if MAP_STYLE else "open-street-map"),
+        mapbox=dict(center=go.layout.mapbox.Center(lat=0, lon=20), zoom=2.0),
+        
+        autosize=True
+    )
+    if url:
+        fig.update_layout(mapbox_layers=[
+            {
+                "below": 'map',
+                "sourcetype": "raster",
+                "sourceattribution": "United States Geological Survey",
+                "source": [
+                    TILE_SERVER_URL+url
+                ],
+                "opacity":0.3
+            }
+        ],)
+
     return fig

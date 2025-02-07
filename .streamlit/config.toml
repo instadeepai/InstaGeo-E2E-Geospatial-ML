@@ -1,2 +1,4 @@
 [ui]
 hideTopBar = true
+[theme]
+base="light"

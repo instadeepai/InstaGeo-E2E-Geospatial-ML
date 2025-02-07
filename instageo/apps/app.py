@@ -27,12 +27,14 @@ import glob
 import json
 import os
 from pathlib import Path
+from datetime import date
 
 import streamlit as st
 
 from instageo import INSTAGEO_APPS_PATH
-from instageo.apps.viz import create_map_with_geotiff_tiles
+from instageo.apps.viz import create_map_with_geotiff_url,create_map_with_geotiff_tiles
 from instageo.apps.utils.styles import general_styles
+from instageo.apps.utils.consts import MODELS_LIST,PREDICTIONS
 
 
 def generate_map(
@@ -75,30 +77,36 @@ def main() -> None:
     """Instageo Serve Main Entry Point."""
     st.set_page_config(layout="wide")
     general_styles()
-    with open(
-        INSTAGEO_APPS_PATH / "utils/country_code_to_mgrs_tiles.json"
-    ) as json_file:
-        countries_to_tiles_map = json.load(json_file)
-
+    st.logo("instageo/apps/assets/logo.svg")
+    
+    
     with st.sidebar.container():
-        directory = st.sidebar.text_input(
-            "GeoTiff Directory:",
-            help="Write the path to the directory containing your GeoTIFF files",
-        )
-        country_code = st.sidebar.selectbox(
-            "ISO 3166-1 Alpha-2 Country Code:",
-            options=list(countries_to_tiles_map.keys()),
-        )
-        year = st.sidebar.number_input("Select Year", 2023, 2024)
-        month = st.sidebar.number_input("Select Month", 1, 12)
 
-    if st.sidebar.button("Generate Map"):
-        country_tiles = countries_to_tiles_map[country_code]
-        generate_map(directory, year, month, country_tiles)
-    else:
-        st.plotly_chart(
-            create_map_with_geotiff_tiles(tiles_to_overlay=[]), use_container_width=True
-        )
+        model = st.sidebar.selectbox( 
+            "Select Model",
+            options=MODELS_LIST,
+            )
+        cols = st.sidebar.columns(2)    
+        current_date = date.today()
+        current_year = current_date.year
+        year =  cols[0].selectbox('Year', range(current_year, 1989,-1))
+        month = cols[1].selectbox('Month', range(12, 0, -1))
+    
+    predictionPath = None
+    with st.sidebar.container():
+        st.sidebar.markdown("### Predictions History")
+        for prediction in PREDICTIONS:
+            if st.sidebar.button(prediction["name"], prediction["path"], type="tertiary"):
+                predictionPath = prediction["path"]
+    
+    
+    with st.sidebar.container():
+        if st.sidebar.button("Submit job",use_container_width=True):
+            pass
+
+    st.plotly_chart(
+            create_map_with_geotiff_url(url=predictionPath), use_container_width=True,config={"scrollZoom": True}
+    )
 
 
 if __name__ == "__main__":
