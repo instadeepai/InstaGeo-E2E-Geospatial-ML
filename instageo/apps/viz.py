@@ -142,7 +142,6 @@ def read_geotiff_to_xarray(filepath: str) -> tuple[xr.Dataset, CRS]:
 def zoom_to_scale(zoom: float):
     zoom_dict = {1:0.1,2:0.1,3:0.1,4:0.25,5:0.5,6:0.6,7:0.1,8:0.1}
     zoom_ceiled = math.ceil(zoom)
-    print("zoom ciel",zoom_ceiled)
     if zoom_ceiled in zoom_dict.keys():  
         scale = zoom_dict[zoom_ceiled]  
     else:

@@ -3,6 +3,6 @@ plotly
 rasterio
 xarray
 datashader==0.16.2
-dask==2024.12.1
+dask
 matplotlib
-streamlit==1.31.1
+dash

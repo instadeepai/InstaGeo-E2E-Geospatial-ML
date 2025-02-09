@@ -14,7 +14,7 @@ import datashader.transfer_functions as tf
 import matplotlib.cm
 from pathlib import Path
 from pyproj import CRS, Transformer
-from instageo.apps.viz import create_map_with_geotiff_tiles
+from viz import create_map_with_geotiff_tiles
 
 # Initialize Dash App
 app = dash.Dash(__name__)
@@ -42,9 +42,6 @@ def load_tile_metadata(json_path: str) -> list:
     """Load tile metadata from a JSON file."""
     with open(json_path, "r") as f:
         return json.load(f)
-
-
-
 
 # Layout with Sidebar
 app.layout = html.Div([
@@ -111,7 +108,7 @@ app.layout = html.Div([
 
 ],style={'display':'flex','height':'100vh'})
 
-tile_metadata_path = "instageo/apps/tile_metadata.json"
+tile_metadata_path = "tile_metadata.json"
 tile_metadata = load_tile_metadata(tile_metadata_path) 
 
 
@@ -172,12 +169,6 @@ def update_map(relayout_data, directory, year, month, current_viewport,dimension
     else:
         new_viewport = current_viewport
     return create_map_with_geotiff_tiles(tile_metadata, new_viewport, zoom, base_dir)
-
-
-
-
-
-
 
 if __name__ == "__main__":
     app.run_server(debug=True)
