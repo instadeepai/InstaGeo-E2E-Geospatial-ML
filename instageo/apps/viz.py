@@ -198,7 +198,20 @@ def read_geotiff_to_xarray(filepath: str) -> tuple[xr.Dataset, CRS]:
 
 
 def create_map_with_geotiff_tiles(tile_metadata: list, viewport: dict, zoom: float, base_dir: str) -> go.Figure:
-    """Create a map with multiple GeoTIFF tiles overlaid."""
+    """Create a map with multiple GeoTIFF tiles overlaid.
+
+    This function reads GeoTIFF files from a specified directory and overlays them on a
+    Plotly map.
+
+    Args:
+        tiles_to_overlay (list[str]): Path to tiles to overlay on map.
+        viewport (dict): dict that contains lon and lat of the map
+        zoom (float): zoom level 
+        base_dir (str): base directory of tiles
+
+    Returns:
+        Figure: A Plotly figure with overlaid GeoTIFF tiles.
+    """
     
     fig = go.Figure(go.Scattermapbox())
     fig.update_layout(
