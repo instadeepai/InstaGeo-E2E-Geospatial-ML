@@ -270,36 +270,7 @@ def update_map(relayout_data, directory, year, month, current_viewport,dimension
 
 
 
-# Create assets folder and JavaScript file
-assets_dir = APP_DIR / 'assets'
-if not assets_dir.exists():
-    assets_dir.mkdir()
 
-js_file = assets_dir / 'clientside.js'
-if not js_file.exists():
-    js_content = """
-window.dash_clientside = Object.assign({}, window.dash_clientside, {
-    clientside: {
-        getDimensions: function() {
-            const container = document.getElementById('plot-container');
-            if (container) {
-                const rect = container.getBoundingClientRect();
-                return JSON.stringify({
-                    width: rect.width,
-                    height: window.innerHeight,
-                    containerWidth: rect.width
-                });
-            }
-            return JSON.stringify({
-                width: window.innerWidth,
-                height: window.innerHeight,
-                containerWidth: window.innerWidth
-            });
-        }
-    }
-});
-"""
-    js_file.write_text(js_content)
 
 if __name__ == "__main__":
     app.run_server(debug=True)
