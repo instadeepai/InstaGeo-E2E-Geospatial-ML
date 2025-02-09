@@ -2,6 +2,7 @@ import os
 import json
 import dash
 import plotly.graph_objects as go
+import math
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 from functools import lru_cache
@@ -51,6 +52,19 @@ def read_geotiff_to_xarray(filepath: str) -> tuple[xr.Dataset, CRS]:
     xarr_dataset = xr.open_dataset(filepath).sel(band=1)
     crs = rasterio.open(filepath).crs
     return xarr_dataset, crs
+# get scale based on zoom level
+# def zoom_to_scale(zoom: float, growth_rate: float = 0.2) -> float:
+#     scale = 1 - math.exp(-growth_rate * zoom)
+#     return round(scale, 3)
+
+def zoom_to_scale(zoom: float):
+    zoom_dict = {1:0.1,2:0.15,3:0.2,4:0.25,5:0.5,6:0.6,7:0.7,8:0.8}
+    zoom_ceiled = math.ceil(zoom)
+    if zoom_ceiled in zoom_dict.keys():  
+        scale = zoom_dict[zoom_ceiled]  
+    else:
+        scale = 1.0
+    return scale
 
 def create_map_with_geotiff_tiles(tile_metadata: list, viewport: dict, zoom: float, base_dir: str) -> go.Figure:
     """Create a map with multiple GeoTIFF tiles overlaid."""
@@ -67,14 +81,15 @@ def create_map_with_geotiff_tiles(tile_metadata: list, viewport: dict, zoom: flo
         ),
         margin={"r": 0, "t": 40, "l": 0, "b": 0},
     )
-    print(viewport)
     mapbox_layers = []
     for tile in tile_metadata:
         if is_tile_in_viewport(tile['bounds'], viewport, zoom=zoom):
             tile_path = os.path.join(base_dir, tile['name'])
-            print(tile_path)
             xarr_dataset, crs = read_geotiff_to_xarray(tile_path)
-            img, coordinates = add_raster_to_plotly_figure(xarr_dataset, crs, scale=1.0 if zoom > 8 else 0.5)
+            scale = zoom_to_scale(zoom)
+            print("--zoom--", zoom)
+            print("----sclale",scale)
+            img, coordinates = add_raster_to_plotly_figure(xarr_dataset, crs, scale=scale if zoom > 8 else 0.5)
             mapbox_layers.append({"sourcetype": "image", "source": img, "coordinates": coordinates})
     fig.update_layout(mapbox_layers=mapbox_layers)
     return fig
