@@ -37,10 +37,10 @@ def is_tile_in_viewport(tile_bounds: dict, viewport: dict, zoom: float) -> bool:
     """Check if a tile is within the current viewport."""
     lat_min, lat_max = viewport['latitude']['min'], viewport['latitude']['max']
     lon_min, lon_max = viewport['longitude']['min'], viewport['longitude']['max']
-    lat_min -= 3/zoom
-    lat_max += 3/zoom
-    lon_min -= 3/zoom
-    lon_max += 3/zoom
+    lat_min -=  1 - math.exp(-0.1 * zoom)
+    lat_max += 1 - math.exp(-0.1 * zoom)
+    lon_min -= 1 - math.exp(-0.1 * zoom)
+    lon_max += 1 - math.exp(-0.1 * zoom)
     tile_lat_min, tile_lat_max = tile_bounds['lat_min'], tile_bounds['lat_max']
     tile_lon_min, tile_lon_max = tile_bounds['lon_min'], tile_bounds['lon_max']
     return not (tile_lat_max < lat_min or tile_lat_min > lat_max or
@@ -80,7 +80,7 @@ def create_map_with_geotiff_tiles(tile_metadata: list, viewport: dict, zoom: flo
     )
     mapbox_layers = []
     for tile in tile_metadata:
-        if len(mapbox_layers) > 10:
+        if len(mapbox_layers) > 15:
             break
         if is_tile_in_viewport(tile['bounds'], viewport, zoom=zoom):
             tile_path = os.path.join(base_dir, tile['name'])
