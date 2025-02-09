@@ -4,6 +4,8 @@ import dash
 import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
+from functools import lru_cache
+
 import rasterio
 import xarray as xr
 import datashader as ds
@@ -43,6 +45,7 @@ def is_tile_in_viewport(tile_bounds: dict, viewport: dict, zoom: float) -> bool:
     return not (tile_lat_max < lat_min or tile_lat_min > lat_max or
                 tile_lon_max < lon_min or tile_lon_min > lon_max)
 
+@lru_cache(maxsize = 16)
 def read_geotiff_to_xarray(filepath: str) -> tuple[xr.Dataset, CRS]:
     """Read GeoTIFF file into an xarray Dataset."""
     xarr_dataset = xr.open_dataset(filepath).sel(band=1)
