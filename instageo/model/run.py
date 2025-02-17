@@ -29,6 +29,7 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import rasterio
+import sklearn.metrics as metrics
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
@@ -320,6 +321,14 @@ class PrithviSegmentationModule(pl.LightningModule):
             logger=True,
         )
         self.log(
+            f"{stage}_roc_auc",
+            out["roc_auc"],
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+        self.log(
             f"{stage}_mIoU",
             out["iou"],
             on_step=True,
@@ -377,8 +386,10 @@ class PrithviSegmentationModule(pl.LightningModule):
             dict: A dictionary containing 'iou', 'overall_accuracy', and
                 'accuracy_per_class', 'precision_per_class' and 'recall_per_class'.
         """
+        prediction_proba = torch.nn.functional.softmax(pred_mask, dim=1)[:, 1, :, :]
         pred_mask = torch.argmax(pred_mask, dim=1)
         no_ignore = gt_mask.ne(self.ignore_index).to(self.device)
+        prediction_proba = prediction_proba.masked_select(no_ignore).cpu().numpy()
         pred_mask = pred_mask.masked_select(no_ignore).cpu().numpy()
         gt_mask = gt_mask.masked_select(no_ignore).cpu().numpy()
         classes = np.unique(np.concatenate((gt_mask, pred_mask)))
@@ -422,8 +433,9 @@ class PrithviSegmentationModule(pl.LightningModule):
         # Overall IoU and accuracy
         mean_iou = np.mean(iou_per_class) if iou_per_class else 0.0
         overall_accuracy = np.sum(pred_mask == gt_mask) / gt_mask.size
-
+        roc_auc = metrics.roc_auc_score(gt_mask, prediction_proba)
         return {
+            "roc_auc": roc_auc,
             "iou": mean_iou,
             "acc": overall_accuracy,
             "acc_per_class": accuracy_per_class,
