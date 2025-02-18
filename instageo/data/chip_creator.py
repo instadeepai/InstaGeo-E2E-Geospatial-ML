@@ -195,6 +195,7 @@ def main(argv: Any) -> None:
                 num_steps=FLAGS.num_steps,
                 temporal_step=FLAGS.temporal_step,
                 temporal_tolerance=FLAGS.temporal_tolerance,
+                cloud_coverage=FLAGS.cloud_coverage,
             )
             logging.info("Retrieving HLS tiles that will be downloaded.")
             hls_dataset, hls_granules_to_download = hls_utils.create_hls_dataset(

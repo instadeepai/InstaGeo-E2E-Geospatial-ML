@@ -172,6 +172,7 @@ def decode_fmask_value(
 
 def retrieve_hls_metadata(
     tile_info_df: pd.DataFrame,
+    cloud_coverage: int = 10,
 ) -> dict[str, tuple[list[str], list[list[str]]]]:
     """Retrieve HLS Tiles Metadata.
 
@@ -181,6 +182,7 @@ def retrieve_hls_metadata(
     Args:
         tile_info_df (pd.DataFrame): A dataframe containing tile_id, start_date and
             end_date in each row.
+        cloud_coverage (int): Minimum percentage of cloud cover acceptable for a HLS tile.
 
     Returns:
         A dictionary mapping tile_id to a list of available HLS granules.
@@ -199,6 +201,7 @@ def retrieve_hls_metadata(
             short_name=["HLSL30", "HLSS30"],
             bounding_box=(make_valid_bbox(lon_min, lat_min, lon_max, lat_max)),
             temporal=(f"{start_date}T00:00:00", f"{end_date}T23:59:59"),
+            cloud_cover=cloud_coverage,
         )
         granules = pd.json_normalize(
             [result | {"data_links": result.data_links()} for result in results]
@@ -311,6 +314,7 @@ def add_hls_granules(
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 5,
+    cloud_coverage: int = 10,
 ) -> pd.DataFrame:
     """Add HLS Granules.
 
@@ -324,6 +328,7 @@ def add_hls_granules(
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
         temporal_tolerance (int): Tolerance (in days) for finding closest HLS tile.
+        cloud_coverage (int): Minimum percentage of cloud cover acceptable for a HLS tile.
 
     Returns:
         A dataframe containing a list of HLS granules. Each granule is a directory
@@ -339,7 +344,7 @@ def add_hls_granules(
         f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
     ]
     data["tile_queries"] = tile_queries_str
-    tile_database = retrieve_hls_metadata(tiles_info)
+    tile_database = retrieve_hls_metadata(tiles_info, cloud_coverage=cloud_coverage)
     tile_queries_dict = {k: v for k, v in zip(tile_queries_str, tile_queries)}
     query_result = find_closest_tile(
         tile_queries=tile_queries_dict,

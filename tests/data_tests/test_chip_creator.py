@@ -66,6 +66,8 @@ def test_chip_creator(
         "water",
         "--processing_method",
         "download",
+        "--cloud_coverage",
+        "0",
     ]
     FLAGS(argv)
     chip_creator.main("None")
@@ -117,6 +119,8 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
         "True",
         "--data_source",
         "HLS",
+        "--cloud_coverage",
+        "0",
     ]
     FLAGS(argv)
     chip_creator.main("None")
@@ -153,6 +157,8 @@ def test_chip_creator_cog(setup_and_teardown_output_dir):
         "water",
         "--processing_method",
         "cog",
+        "--cloud_coverage",
+        "0",
     ]
     FLAGS(argv)
     chip_creator.main("None")
