@@ -376,7 +376,10 @@ class PrithviSegmentationModule(pl.LightningModule):
     def compute_metrics(
         self, pred_mask: torch.Tensor, gt_mask: torch.Tensor
     ) -> dict[str, List[float]]:
-        """Calculate the Intersection over Union (IoU), Accuracy, Precision and Recall metrics.
+        """Calculate Metrics.
+
+        The computed metrics includes Intersection over Union (IoU), Accuracy, Precision, Recall and
+        ROC-AUC.
 
         Args:
             pred_mask (np.array): Predicted segmentation mask.
