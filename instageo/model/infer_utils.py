@@ -150,9 +150,8 @@ def chip_inference(
                 prediction_batch = model(data)
                 prediction_cls = (
                     torch.nn.functional.softmax(prediction_batch, dim=1)
-                    .argmax(dim=1)
                     .cpu()
-                    .numpy()
+                    .numpy()[:, 1, :, :]
                 )
 
                 profiles = []

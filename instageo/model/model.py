@@ -30,7 +30,7 @@ import torch.nn as nn
 import yaml  # type: ignore
 from absl import logging
 
-from instageo.model.Prithvi import ViTEncoder
+from instageo.model.Prithvi import ViTEncoder, get_3d_sincos_pos_embed
 
 
 def download_file(url: str, filename: str | Path, retries: int = 3) -> None:
@@ -171,8 +171,16 @@ class PrithviSeg(nn.Module):
             for key, value in checkpoint.items()
             if key.startswith("encoder.")
         }
-        filtered_checkpoint_state_dict["pos_embed"] = torch.zeros(
-            1, (temporal_step * (image_size // 16) ** 2 + 1), 768
+        filtered_checkpoint_state_dict["pos_embed"] = (
+            torch.from_numpy(
+                get_3d_sincos_pos_embed(
+                    768,
+                    (temporal_step, image_size // 16, image_size // 16),
+                    cls_token=True,
+                )
+            )
+            .float()
+            .unsqueeze(0)
         )
         _ = model.load_state_dict(filtered_checkpoint_state_dict)
 

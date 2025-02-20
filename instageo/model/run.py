@@ -29,6 +29,7 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import rasterio
+import sklearn.metrics as metrics
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
@@ -320,6 +321,14 @@ class PrithviSegmentationModule(pl.LightningModule):
             logger=True,
         )
         self.log(
+            f"{stage}_roc_auc",
+            out["roc_auc"],
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+        self.log(
             f"{stage}_mIoU",
             out["iou"],
             on_step=True,
@@ -367,7 +376,10 @@ class PrithviSegmentationModule(pl.LightningModule):
     def compute_metrics(
         self, pred_mask: torch.Tensor, gt_mask: torch.Tensor
     ) -> dict[str, List[float]]:
-        """Calculate the Intersection over Union (IoU), Accuracy, Precision and Recall metrics.
+        """Calculate Metrics.
+
+        The computed metrics includes Intersection over Union (IoU), Accuracy, Precision, Recall and
+        ROC-AUC.
 
         Args:
             pred_mask (np.array): Predicted segmentation mask.
@@ -377,8 +389,10 @@ class PrithviSegmentationModule(pl.LightningModule):
             dict: A dictionary containing 'iou', 'overall_accuracy', and
                 'accuracy_per_class', 'precision_per_class' and 'recall_per_class'.
         """
+        prediction_proba = torch.nn.functional.softmax(pred_mask, dim=1)[:, 1, :, :]
         pred_mask = torch.argmax(pred_mask, dim=1)
         no_ignore = gt_mask.ne(self.ignore_index).to(self.device)
+        prediction_proba = prediction_proba.masked_select(no_ignore).cpu().numpy()
         pred_mask = pred_mask.masked_select(no_ignore).cpu().numpy()
         gt_mask = gt_mask.masked_select(no_ignore).cpu().numpy()
         classes = np.unique(np.concatenate((gt_mask, pred_mask)))
@@ -422,8 +436,9 @@ class PrithviSegmentationModule(pl.LightningModule):
         # Overall IoU and accuracy
         mean_iou = np.mean(iou_per_class) if iou_per_class else 0.0
         overall_accuracy = np.sum(pred_mask == gt_mask) / gt_mask.size
-
+        roc_auc = metrics.roc_auc_score(gt_mask, prediction_proba)
         return {
+            "roc_auc": roc_auc,
             "iou": mean_iou,
             "acc": overall_accuracy,
             "acc_per_class": accuracy_per_class,
@@ -632,78 +647,6 @@ def main(cfg: DictConfig) -> None:
         trainer = pl.Trainer(accelerator=get_device())
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
-
-    elif cfg.mode == "sliding_inference":
-        model = PrithviSegmentationModule.load_from_checkpoint(
-            cfg.checkpoint_path,
-            image_size=IM_SIZE,
-            learning_rate=cfg.train.learning_rate,
-            freeze_backbone=cfg.model.freeze_backbone,
-            num_classes=cfg.model.num_classes,
-            temporal_step=cfg.dataloader.temporal_dim,
-            class_weights=cfg.train.class_weights,
-            ignore_index=cfg.train.ignore_index,
-        )
-        model.eval()
-        infer_filepath = os.path.join(root_dir, cfg.test_filepath)
-        assert (
-            os.path.splitext(infer_filepath)[-1] == ".json"
-        ), f"Test file path expects a json file but got {infer_filepath}"
-        output_dir = os.path.join(root_dir, "predictions")
-        os.makedirs(output_dir, exist_ok=True)
-        with open(os.path.join(infer_filepath)) as json_file:
-            hls_dataset = json.load(json_file)
-        for key, hls_tile_path in tqdm(
-            hls_dataset.items(), desc="Processing HLS Dataset"
-        ):
-            try:
-                hls_tile, _ = process_data(
-                    hls_tile_path,
-                    None,
-                    bands=cfg.dataloader.bands,
-                    no_data_value=cfg.dataloader.no_data_value,
-                    constant_multiplier=cfg.dataloader.constant_multiplier,
-                    mask_cloud=cfg.test.mask_cloud,
-                    replace_label=cfg.dataloader.replace_label,
-                    reduce_to_zero=cfg.dataloader.reduce_to_zero,
-                )
-            except rasterio.RasterioIOError:
-                continue
-            nan_mask = hls_tile == cfg.dataloader.no_data_value
-            nan_mask = np.any(nan_mask, axis=0).astype(int)
-            hls_tile, _ = process_and_augment(
-                hls_tile,
-                None,
-                mean=cfg.dataloader.mean,
-                std=cfg.dataloader.std,
-                temporal_size=cfg.dataloader.temporal_dim,
-                augment=False,
-            )
-            prediction = sliding_window_inference(
-                hls_tile,
-                model,
-                window_size=(cfg.test.img_size, cfg.test.img_size),
-                stride=cfg.test.stride,
-                batch_size=cfg.train.batch_size,
-                device=get_device(),
-            )
-            prediction = np.where(nan_mask == 1, np.nan, prediction)
-            prediction_filename = os.path.join(output_dir, f"{key}_prediction.tif")
-            with rasterio.open(hls_tile_path["tiles"]["B02_0"]) as src:
-                crs = src.crs
-                transform = src.transform
-            with rasterio.open(
-                prediction_filename,
-                "w",
-                driver="GTiff",
-                height=prediction.shape[0],
-                width=prediction.shape[1],
-                count=1,
-                dtype=str(prediction.dtype),
-                crs=crs,
-                transform=transform,
-            ) as dst:
-                dst.write(prediction, 1)
 
     elif cfg.mode == "sliding_inference":
         model = PrithviSegmentationModule.load_from_checkpoint(
