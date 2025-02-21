@@ -389,7 +389,9 @@ class PrithviSegmentationModule(pl.LightningModule):
             dict: A dictionary containing 'iou', 'overall_accuracy', and
                 'accuracy_per_class', 'precision_per_class' and 'recall_per_class'.
         """
-        prediction_proba = torch.nn.functional.softmax(pred_mask, dim=1)[:, 1, :, :]
+        prediction_proba = torch.nn.functional.softmax(pred_mask.detach(), dim=1)[
+            :, 1, :, :
+        ]
         pred_mask = torch.argmax(pred_mask, dim=1)
         no_ignore = gt_mask.ne(self.ignore_index).to(self.device)
         prediction_proba = prediction_proba.masked_select(no_ignore).cpu().numpy()
