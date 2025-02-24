@@ -80,7 +80,7 @@ def create_and_save_chips_with_seg_maps(
         chip_size (int): Size of each chip.
         output_directory (str): Directory where the chips and segmentation maps will be
             saved.
-        no_data_value (int): Value to use for no data areas in the segmentation maps.
+        no_data_value (int): Value to use for no data areas in the chips.
         src_crs (int): CRS of points in `df`
         mask_types (list[str]): Types of masking to perform.
         mask_decoder (Callable): Function to use to process/extract actual mask values
@@ -158,8 +158,12 @@ def create_and_save_chips_with_seg_maps(
         if chip.where(chip != no_data_value).count().values == 0:
             continue
         seg_map = create_segmentation_map(chip, df, window_size)
-        if seg_map.where(seg_map != no_data_value).count().values == 0:
+        valid_mask = (chip != no_data_value).any(dim="band").astype(np.uint8)
+        seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
+        seg_map = seg_map.where(valid_mask, seg_no_data_value)
+        if seg_map.where(seg_map != seg_no_data_value).count().values == 0:
             continue
+
         seg_maps.append(seg_map_name)
         seg_map.rio.to_raster(seg_map_filename)
         chips.append(chip_name)

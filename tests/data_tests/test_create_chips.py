@@ -6,7 +6,11 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from instageo.data.data_pipeline import apply_mask, create_and_save_chips_with_seg_maps
+from instageo.data.data_pipeline import (
+    NO_DATA_VALUES,
+    apply_mask,
+    create_and_save_chips_with_seg_maps,
+)
 from instageo.data.hls_utils import decode_fmask_value, open_mf_tiff_dataset
 
 
@@ -23,7 +27,7 @@ def test_create_chips(setup_and_teardown_output_dir):
     fmask_path = "tests/data/fmask.tif"
     chip_size = 64
     output_directory = "/tmp/output"
-    no_data_value = -1
+    no_data_value = NO_DATA_VALUES.get("HLS")
     df = pd.read_csv("tests/data/sample_4326.csv")
     df["date"] = pd.to_datetime("2020-01-01")
     os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
@@ -65,6 +69,43 @@ def test_create_chips(setup_and_teardown_output_dir):
         assert np.unique(chip.band_data).size > 1
         assert seg_map.band_data.shape == (1, 64, 64)
         assert np.unique(seg_map.band_data).size > 1
+        chip_invalid_mask = (chip == no_data_value).any(dim="band").to_array().values
+        seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
+        seg_invalid_mask = (seg_map == seg_no_data_value).to_array().values[0]
+        assert np.all(seg_invalid_mask[chip_invalid_mask])
+
+
+def test_segmentation_map_masking(setup_and_teardown_output_dir):
+    geotiff_path = "tests/data/HLS.S30.T38PMB.2022145T072618.v2.0.B02.tif"
+    fmask_path = "tests/data/fmask.tif"
+    chip_size = 224
+    output_directory = "/tmp/output"
+    no_data_value = NO_DATA_VALUES.get("HLS")
+    df = pd.read_csv("tests/data/sample_4326.csv")
+    df["date"] = pd.to_datetime("2020-01-01")
+    os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
+    os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
+    chips, labels = create_and_save_chips_with_seg_maps(
+        data_reader=open_mf_tiff_dataset,
+        mask_fn=apply_mask,
+        processing_method="download",
+        tile_dict={
+            "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
+            "fmasks": {"Fmask_0": fmask_path},
+        },
+        data_source="HLS",
+        df=df,
+        chip_size=chip_size,
+        output_directory=output_directory,
+        no_data_value=no_data_value,
+        src_crs=4326,
+        mask_decoder=decode_fmask_value,
+        mask_types=[],
+        masking_strategy="any",
+        window_size=0,
+    )
+    num_chips = len(chips)
+    assert num_chips == 0
 
 
 @pytest.mark.parametrize("window_size", [0, 3, 5, 7])
