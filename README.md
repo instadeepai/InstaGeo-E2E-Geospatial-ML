@@ -1,13 +1,21 @@
-# InstaGeo
+<picture>
+  <source srcset="assets/logo-dark.png" media="(prefers-color-scheme: dark)">
+  <img src="assets/logo.png" alt="Logo">
+</picture>
 
 ## Overview
 
-InstaGeo is geospatial deep learning Python package designed to facilitate geospatial machine learning using satellite imagery data from [Harmonized Landsat and Sentinel-2 (HLS)](https://hls.gsfc.nasa.gov/) Data Product and [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M) geospatial foundational model. It consists of three core components: Data, Model, and Apps, each tailored to support various aspects of geospatial data retrieval, manipulation, preprocessing, model training, and inference serving.
+InstaGeo is geospatial deep learning Python package designed to facilitate geospatial machine learning using satellite imagery data from :
+* [Harmonized Landsat and Sentinel-2 (HLS)](https://hls.gsfc.nasa.gov/) Data Product
+* Sentinel-2 which is part of [ESA](https://www.esa.int/)'s [Copernicus Program](https://www.copernicus.eu/en), with data extracted from this [Microsoft Planetary Computer (MPC)](https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a) product.
+* Sentinel-1 which is also part of [ESA](https://www.esa.int/)'s [Copernicus Program](https://www.copernicus.eu/en), with data extracted from this [Microsoft Planetary Computer (MPC)](https://planetarycomputer.microsoft.com/dataset/sentinel-1-rtc) product.
+
+It leverages the [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M) geospatial foundational model and consists of three core components: Data, Model, and Apps, each tailored to support various aspects of geospatial data retrieval, manipulation, preprocessing, model training, and inference serving.
 
 ### Components
 
-1. [**Data**](./instageo/data/README.md): Focuses on retrieving, manipulating, and processing Harmonized Landsat Sentinel-2 (HLS) data for classification and segmentation tasks such as disaster mapping, crop classification, and breeding ground prediction.
-2. [**Model**](./instageo/model/README.md): Centers around data loading, training, and evaluating models, particularly leveraging the Prithvi model for various modeling tasks. It includes a sliding-window feature that allows inference to be run on large inputs.
+1. [**Data**](./instageo/data/README.md): Focuses on retrieving, manipulating, and processing satellite data for classification and segmentation tasks such as disaster mapping, crop classification, and breeding ground prediction.
+2. [**Model**](./instageo/model/README.md): Centers around data loading, training, and evaluating models, particularly leveraging the Prithvi model for various modeling tasks. It includes a sliding-window feature that allows inference to be run on large inputs and a chip inference feature that performs efficient and optimized inference on geospatial image "chips" using a pre-trained model.
 3. [**Apps**](./instageo/apps/README.md): Aims to operationalize models developed in the Model component for practical applications.
 
 ## Installation
@@ -30,7 +38,7 @@ pytest --verbose .
 
 ### Data Component
 
-- **HLS Data Retrieval**: InstaGeo efficiently searches for and download Sentinel-2 and Landsat 8/9 multi-spectral earth observation images from the HLS data product.
+- **Data Retrieval**: InstaGeo efficiently searches for and download multi-spectral earth observation images from different satellite data products (HLS, Sentinel-2 and Sentinel-1).
 
 - **Create Chips and Segmentation Maps**: InstaGeo breaks down large satellite image tiles into smaller, manageable patches (referred to as "chips") suitable for deep learning model training. It also generate segmentation maps, which serve as targets for training, by categorizing each pixel in the chips.
 
@@ -38,11 +46,14 @@ pytest --verbose .
 
 - **Training Custom Models**: Utilize the Prithvi geospatial foundational model as a backbone to develop custom models tailored for precise geospatial applications. These applications include, but are not limited to, flood mapping for emergency response planning, crop classification for agricultural management, and locust breeding ground prediction to address food security.
 
-- **Inference on Large-scale Geospatial Data**: Perform inference using the models that have been trained on 'chips' (typically measuring 224 x 224 pixels) on expansive HLS tiles, which measure 3660 x 3660 pixels.
+- **Inference on Large-scale Geospatial Data**: Perform inference using the models that have been trained on 'chips' (typically measuring 224 x 224 pixels) on expansive tiles, which can measure 3660 x 3660 pixels.
+
+- **Chip Inference**:
+Perform efficient and optimized inference on geospatial image "chips" using a pre-trained model. It processes the data in batches, makes predictions, and saves the results as TIFF files with the appropriate geospatial metadata. It uses GPU (if available) and multithreading to save files faster.
 
 ### Apps Component
 
-- **Operationalize Models**: Once data has been created and model trained, deploy model for use using the Apps components. HLS tile predictions can be overlaid and visualized on interactive maps.
+- **Operationalize Models**: Once data has been created and model trained, deploy model for use using the Apps components. Tile predictions can be overlaid and visualized on interactive maps.
 
 ### Putting It All Together - Locust Breeding Ground Prediction
 See [InstGeo_Demo](notebooks/InstaGeo_Demo.ipynb) notebook for an end-to-end demo.
@@ -68,10 +79,8 @@ python -m "instageo.data.chip_creator" \
     --output_directory="locust_breeding/train" \
     --min_count=1 \
     --chip_size=224 \
-    --no_data_value=-1 \
     --temporal_tolerance=3 \
     --temporal_step=30 \
-    --mask_cloud=False \
     --num_steps=3
 ```
 
@@ -82,10 +91,8 @@ python -m "instageo.data.chip_creator" \
     --output_directory="locust_breeding/val" \
     --min_count=1 \
     --chip_size=224 \
-    --no_data_value=-1 \
     --temporal_tolerance=3 \
     --temporal_step=30 \
-    --mask_cloud=False \
     --num_steps=3
 ```
 
@@ -96,10 +103,8 @@ python -m "instageo.data.chip_creator" \
     --output_directory="locust_breeding/test" \
     --min_count=1 \
     --chip_size=224 \
-    --no_data_value=-1 \
     --temporal_tolerance=3 \
     --temporal_step=30 \
-    --mask_cloud=False \
     --num_steps=3
 ```
 
@@ -145,11 +150,10 @@ python -m "instageo.data.chip_creator" \
     --dataframe_path="gs://instageo/utils/africa_prediction_template.csv" \
     --output_directory="inference/20223-01" \
     --min_count=1 \
-    --no_data_value=-1 \
     --temporal_tolerance=3 \
     --temporal_step=30 \
     --num_steps=3 \
-    --download_only
+    --processing_method="download-only"
 ```
 
 - Inference
@@ -159,7 +163,7 @@ python -m instageo.model.run --config-name=locust \
     test_filepath='hls_dataset.json' \
     train.batch_size=16 \
     checkpoint_path='instageo-data/outputs/2024-03-01/09-16-30/instageo_epoch-10-val_iou-0.70.ckpt' \
-    mode=predict
+    mode=sliding_inference
 ```
 
 #### Visualize Predictions

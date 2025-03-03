@@ -74,9 +74,9 @@ flags.DEFINE_integer(
     "num_steps",
     3,
     """Number of temporal steps. When `is_time_series_task` is set to True, an attempt
-    will be made to retrieve `num_steps` HLS chips prior to the observation date.
+    will be made to retrieve `num_steps` chips prior to the observation date.
     Otherwise, the value of `num_steps` will default to 1 and an attempt will be made to retrieve
-    the HLS chip corresponding to the observation date.
+    the chip corresponding to the observation date.
     """,
     lower_bound=1,
 )
@@ -114,7 +114,7 @@ flags.DEFINE_enum(
     ["cog", "download", "download-only"],
     """Method to use to process the tiles:
     - "cog" corresponds to creating the chips by utilizing the Cloud Optimized GeoTIFFs.
-    - "download" corresponds to downloading entire HLS tiles to be used for creating
+    - "download" corresponds to downloading entire tiles to be used for creating
     the chips.
     - "download-only" corresponds to a simple download of the tiles without further
     processing.""",
