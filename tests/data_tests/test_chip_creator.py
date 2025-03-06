@@ -36,10 +36,16 @@ def setup_and_teardown_output_dir():
 
 @pytest.mark.auth
 @pytest.mark.parametrize(
-    "data_source, chip_counts, tile_counts", [("HLS", 4, 28), ("S2", 3, 3)]
+    "data_source, temporal_tolerance, chip_counts, tile_counts, num_bands",
+    [("HLS", "1", 4, 28, 6), ("S2", "1", 3, 3, 6), ("S1", "3", 2, None, 2)],
 )
 def test_chip_creator(
-    setup_and_teardown_output_dir, data_source, chip_counts, tile_counts
+    setup_and_teardown_output_dir,
+    data_source,
+    temporal_tolerance,
+    chip_counts,
+    tile_counts,
+    num_bands,
 ):
     output_directory = "/tmp/csv_chip_creator"
     argv = [
@@ -53,7 +59,7 @@ def test_chip_creator(
         "--chip_size",
         "512",
         "--temporal_tolerance",
-        "1",
+        temporal_tolerance,
         "--temporal_step",
         "30",
         "--num_steps",
@@ -79,20 +85,22 @@ def test_chip_creator(
     seg_map_path = os.path.join(output_directory, "seg_maps", seg_maps[0])
     chip = xr.open_dataset(chip_path)
     seg_map = xr.open_dataset(seg_map_path)
-    assert chip.band_data.shape == (6, 512, 512)
+    assert chip.band_data.shape == (num_bands, 512, 512)
     assert np.unique(chip.band_data).size > 1
     assert seg_map.band_data.shape == (1, 512, 512)
     assert np.unique(seg_map.band_data).size > 1
-    assert (
-        len(
-            pd.read_csv(
-                os.path.join(
-                    output_directory, f"{data_source.lower()}_granules_to_download.csv"
+    if data_source != "S1":
+        assert (
+            len(
+                pd.read_csv(
+                    os.path.join(
+                        output_directory,
+                        f"{data_source.lower()}_granules_to_download.csv",
+                    )
                 )
             )
+            == tile_counts
         )
-        == tile_counts
-    )
 
 
 @pytest.mark.auth

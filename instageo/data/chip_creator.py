@@ -32,7 +32,7 @@ from absl import app, flags, logging
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from instageo.data import hls_utils, s2_utils
+from instageo.data import hls_utils, s1_utils, s2_utils
 from instageo.data.data_pipeline import (
     MASK_DECODING_POS,
     NO_DATA_VALUES,
@@ -90,7 +90,7 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
-flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2"], "Data source to use.")
+flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2", "S1"], "Data source to use.")
 flags.DEFINE_integer(
     "cloud_coverage",
     10,
@@ -337,7 +337,7 @@ def main(argv: Any) -> None:
         all_seg_maps = []
         os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
         os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-        s2_pystac_client = get_pystac_client(s2_utils.API_URL)
+        s2_pystac_client = get_pystac_client()
         with dask.distributed.Client() as client:
             for key, tile_dict in tqdm(
                 s2_dataset.items(), desc="Processing Sentinel-2 Dataset"
@@ -381,9 +381,92 @@ def main(argv: Any) -> None:
         pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
             os.path.join(FLAGS.output_directory, "s2_chips_dataset.csv")
         )
+
+    elif FLAGS.data_source == "S1":
+        logging.info("Using Sentinel-1 pipeline")
+        s1_pystac_client = get_pystac_client()
+        s1_dataset_with_items: Any = {}
+        if not (
+            os.path.exists(os.path.join(FLAGS.output_directory, "s1_dataset.json"))
+        ):
+            logging.info("Creating S1 dataset JSON.")
+            logging.info("Retrieving S1 tile ID for each observation.")
+
+            sub_data_with_tiles = s1_utils.add_s1_items(
+                s1_pystac_client,
+                sub_data,
+                src_crs=FLAGS.src_crs,
+                num_steps=FLAGS.num_steps,
+                temporal_step=FLAGS.temporal_step,
+                temporal_tolerance=FLAGS.temporal_tolerance,
+            )
+
+            logging.info("Retrieving S1 tiles that will be loaded.")
+            s1_dataset, s1_dataset_with_items = s1_utils.create_s1_dataset(
+                sub_data_with_tiles
+            )
+            with open(
+                os.path.join(FLAGS.output_directory, "s1_dataset.json"), "w"
+            ) as json_file:
+                json.dump(s1_dataset, json_file, indent=4)
+        else:
+            logging.info("S1 dataset JSON already created")
+            with open(
+                os.path.join(FLAGS.output_directory, "s1_dataset.json")
+            ) as json_file:
+                s1_dataset = json.load(json_file)
+                logging.info("Loading PySTAC items from dataset")
+                s1_dataset_with_items = s1_utils.load_pystac_items_from_dataset(
+                    s1_dataset
+                )
+        logging.info("Creating Chips and Segmentation Maps")
+        all_chips = []
+        all_seg_maps = []
+        os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
+        os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
+        FLAGS.processing_method = "cog"
+        with dask.distributed.Client() as client:
+            for key, tile_dict in tqdm(
+                s1_dataset_with_items.items(), desc="Processing Sentinel-1 Dataset"
+            ):
+                obsv_date_str, tile_id, _ = key.split("_")
+                obsv_data = sub_data[
+                    (sub_data["date"] == pd.to_datetime(obsv_date_str))
+                    & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
+                ]
+                try:
+                    chips, seg_maps = create_and_save_chips_with_seg_maps(
+                        data_reader=s1_utils.open_s1_cogs,
+                        mask_fn=apply_mask,
+                        processing_method=FLAGS.processing_method,
+                        tile_dict=tile_dict,
+                        data_source=FLAGS.data_source,
+                        df=obsv_data,
+                        chip_size=FLAGS.chip_size,
+                        output_directory=FLAGS.output_directory,
+                        no_data_value=NO_DATA_VALUES.get("S1"),
+                        src_crs=FLAGS.src_crs,
+                        mask_decoder=s1_utils.decode_mask,
+                        mask_types=[],
+                        masking_strategy=FLAGS.masking_strategy,
+                        window_size=FLAGS.window_size,
+                    )
+                    all_chips.extend(chips)
+                    all_seg_maps.extend(seg_maps)
+                except rasterio.errors.RasterioIOError as e:
+                    logging.error(
+                        f"Error {e} when reading dataset containing: {tile_dict}"
+                    )
+                except IndexError as e:
+                    logging.error(f"Error {e} when processing {key}")
+
+        logging.info("Saving dataframe of chips and segmentation maps.")
+        pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
+            os.path.join(FLAGS.output_directory, "s1_chips_dataset.csv")
+        )
     else:
         raise ValueError(
-            "Error: data_source value is not correct. Please enter 'HLS' or 'S2'."
+            "Error: data_source value is not correct. Please enter 'HLS' or 'S2' or 'S1'."
         )
 
 

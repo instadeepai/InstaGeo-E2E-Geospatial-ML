@@ -42,4 +42,5 @@ class NoDataValues(BaseSettings):
 
     HLS: int = -9999
     S2: int = 0
+    S1: int = -1
     SEG_MAP: int = -1

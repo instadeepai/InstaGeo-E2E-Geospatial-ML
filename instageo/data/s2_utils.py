@@ -30,20 +30,26 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import planetary_computer
 import rasterio
 import requests  # type: ignore
 import stackstac
 import xarray as xr
 from absl import logging
 from pystac.item import Item
+from pystac.item_collection import ItemCollection
 from pystac_client import Client, ItemSearch
 from rasterio.crs import CRS
 from tqdm import tqdm
 
-from instageo.data.data_pipeline import NO_DATA_VALUES, get_tile_info, make_valid_bbox
+from instageo.data.data_pipeline import (
+    NO_DATA_VALUES,
+    adjust_dims,
+    get_tile_info,
+    make_valid_bbox,
+)
 
 BLOCKSIZE = 512
-API_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 COLLECTION = ["sentinel-2-l2a"]
 BANDS_ASSET = ["B02", "B03", "B04", "B8A", "B11", "B12"]
 SCL_ASSET = ["SCL"]
@@ -771,7 +777,7 @@ def search_and_open_s2_cogs(
     # Load the bands for all timesteps and stack them in a data array
     assets_to_load = BANDS_ASSET + SCL_ASSET if load_masks else BANDS_ASSET
     stacked_items = stackstac.stack(
-        results,
+        planetary_computer.sign(ItemCollection(results)),
         assets=assets_to_load,
         chunksize=BLOCKSIZE,
         properties=False,
@@ -799,7 +805,7 @@ def get_item_search_objs(client: Client, tile_dict: dict[str, Any]) -> List[Item
     Returns:
        List[ItemSearch]: A list of search objects.
     """
-    s2_ids = list(map(lambda path: path.split("/")[2], tile_dict["granules"]))
+    s2_ids = list(map(lambda path: path.split("/")[-1], tile_dict["granules"]))
     dates = [
         datetime.strptime(id.split("_")[2].split("T")[0], "%Y%m%d").strftime("%Y-%m-%d")
         for id in s2_ids
@@ -830,27 +836,3 @@ def get_item_collection(search_objs: List[ItemSearch]) -> List[Item]:
        List[Item]: A list of items from the search objects.
     """
     return [list(search_obj.item_collection())[0] for search_obj in search_objs]
-
-
-def adjust_dims(data: xr.DataArray) -> xr.DataArray:
-    """Adjusts dimensions of a dataarray.
-
-    This function stacks the "time" and "band" dims over a new "band" dim and reorders
-    the dataarray dims into ("band","y","x").
-
-    Args:
-        data (xr.DataArray): A dataarray for which dimensions need to be adjusted.
-
-    Returns:
-        xr.DataArray: A 3D xarray DataArray without 'time' dimension.
-    """
-    num_bands = data["band"].size
-    data = data.stack(time_band=("time", "band"))
-    new_bands_indices = [
-        f"{band}_{i//num_bands}"
-        for i, (_, band) in enumerate(data.coords["time_band"].values)
-    ]
-    data = data.drop_vars(["time_band", "time", "band"])
-    data.coords["time_band"] = new_bands_indices
-    data = data.rename({"time_band": "band"}).transpose("band", "y", "x")
-    return data

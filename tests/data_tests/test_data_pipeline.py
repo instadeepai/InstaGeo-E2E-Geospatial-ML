@@ -2,12 +2,18 @@ import os
 import shutil
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 from shapely.geometry import Point
 
-from instageo.data.data_pipeline import get_chip_coords, get_tile_info, get_tiles
+from instageo.data.data_pipeline import (
+    adjust_dims,
+    get_chip_coords,
+    get_tile_info,
+    get_tiles,
+)
 
 
 @pytest.fixture
@@ -139,3 +145,26 @@ def test_get_tile_info(observation_data):
         ("38PMB", ["2022-06-08", "2022-06-03", "2022-05-29"]),
         ("38PMB", ["2022-06-09", "2022-06-04", "2022-05-30"]),
     ]
+
+
+def test_adjust_dims():
+    """Tests dimensionality of a chip array."""
+
+    data = np.random.rand(3, 6, 100, 100)
+    dummy_chip = xr.DataArray(
+        data,
+        dims=("time", "band", "y", "x"),
+        coords={
+            "time": np.arange(3),
+            "band": np.arange(6),
+            "y": np.arange(100),
+            "x": np.arange(100),
+        },
+    )
+    assert dummy_chip.dims == ("time", "band", "y", "x")
+    assert dummy_chip.shape == (3, 6, 100, 100)
+
+    # Collapse time dimension
+    dummy_chip = adjust_dims(dummy_chip)
+    assert dummy_chip.dims == ("band", "y", "x")
+    assert dummy_chip.shape == (18, 100, 100)

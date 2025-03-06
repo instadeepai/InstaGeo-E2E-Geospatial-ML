@@ -28,7 +28,6 @@ import geopandas as gpd
 import mgrs
 import numpy as np
 import pandas as pd
-import planetary_computer
 import xarray as xr
 from pyproj import Transformer
 from pystac_client import Client
@@ -44,6 +43,9 @@ MASK_DECODING_POS: dict[str, dict] = {
 
 # No data values
 NO_DATA_VALUES = NoDataValues().model_dump()
+
+# Microsoft Planetary Computer STAC API
+MPC_STAC_API_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
 
 def mask_segmentation_map(
@@ -127,17 +129,23 @@ def create_and_save_chips_with_seg_maps(
     ]
     os.makedirs(output_directory, exist_ok=True)
     # TODO: handle chip names more gracefully
-    tile_name_splits = (
-        tile_dict["tiles"]["B02_0"].split(".")
-        if data_source == "HLS"
-        else tile_dict["granules"][0].split(".")[0].split("/")[-1].split("_")
-    )
-    tile_id = (
-        f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
-        if data_source == "HLS"
-        else f"{tile_name_splits[0]}_{tile_name_splits[1]}_"
-        f"{tile_name_splits[5]}_{tile_name_splits[2]}"
-    )
+    if data_source == "HLS":
+        tile_name_splits = tile_dict["tiles"]["B02_0"].split(".")
+        tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
+    elif data_source == "S2":
+        tile_name_splits = (
+            tile_dict["granules"][0].split(".")[0].split("/")[-1].split("_")
+        )
+        tile_id = (
+            f"{tile_name_splits[0]}_{tile_name_splits[1]}_"
+            f"{tile_name_splits[5]}_{tile_name_splits[2]}"
+        )
+    elif data_source == "S1":
+        tile_name_splits = tile_dict["items"][0].id.split("_")
+        tile_id = "_".join(
+            tile_name_splits[0:2] + [tile_name_splits[4]] + tile_name_splits[6:9]
+        )
+
     date_id = df.iloc[0]["date"].strftime("%Y%m%d")
     chips = []
     seg_maps: list[str | None] = []
@@ -444,13 +452,34 @@ def make_valid_bbox(
         return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
 
 
-def get_pystac_client(url: str) -> Client:
-    """Opens a pystac_client Client instance using a STAC Catalog URL.
-
-    Args:
-        url (str): STAC Catalog URL.
+def get_pystac_client() -> Client:
+    """Opens a pystac_client Client instance using MPC STAC API URL.
 
     Returns:
         Client : A client with an established connection to the STAC Catalog.
     """
-    return Client.open(url, modifier=planetary_computer.sign_inplace)
+    return Client.open(MPC_STAC_API_URL)
+
+
+def adjust_dims(data: xr.DataArray) -> xr.DataArray:
+    """Adjusts dimensions of a dataarray.
+
+    This function stacks the "time" and "band" dims over a new "band" dim and reorders
+    the dataarray dims into ("band","y","x").
+
+    Args:
+        data (xr.DataArray): A dataarray for which dimensions need to be adjusted.
+
+    Returns:
+        xr.DataArray: A 3D xarray DataArray without 'time' dimension.
+    """
+    num_bands = data["band"].size
+    data = data.stack(time_band=("time", "band"))
+    new_bands_indices = [
+        f"{band}_{i//num_bands}"
+        for i, (_, band) in enumerate(data.coords["time_band"].values)
+    ]
+    data = data.drop_vars(["time_band", "time", "band"])
+    data.coords["time_band"] = new_bands_indices
+    data = data.rename({"time_band": "band"}).transpose("band", "y", "x")
+    return data
