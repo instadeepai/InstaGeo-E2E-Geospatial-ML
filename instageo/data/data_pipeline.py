@@ -46,6 +46,28 @@ MASK_DECODING_POS: dict[str, dict] = {
 NO_DATA_VALUES = NoDataValues().model_dump()
 
 
+def mask_segmentation_map(
+    chip: xr.DataArray, seg_map: xr.DataArray, no_data_value: xr.DataArray
+) -> xr.DataArray:
+    """Masks segmentation map.
+
+    Checks for no_data_value in the chip and masks the segmentation values
+    that correspond to no data value in the chip (at least for one band).
+
+    Args:
+        seg_map (DataArray): Segmentation map to mask
+        chip (DataArray): Chip that correspond to the segmentation map
+        no_data_value (int): Value to use for no data areas in the chips.
+
+    Returns:
+        The segmentation map after masking
+    """
+    valid_mask = (chip != no_data_value).all(dim="band").astype(np.uint8)
+    seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
+    seg_map = seg_map.where(valid_mask, seg_no_data_value)
+    return seg_map
+
+
 def create_and_save_chips_with_seg_maps(
     data_reader: Callable | partial,
     mask_fn: Callable,
@@ -158,9 +180,8 @@ def create_and_save_chips_with_seg_maps(
         if chip.where(chip != no_data_value).count().values == 0:
             continue
         seg_map = create_segmentation_map(chip, df, window_size)
-        valid_mask = (chip != no_data_value).any(dim="band").astype(np.uint8)
+        seg_map = mask_segmentation_map(chip, seg_map, no_data_value)
         seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
-        seg_map = seg_map.where(valid_mask, seg_no_data_value)
         if seg_map.where(seg_map != seg_no_data_value).count().values == 0:
             continue
 

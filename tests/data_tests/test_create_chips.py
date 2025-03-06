@@ -4,12 +4,14 @@ import shutil
 import numpy as np
 import pandas as pd
 import pytest
+import rioxarray
 import xarray as xr
 
 from instageo.data.data_pipeline import (
     NO_DATA_VALUES,
     apply_mask,
     create_and_save_chips_with_seg_maps,
+    mask_segmentation_map,
 )
 from instageo.data.hls_utils import decode_fmask_value, open_mf_tiff_dataset
 
@@ -75,37 +77,56 @@ def test_create_chips(setup_and_teardown_output_dir):
         assert np.all(seg_invalid_mask[chip_invalid_mask])
 
 
-def test_segmentation_map_masking(setup_and_teardown_output_dir):
-    geotiff_path = "tests/data/HLS.S30.T38PMB.2022145T072618.v2.0.B02.tif"
-    fmask_path = "tests/data/fmask.tif"
-    chip_size = 224
-    output_directory = "/tmp/output"
+def test_segmentation_map_masking():
+    chip_path = "tests/data/chip_178_022.tif"
+    seg_map_path = "tests/data/chip_178_022.mask.tif"
     no_data_value = NO_DATA_VALUES.get("HLS")
-    df = pd.read_csv("tests/data/sample_4326.csv")
-    df["date"] = pd.to_datetime("2020-01-01")
-    os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
-    os.makedirs(os.path.join(output_directory, "seg_maps"), exist_ok=True)
-    chips, labels = create_and_save_chips_with_seg_maps(
-        data_reader=open_mf_tiff_dataset,
-        mask_fn=apply_mask,
-        processing_method="download",
-        tile_dict={
-            "tiles": {"B02_0": geotiff_path, "B04_0": geotiff_path},
-            "fmasks": {"Fmask_0": fmask_path},
-        },
-        data_source="HLS",
-        df=df,
-        chip_size=chip_size,
-        output_directory=output_directory,
-        no_data_value=no_data_value,
-        src_crs=4326,
-        mask_decoder=decode_fmask_value,
-        mask_types=[],
-        masking_strategy="any",
-        window_size=0,
+    chip = rioxarray.open_rasterio(chip_path)
+    seg_map = rioxarray.open_rasterio(seg_map_path)
+    seg_map = seg_map.assign_coords(x=chip.x.values, y=chip.y.values)
+    seg_map = mask_segmentation_map(chip, seg_map, no_data_value)
+    seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
+    assert seg_map.where(seg_map != seg_no_data_value).count().values == 0
+
+
+def test_segmentation_map_masking_pass():
+    chip = np.array([[1, 2, 3, 4], [1, 3, -9, 7], [6, 7, 3, 9]])
+    chip = xr.DataArray(
+        chip,
+        dims=["band", "x"],
+        coords={"band": np.arange(chip.shape[0]), "x": np.arange(chip.shape[1])},
     )
-    num_chips = len(chips)
-    assert num_chips == 0
+    seg_map = np.array([[1, -1, 1, 2]])
+    seg_map = xr.DataArray(
+        seg_map,
+        dims=["band", "x"],
+        coords={"band": np.arange(seg_map.shape[0]), "x": np.arange(seg_map.shape[1])},
+    )
+    seg_no_data_value = -1
+    chip_no_data_value = -9
+    seg_map = mask_segmentation_map(chip, seg_map, no_data_value=chip_no_data_value)
+    assert seg_map.where(seg_map != seg_no_data_value).count().values > 0
+    np.testing.assert_array_equal(np.array([[1, -1, -1, 2]]), seg_map.values)
+
+
+def test_segmentation_map_masking_fail():
+    chip = np.array([[1, 2, 3, 4], [-9, -9, -9, -9], [6, 7, 3, 9]])
+    chip = xr.DataArray(
+        chip,
+        dims=["band", "x"],
+        coords={"band": np.arange(chip.shape[0]), "x": np.arange(chip.shape[1])},
+    )
+    seg_map = np.array([[1, -1, 1, 2]])
+    seg_map = xr.DataArray(
+        seg_map,
+        dims=["band", "x"],
+        coords={"band": np.arange(seg_map.shape[0]), "x": np.arange(seg_map.shape[1])},
+    )
+    seg_no_data_value = -1
+    chip_no_data_value = -9
+    seg_map = mask_segmentation_map(chip, seg_map, no_data_value=chip_no_data_value)
+    assert seg_map.where(seg_map != seg_no_data_value).count().values == 0
+    np.testing.assert_array_equal(np.array([[-1, -1, -1, -1]]), seg_map.values)
 
 
 @pytest.mark.parametrize("window_size", [0, 3, 5, 7])
