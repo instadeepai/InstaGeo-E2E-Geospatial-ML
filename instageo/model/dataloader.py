@@ -22,17 +22,37 @@
 import os
 import random
 from functools import partial
-from typing import Callable, List, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import rasterio
 import torch
+import xarray as xr
 from absl import logging
 from PIL import Image
 from torchvision import transforms
 
-from instageo.data.hls_utils import open_mf_tiff_dataset
+
+def open_mf_tiff_dataset(band_files: dict[str, Any]) -> xr.Dataset:
+    """Open multiple TIFF files as an xarray Dataset.
+
+    Args:
+        band_files (Dict[str, Dict[str, str]]): A dictionary mapping band names to file paths.
+
+    Returns:
+        (xr.Dataset, xr.Dataset | None, CRS): A tuple of xarray Dataset combining data from all the
+            provided TIFF files, (optionally) the masks, and the CRS
+    """
+    band_paths = list(band_files["tiles"].values())
+    bands_dataset = xr.open_mfdataset(
+        band_paths,
+        concat_dim="band",
+        combine="nested",
+        mask_and_scale=False,  # Scaling will be applied manually
+    )
+    bands_dataset.band_data.attrs["scale_factor"] = 1
+    return bands_dataset
 
 
 def random_crop_and_flip(
@@ -103,7 +123,7 @@ def process_and_augment(
     std: List[float],
     temporal_size: int = 1,
     im_size: int = 224,
-    train: bool = True,
+    augment: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Process and augment the given images and labels.
 
@@ -113,7 +133,7 @@ def process_and_augment(
         mean (List[float]): The mean of each channel in the image
         std (List[float]): The standard deviation of each channel in the image
         temporal_size: The number of temporal steps
-        train: To identify training mode.
+        augment: Flag to perform augmentations in training mode.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A tuple of tensors representing the processed
@@ -125,7 +145,7 @@ def process_and_augment(
     ims = [Image.fromarray(im) for im in ims]
     if y is not None:
         label = Image.fromarray(y.copy().squeeze())
-    if train:
+    if augment:
         ims, label = random_crop_and_flip(ims, label, im_size)
     ims, label = normalize_and_convert_to_tensor(ims, label, mean, std, temporal_size)
     return ims, label
@@ -196,7 +216,7 @@ def process_test(
         mean=mean,
         std=std,
         temporal_size=temporal_size,
-        train=False,
+        augment=False,
     )
 
     img_crops, mask_crops = [], []
@@ -238,7 +258,9 @@ def get_raster_data(
         np.ndarray: Numpy array representing the processed data.
     """
     if isinstance(fname, dict):
-        data, mask, crs = open_mf_tiff_dataset(fname, load_masks=False)
+        # @TODO This is used during sliding window inference so masking and processing needs to
+        # match what is done to chips in data component
+        data = open_mf_tiff_dataset(fname)
         data = data.fillna(no_data_value)
         data = data.band_data.values
     else:
@@ -246,14 +268,6 @@ def get_raster_data(
             data = src.read()
     if (not is_label) and bands:
         data = data[bands, ...]
-    # For some reasons, some few HLS tiles are not scaled in v2.0.
-    # In the following lines, we find and scale them
-    bands = []
-    for band in data:
-        if band.max() > 10:
-            band *= 0.0001
-        bands.append(band)
-    data = np.stack(bands, axis=0)
     return data
 
 
@@ -303,7 +317,35 @@ def process_data(
     return arr_x, arr_y
 
 
-def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str]]:
+def mask_label_with_chip(chips_path: str, labels_path: str) -> bool:
+    """Masks the label raster using a corresponding chip raster.
+
+    Args:
+        chips_path (str): Path to the directory containing chip rasters.
+        labels_path (str): Path to the directory containing label rasters.
+        chips (list): List of chip filenames.
+        seg_maps (list): List of label filenames.
+        idx (int): Index to access a specific chip and label.
+
+    Returns:
+        np.ndarray: The masked label array.
+        bool: Whether all values in the label array are NaN.
+    """
+    with rasterio.open(chips_path) as src:
+        num_steps = max(1, src.count // 6)
+        stacked = src.read([(6 * i) + 1 for i in range(num_steps)])
+        stacked = np.where(stacked == -9999, 0, 1).all(0).astype(int)
+
+    with rasterio.open(labels_path) as src:
+        label = src.read(1)
+        label = np.where(label == -9999, np.nan, label)
+        label = np.where(stacked == 0, np.nan, label)
+
+    all_nan = np.all(np.isnan(label))
+    return all_nan
+
+
+def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, Optional[str]]]:
     """Load data file paths from a CSV file.
 
     Args:
@@ -311,22 +353,32 @@ def load_data_from_csv(fname: str, input_root: str) -> List[Tuple[str, str]]:
         input_root (str): Root directory for input images and labels.
 
     Returns:
-        List[Tuple[str, str]]: A list of tuples, each containing file paths for input
-        image and label image.
+        List[Tuple[str, Optional[str]]]: A list of tuples, each containing file paths for input
+        image and label image. The label image may be None if not present.
     """
-    file_paths = []
+    file_paths: List[Tuple[str, Optional[str]]] = []  # Explicit annotation
+
     data = pd.read_csv(fname)
+    label_present = "Label" in data.columns
+
     for _, row in data.iterrows():
         im_path = os.path.join(input_root, row["Input"])
-        mask_path = os.path.join(input_root, row["Label"])
+        mask_path = os.path.join(input_root, row["Label"]) if label_present else None
+
         if os.path.exists(im_path):
             try:
                 with rasterio.open(im_path) as src:
                     _ = src.crs
-                file_paths.append((im_path, mask_path))
+                if mask_path is not None:
+                    all_nan = mask_label_with_chip(im_path, mask_path)
+                    if not all_nan:
+                        file_paths.append((im_path, mask_path))
+                else:
+                    file_paths.append((im_path, None))  # Ensure explicit `None`
             except Exception as e:
                 logging.error(e)
                 continue
+    print(f"Dropped a total of {len(data) - len(file_paths)} rows")
     return file_paths
 
 
@@ -343,6 +395,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         reduce_to_zero: bool,
         constant_multiplier: float,
         bands: List[int] | None = None,
+        include_filenames: bool = False,
     ):
         """Dataset Class for loading and preprocessing the dataset.
 
@@ -355,6 +408,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             reduce_to_zero (bool): Reduces the label index to start from Zero.
             replace_label (Tuple): Tuple of value to replace and the replacement value.
             constant_multiplier (float): Constant multiplier for image.
+            include_filenames (bool): Flag that determines whether to return filenames.
 
         """
         self.input_root = input_root
@@ -365,6 +419,7 @@ class InstaGeoDataset(torch.utils.data.Dataset):
         self.replace_label = replace_label
         self.reduce_to_zero = reduce_to_zero
         self.constant_multiplier = constant_multiplier
+        self.include_filenames = include_filenames
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Retrieves a sample from dataset.
@@ -386,7 +441,10 @@ class InstaGeoDataset(torch.utils.data.Dataset):
             bands=self.bands,
             constant_multiplier=self.constant_multiplier,
         )
-        return self.preprocess_func(arr_x, arr_y)
+        if self.include_filenames:
+            return self.preprocess_func(arr_x, arr_y), im_fname
+        else:
+            return self.preprocess_func(arr_x, arr_y)
 
     def __len__(self) -> int:
         """Return length of dataset."""

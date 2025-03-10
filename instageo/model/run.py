@@ -43,7 +43,7 @@ from instageo.model.dataloader import (
     process_data,
     process_test,
 )
-from instageo.model.infer_utils import sliding_window_inference
+from instageo.model.infer_utils import chip_inference, sliding_window_inference
 from instageo.model.model import PrithviSeg
 
 pl.seed_everything(seed=1042, workers=True)
@@ -83,6 +83,35 @@ def get_device() -> str:
             device = "cpu"
             logging.info("Neither GPU nor TPU is available. Using CPU...")
     return device
+
+
+def eval_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Evaluation DataLoader Collate Function.
+
+    Args:
+        batch (Tuple[Tensor]): A list of tuples containing features and labels.
+
+    Returns:
+        Tuple of (x,y) concatenated into separate tensors
+    """
+    data = torch.cat([a[0][0] for a in batch], 0)
+    labels = torch.cat([a[0][1] for a in batch], 0)
+    return data, labels
+
+
+def infer_collate_fn(batch: tuple[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Inference DataLoader Collate Function.
+
+    Args:
+        batch (Tuple[Tensor]): A list of tuples containing features and labels.
+
+    Returns:
+        Tuple of (x,y) concatenated into separate tensors
+    """
+    data = torch.stack([a[0][0] for a in batch], 0)
+    labels = [a[0][1] for a in batch]
+    filepaths = [a[1] for a in batch]
+    return (data, labels), filepaths
 
 
 def create_dataloader(
@@ -125,6 +154,7 @@ class PrithviSegmentationModule(pl.LightningModule):
 
     def __init__(
         self,
+        image_size: int = 224,
         learning_rate: float = 1e-4,
         freeze_backbone: bool = True,
         num_classes: int = 2,
@@ -139,6 +169,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         segmentation.
 
         Args:
+            image_size (int): Size of input image.
             num_classes (int): Number of classes for segmentation.
             temporal_step (int): Number of temporal steps for multi-temporal input.
             learning_rate (float): Learning rate for the optimizer.
@@ -149,6 +180,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         """
         super().__init__()
         self.net = PrithviSeg(
+            image_size=image_size,
             num_classes=num_classes,
             temporal_step=temporal_step,
             freeze_backbone=freeze_backbone,
@@ -335,7 +367,9 @@ class PrithviSegmentationModule(pl.LightningModule):
     def compute_metrics(
         self, pred_mask: torch.Tensor, gt_mask: torch.Tensor
     ) -> dict[str, List[float]]:
-        """Calculate the Intersection over Union (IoU), Accuracy, Precision and Recall metrics.
+        """Calculate Metrics.
+
+        The computed metrics includes Intersection over Union (IoU), Accuracy, Precision and Recall.
 
         Args:
             pred_mask (np.array): Predicted segmentation mask.
@@ -345,8 +379,12 @@ class PrithviSegmentationModule(pl.LightningModule):
             dict: A dictionary containing 'iou', 'overall_accuracy', and
                 'accuracy_per_class', 'precision_per_class' and 'recall_per_class'.
         """
+        prediction_proba = torch.nn.functional.softmax(pred_mask.detach(), dim=1)[
+            :, 1, :, :
+        ]
         pred_mask = torch.argmax(pred_mask, dim=1)
         no_ignore = gt_mask.ne(self.ignore_index).to(self.device)
+        prediction_proba = prediction_proba.masked_select(no_ignore).cpu().numpy()
         pred_mask = pred_mask.masked_select(no_ignore).cpu().numpy()
         gt_mask = gt_mask.masked_select(no_ignore).cpu().numpy()
         classes = np.unique(np.concatenate((gt_mask, pred_mask)))
@@ -390,7 +428,6 @@ class PrithviSegmentationModule(pl.LightningModule):
         # Overall IoU and accuracy
         mean_iou = np.mean(iou_per_class) if iou_per_class else 0.0
         overall_accuracy = np.sum(pred_mask == gt_mask) / gt_mask.size
-
         return {
             "iou": mean_iou,
             "acc": overall_accuracy,
@@ -399,6 +436,38 @@ class PrithviSegmentationModule(pl.LightningModule):
             "precision_per_class": precision_per_class,
             "recall_per_class": recall_per_class,
         }
+
+
+def compute_mean_std(data_loader: DataLoader) -> Tuple[List[float], List[float]]:
+    """Compute the mean and standard deviation of a dataset.
+
+    Args:
+        data_loader (DataLoader): PyTorch DataLoader.
+
+    Returns:
+        mean (list): List of means for each channel.
+        std (list): List of standard deviations for each channel.
+    """
+    mean = 0.0
+    var = 0.0
+    nb_samples = 0
+
+    for data, _ in data_loader:
+        # Reshape data to (B, C, T*H*W)
+        batch_samples = data.size(0)
+        data = data.view(batch_samples, data.size(1), -1)
+
+        nb_samples += batch_samples
+
+        # Sum over batch, height and width
+        mean += data.mean(2).sum(0)
+
+        var += data.var(2, unbiased=False).sum(0)
+
+    mean /= nb_samples
+    var /= nb_samples
+    std = torch.sqrt(var)
+    return mean.tolist(), std.tolist()  # type:ignore
 
 
 @hydra.main(config_path="configs", version_base=None, config_name="config")
@@ -428,6 +497,34 @@ def main(cfg: DictConfig) -> None:
     train_filepath = cfg.train_filepath
     test_filepath = cfg.test_filepath
     checkpoint_path = cfg.checkpoint_path
+
+    if cfg.mode == "stats":
+        train_dataset = InstaGeoDataset(
+            filename=train_filepath,
+            input_root=root_dir,
+            preprocess_func=partial(
+                process_and_augment,
+                mean=[0] * len(MEAN),
+                std=[1] * len(STD),
+                temporal_size=TEMPORAL_SIZE,
+                im_size=IM_SIZE,
+            ),
+            bands=BANDS,
+            replace_label=cfg.dataloader.replace_label,
+            reduce_to_zero=cfg.dataloader.reduce_to_zero,
+            no_data_value=cfg.dataloader.no_data_value,
+            constant_multiplier=cfg.dataloader.constant_multiplier,
+        )
+        train_loader = create_dataloader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=1,
+        )
+        mean, std = compute_mean_std(train_loader)
+        print(mean)
+        print(std)
+        exit(0)
 
     if cfg.mode == "train":
         check_required_flags(["root_dir", "train_filepath", "valid_filepath"], cfg)
@@ -471,6 +568,7 @@ def main(cfg: DictConfig) -> None:
             valid_dataset, batch_size=batch_size, shuffle=False, num_workers=1
         )
         model = PrithviSegmentationModule(
+            image_size=IM_SIZE,
             learning_rate=cfg.train.learning_rate,
             freeze_backbone=cfg.model.freeze_backbone,
             num_classes=cfg.model.num_classes,
@@ -520,17 +618,14 @@ def main(cfg: DictConfig) -> None:
             reduce_to_zero=cfg.dataloader.reduce_to_zero,
             no_data_value=cfg.dataloader.no_data_value,
             constant_multiplier=cfg.dataloader.constant_multiplier,
+            include_filenames=True,
         )
         test_loader = create_dataloader(
-            test_dataset,
-            batch_size=batch_size,
-            collate_fn=lambda x: (
-                torch.cat([a[0] for a in x], 0),
-                torch.cat([a[1] for a in x], 0),
-            ),
+            test_dataset, batch_size=batch_size, collate_fn=eval_collate_fn
         )
         model = PrithviSegmentationModule.load_from_checkpoint(
             checkpoint_path,
+            image_size=IM_SIZE,
             learning_rate=cfg.train.learning_rate,
             freeze_backbone=cfg.model.freeze_backbone,
             num_classes=cfg.model.num_classes,
@@ -542,15 +637,18 @@ def main(cfg: DictConfig) -> None:
         trainer = pl.Trainer(accelerator=get_device())
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
-    elif cfg.mode == "predict":
+
+    elif cfg.mode == "sliding_inference":
         model = PrithviSegmentationModule.load_from_checkpoint(
             cfg.checkpoint_path,
+            image_size=IM_SIZE,
             learning_rate=cfg.train.learning_rate,
             freeze_backbone=cfg.model.freeze_backbone,
             num_classes=cfg.model.num_classes,
             temporal_step=cfg.dataloader.temporal_dim,
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
+            weight_decay=cfg.train.weight_decay,
         )
         model.eval()
         infer_filepath = os.path.join(root_dir, cfg.test_filepath)
@@ -585,7 +683,7 @@ def main(cfg: DictConfig) -> None:
                 mean=cfg.dataloader.mean,
                 std=cfg.dataloader.std,
                 temporal_size=cfg.dataloader.temporal_dim,
-                train=False,
+                augment=False,
             )
             prediction = sliding_window_inference(
                 hls_tile,
@@ -612,6 +710,45 @@ def main(cfg: DictConfig) -> None:
                 transform=transform,
             ) as dst:
                 dst.write(prediction, 1)
+
+    # TODO: Add support for chips that are greater than image size used for training
+    elif cfg.mode == "chip_inference":
+        check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
+        output_dir = os.path.join(root_dir, "predictions")
+        os.makedirs(output_dir, exist_ok=True)
+        test_dataset = InstaGeoDataset(
+            filename=test_filepath,
+            input_root=root_dir,
+            preprocess_func=partial(
+                process_and_augment,
+                mean=MEAN,
+                std=STD,
+                temporal_size=TEMPORAL_SIZE,
+                im_size=cfg.test.img_size,
+                augment=False,
+            ),
+            bands=BANDS,
+            replace_label=cfg.dataloader.replace_label,
+            reduce_to_zero=cfg.dataloader.reduce_to_zero,
+            no_data_value=cfg.dataloader.no_data_value,
+            constant_multiplier=cfg.dataloader.constant_multiplier,
+            include_filenames=True,
+        )
+        test_loader = create_dataloader(
+            test_dataset, batch_size=batch_size, collate_fn=infer_collate_fn
+        )
+        model = PrithviSegmentationModule.load_from_checkpoint(
+            checkpoint_path,
+            image_size=IM_SIZE,
+            learning_rate=cfg.train.learning_rate,
+            freeze_backbone=cfg.model.freeze_backbone,
+            num_classes=cfg.model.num_classes,
+            temporal_step=cfg.dataloader.temporal_dim,
+            class_weights=cfg.train.class_weights,
+            ignore_index=cfg.train.ignore_index,
+            weight_decay=cfg.train.weight_decay,
+        )
+        chip_inference(test_loader, output_dir, model, device=get_device())
 
 
 if __name__ == "__main__":

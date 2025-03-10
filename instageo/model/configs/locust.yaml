@@ -21,17 +21,33 @@ model:
 dataloader:
   # 3*(Blue, Green, Red, Narrow NIR, SWIR 1, SWIR 2)
   bands: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
-  mean: [0.14245495, 0.13921481, 0.12434631, 0.31420089, 0.20743526, 0.12046503]
-  std: [0.04036231, 0.04186983, 0.05267646, 0.0822221, 0.06834774, 0.05294205]
-  img_size: 224
+  mean:
+    [
+      623.2724609375,
+      1247.657958984375,
+      1772.24169921875,
+      2371.256103515625,
+      2862.867431640625,
+      2357.759765625,
+    ]
+  std:
+    [
+      2182.050048828125,
+      2248.420654296875,
+      2302.53515625,
+      2372.204345703125,
+      2398.52685546875,
+      2292.96435546875,
+    ]
+  img_size: 256
   temporal_dim: 3
-  replace_label: null
+  replace_label: [-9999, -1]
   reduce_to_zero: False
-  no_data_value: -1
+  no_data_value: -9999
   constant_multiplier: 1.0
 
 test:
-  img_size: 224
-  crop_size: 224
-  stride: 224
+  img_size: 256
+  crop_size: 256
+  stride: 256
   mask_cloud: False

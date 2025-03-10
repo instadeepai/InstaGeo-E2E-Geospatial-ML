@@ -30,7 +30,7 @@ import torch.nn as nn
 import yaml  # type: ignore
 from absl import logging
 
-from instageo.model.Prithvi import ViTEncoder
+from instageo.model.Prithvi import ViTEncoder, get_3d_sincos_pos_embed
 
 
 def download_file(url: str, filename: str | Path, retries: int = 3) -> None:
@@ -121,7 +121,11 @@ class PrithviSeg(nn.Module):
     """Prithvi Segmentation Model."""
 
     def __init__(
-        self, temporal_step: int = 1, num_classes: int = 2, freeze_backbone: bool = True
+        self,
+        temporal_step: int = 1,
+        image_size: int = 224,
+        num_classes: int = 2,
+        freeze_backbone: bool = True,
     ) -> None:
         """Initialize the PrithviSeg model.
 
@@ -131,20 +135,21 @@ class PrithviSeg(nn.Module):
 
         Args:
             temporal_step (int): Size of temporal dimension.
+            image_size (int): Size of input image.
             num_classes (int): Number of target classes.
             freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
         """
         super().__init__()
         weights_dir = Path.home() / ".instageo" / "prithvi"
         weights_dir.mkdir(parents=True, exist_ok=True)
-        weights_path = weights_dir / "Prithvi_100M.pt"
-        cfg_path = weights_dir / "Prithvi_100M_config.yaml"
+        weights_path = weights_dir / "Prithvi_EO_V1_100M.pt"
+        cfg_path = weights_dir / "config.yaml"
         download_file(
-            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M/resolve/main/Prithvi_100M.pt?download=true",  # noqa
+            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-1.0-100M/resolve/main/Prithvi_EO_V1_100M.pt?download=true",  # noqa
             weights_path,
         )
         download_file(
-            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M/raw/main/Prithvi_100M_config.yaml",  # noqa
+            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M/raw/main/config.yaml",  # noqa
             cfg_path,
         )
         checkpoint = torch.load(weights_path, map_location="cpu")
@@ -154,14 +159,30 @@ class PrithviSeg(nn.Module):
         model_args = model_config["model_args"]
 
         model_args["num_frames"] = temporal_step
+        model_args["img_size"] = image_size
         self.model_args = model_args
         # instantiate model
         model = ViTEncoder(**model_args)
         if freeze_backbone:
             for param in model.parameters():
                 param.requires_grad = False
-        del checkpoint["pos_embed"]
-        _ = model.load_state_dict(checkpoint, strict=False)
+        filtered_checkpoint_state_dict = {
+            key[len("encoder.") :]: value
+            for key, value in checkpoint.items()
+            if key.startswith("encoder.")
+        }
+        filtered_checkpoint_state_dict["pos_embed"] = (
+            torch.from_numpy(
+                get_3d_sincos_pos_embed(
+                    768,
+                    (temporal_step, image_size // 16, image_size // 16),
+                    cls_token=True,
+                )
+            )
+            .float()
+            .unsqueeze(0)
+        )
+        _ = model.load_state_dict(filtered_checkpoint_state_dict)
 
         self.prithvi_100M_backbone = model
 
@@ -184,6 +205,7 @@ class PrithviSeg(nn.Module):
                     padding=1,
                     output_padding=1,
                 ),
+                nn.Dropout(0.1),
                 nn.Conv2d(
                     in_channels=out_channels,
                     out_channels=out_channels,
@@ -200,6 +222,7 @@ class PrithviSeg(nn.Module):
         ]
         self.segmentation_head = nn.Sequential(
             *[upscaling_block(embed_dims[i], embed_dims[i + 1]) for i in range(4)],
+            nn.Dropout(0.1),
             nn.Conv2d(
                 kernel_size=1, in_channels=embed_dims[-1], out_channels=num_classes
             ),
