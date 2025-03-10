@@ -20,6 +20,7 @@
 """InstaGeo Chip Creator Module."""
 
 import json
+import logging as std_logging
 import os
 from functools import partial
 from typing import Any
@@ -45,6 +46,7 @@ from instageo.data.settings import GDALOptions
 
 load_dotenv(os.path.expanduser("~/.credentials"))
 logging.set_verbosity(logging.INFO)
+std_logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
 
 FLAGS = flags.FLAGS
 
@@ -153,7 +155,7 @@ def setup() -> None:
 
     Configures relevant GDAL options for reading COGs
     """
-    earthaccess.login(persist=True)
+    earthaccess.login(strategy="environment", persist=True)
     env = rasterio.Env(**GDALOptions().model_dump())
     env.__enter__()
 

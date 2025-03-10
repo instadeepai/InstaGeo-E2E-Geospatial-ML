@@ -31,9 +31,9 @@ import pytorch_lightning as pl
 import rasterio
 import torch
 import torch.nn as nn
+from neptune.utils import stringify_unsupported
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -45,13 +45,16 @@ from instageo.model.dataloader import (
 )
 from instageo.model.infer_utils import chip_inference, sliding_window_inference
 from instageo.model.model import PrithviSeg
+from instageo.model.neptune_logger import AIchorNeptuneLogger, set_neptune_api_token
 
 pl.seed_everything(seed=1042, workers=True)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+torch.set_float32_matmul_precision("high")
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
 
 
 def check_required_flags(required_flags: List[str], config: DictConfig) -> None:
@@ -218,6 +221,18 @@ class PrithviSegmentationModule(pl.LightningModule):
         outputs = self.forward(inputs)
         loss = self.criterion(outputs, labels.long())
         self.log_metrics(outputs, labels, "train", loss)
+
+        opt = self.optimizers()
+        current_lr = opt.param_groups[0]["lr"]
+        self.log(
+            "learning_rate",
+            current_lr,
+            on_step=True,
+            on_epoch=False,
+            prog_bar=True,
+            logger=True,
+        )
+
         return loss
 
     def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
@@ -306,7 +321,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         self.log(
             f"{stage}_loss",
             loss,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
             logger=True,
@@ -314,7 +329,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         self.log(
             f"{stage}_aAcc",
             out["acc"],
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
             logger=True,
@@ -322,7 +337,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         self.log(
             f"{stage}_mIoU",
             out["iou"],
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
             logger=True,
@@ -331,7 +346,7 @@ class PrithviSegmentationModule(pl.LightningModule):
             self.log(
                 f"{stage}_IoU_{idx}",
                 value,
-                on_step=True,
+                on_step=False,
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
@@ -340,7 +355,7 @@ class PrithviSegmentationModule(pl.LightningModule):
             self.log(
                 f"{stage}_Acc_{idx}",
                 value,
-                on_step=True,
+                on_step=False,
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
@@ -349,7 +364,7 @@ class PrithviSegmentationModule(pl.LightningModule):
             self.log(
                 f"{stage}_Precision_{idx}",
                 value,
-                on_step=True,
+                on_step=False,
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
@@ -358,7 +373,7 @@ class PrithviSegmentationModule(pl.LightningModule):
             self.log(
                 f"{stage}_Recall_{idx}",
                 value,
-                on_step=True,
+                on_step=False,
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
@@ -528,6 +543,14 @@ def main(cfg: DictConfig) -> None:
 
     if cfg.mode == "train":
         check_required_flags(["root_dir", "train_filepath", "valid_filepath"], cfg)
+        neptune_logger = AIchorNeptuneLogger(
+            api_key=set_neptune_api_token(),
+            project=os.environ["NEPTUNE_PROJECT"],
+            log_model_checkpoints=False,
+        )
+        neptune_logger.experiment["config"] = stringify_unsupported(
+            OmegaConf.to_yaml(cfg)
+        )
         train_dataset = InstaGeoDataset(
             filename=train_filepath,
             input_root=root_dir,
@@ -581,19 +604,17 @@ def main(cfg: DictConfig) -> None:
         checkpoint_callback = ModelCheckpoint(
             monitor="val_mIoU",
             dirpath=hydra_out_dir,
-            filename="instageo_epoch-{epoch:02d}-val_iou-{val_mIoU:.2f}",
+            filename="instageo_best_checkpoint",
             auto_insert_metric_name=False,
             mode="max",
-            save_top_k=3,
+            save_top_k=1,
         )
-
-        logger = TensorBoardLogger(hydra_out_dir, name="instageo")
 
         trainer = pl.Trainer(
             accelerator=get_device(),
             max_epochs=cfg.train.num_epochs,
             callbacks=[checkpoint_callback],
-            logger=logger,
+            logger=neptune_logger,
         )
 
         # run training and validation
@@ -601,6 +622,14 @@ def main(cfg: DictConfig) -> None:
 
     elif cfg.mode == "eval":
         check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
+        neptune_logger = AIchorNeptuneLogger(
+            api_key=set_neptune_api_token(),
+            project=os.environ["NEPTUNE_PROJECT"],
+            log_model_checkpoints=False,
+        )
+        neptune_logger.experiment["config"] = stringify_unsupported(
+            OmegaConf.to_yaml(cfg)
+        )
         test_dataset = InstaGeoDataset(
             filename=test_filepath,
             input_root=root_dir,
@@ -634,7 +663,11 @@ def main(cfg: DictConfig) -> None:
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
         )
-        trainer = pl.Trainer(accelerator=get_device())
+        trainer = pl.Trainer(
+            precision="bf16",
+            accelerator=get_device(),
+            logger=neptune_logger,
+        )
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
 
