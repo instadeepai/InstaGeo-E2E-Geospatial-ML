@@ -93,10 +93,12 @@ flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
 flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2", "S1"], "Data source to use.")
-flags.DEFINE_integer(
+flags.DEFINE_float(
     "cloud_coverage",
     10,
-    "Percentage of cloud cover to use. Accepted values are between 0 and 100.",
+    "Percentage of cloud cover to use. Accepted values are between 0.0001 and 100.",
+    lower_bound=0.0001,
+    upper_bound=100,
 )
 flags.DEFINE_integer(
     "window_size",

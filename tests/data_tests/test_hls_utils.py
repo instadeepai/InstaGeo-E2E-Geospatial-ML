@@ -152,21 +152,11 @@ def test_retrieve_hls_metadata():
             "lat_max": [15.287778],
         }
     )
-    tile_database = retrieve_hls_metadata(tile_info, cloud_coverage=0)
+    tile_database = retrieve_hls_metadata(tile_info, cloud_coverage=0.0001)
     assert tile_database["38PMB"][0] == [  # ignore links
         "HLS.S30.T38PMB.2022145T072619.v2.0",
         "HLS.L30.T38PMB.2022146T072532.v2.0",
-        "HLS.L30.T38PMB.2022147T071947.v2.0",
-        "HLS.S30.T38PMB.2022147T071621.v2.0",
-        "HLS.S30.T38PMB.2022150T072621.v2.0",
-        "HLS.S30.T38PMB.2022152T071619.v2.0",
         "HLS.L30.T38PMB.2022154T072604.v2.0",
-        "HLS.L30.T38PMB.2022155T071923.v2.0",
-        "HLS.S30.T38PMB.2022155T072619.v2.0",
-        "HLS.S30.T38PMB.2022157T071631.v2.0",
-        "HLS.S30.T38PMB.2022160T072621.v2.0",
-        "HLS.L30.T38PMB.2022162T072536.v2.0",
-        "HLS.S30.T38PMB.2022162T071619.v2.0",
         "HLS.L30.T38PMB.2022163T072000.v2.0",
         "HLS.S30.T38PMB.2022165T072619.v2.0",
     ]
@@ -361,26 +351,26 @@ def test_parse_date_from_entry(tile_id, result):
 
 def test_add_hls_granules(observation_data):
     data = get_tiles(observation_data, min_count=3)
-    result = add_hls_granules(data, cloud_coverage=0)
+    result = add_hls_granules(data, cloud_coverage=0.0001)
     assert list(result["hls_tiles"]) == [
         [
-            "HLS.S30.T38PMB.2022160T072621.v2.0",
-            "HLS.S30.T38PMB.2022150T072621.v2.0",
+            "HLS.L30.T38PMB.2022163T072000.v2.0",
+            "HLS.L30.T38PMB.2022146T072532.v2.0",
             "HLS.L30.T38PMB.2022139T071922.v2.0",
         ],
         [
-            "HLS.S30.T38PMB.2022160T072621.v2.0",
-            "HLS.S30.T38PMB.2022150T072621.v2.0",
+            "HLS.L30.T38PMB.2022163T072000.v2.0",
+            "HLS.L30.T38PMB.2022146T072532.v2.0",
             "HLS.L30.T38PMB.2022139T071922.v2.0",
         ],
         [
-            "HLS.S30.T38PMB.2022160T072621.v2.0",
-            "HLS.S30.T38PMB.2022150T072621.v2.0",
+            "HLS.L30.T38PMB.2022163T072000.v2.0",
+            "HLS.L30.T38PMB.2022146T072532.v2.0",
             "HLS.L30.T38PMB.2022139T071922.v2.0",
         ],
         [
-            "HLS.S30.T38PMB.2022160T072621.v2.0",
-            "HLS.S30.T38PMB.2022150T072621.v2.0",
+            "HLS.L30.T38PMB.2022163T072000.v2.0",
+            "HLS.L30.T38PMB.2022146T072532.v2.0",
             "HLS.S30.T38PMB.2022140T072621.v2.0",
         ],
     ]
@@ -389,7 +379,7 @@ def test_add_hls_granules(observation_data):
 def test_create_hls_dataset(observation_data):
     data = get_tiles(observation_data, min_count=3)
     data_with_tiles = add_hls_granules(
-        data, num_steps=3, temporal_step=10, temporal_tolerance=5, cloud_coverage=0
+        data, num_steps=3, temporal_step=10, temporal_tolerance=5, cloud_coverage=0.0001
     )
     hls_dataset, tiles_to_download = create_hls_dataset(data_with_tiles, outdir="")
     assert len(tiles_to_download) == 28
@@ -398,19 +388,19 @@ def test_create_hls_dataset(observation_data):
     assert len(hls_dataset["2022-06-08_T38PMB"]["fmasks"]) == 3
     assert (
         hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_0"]
-        == "hls_tiles/HLS.S30.T38PMB.2022160T072621.v2.0.B02.tif"
+        == "hls_tiles/HLS.L30.T38PMB.2022163T072000.v2.0.B02.tif"
     )
     assert (
         hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_0"]
-        == "hls_tiles/HLS.S30.T38PMB.2022160T072621.v2.0.Fmask.tif"
+        == "hls_tiles/HLS.L30.T38PMB.2022163T072000.v2.0.Fmask.tif"
     )
     assert (
         hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_1"]
-        == "hls_tiles/HLS.S30.T38PMB.2022150T072621.v2.0.B02.tif"
+        == "hls_tiles/HLS.L30.T38PMB.2022146T072532.v2.0.B02.tif"
     )
     assert (
         hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_1"]
-        == "hls_tiles/HLS.S30.T38PMB.2022150T072621.v2.0.Fmask.tif"
+        == "hls_tiles/HLS.L30.T38PMB.2022146T072532.v2.0.Fmask.tif"
     )
     assert (
         hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_2"]
