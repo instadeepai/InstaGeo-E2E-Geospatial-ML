@@ -61,6 +61,7 @@ class GDALOptions(BaseSettings):
     GDAL_CACHEMAX: int = 1024  # 1 GB
     GDAL_SWATH_SIZE: int = 16777216  # 16 MB
     CPL_VSIL_CURL_CACHE_SIZE: int = 67108864  # 64 MB
+    GDAL_HTTP_COOKIEFILE: str = "/tmp/cookies.txt"
 
 
 class NoDataValues(BaseSettings):

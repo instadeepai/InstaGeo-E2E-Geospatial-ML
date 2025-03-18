@@ -2,17 +2,14 @@ import os
 import pathlib
 import shutil
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 from absl import flags
-from shapely.geometry import Point
 
 from instageo.data import chip_creator
 from instageo.data.chip_creator import app, check_required_flags
-from instageo.data.data_pipeline import get_chip_coords
 
 FLAGS = flags.FLAGS
 
@@ -24,14 +21,7 @@ def setup_and_teardown_output_dir():
     output_dir = "/tmp/csv_chip_creator"
     os.makedirs(output_dir, exist_ok=True)
     yield
-    try:
-        shutil.rmtree(os.path.join(output_dir, "chips"))
-        shutil.rmtree(os.path.join(output_dir, "seg_maps"))
-        os.remove(os.path.join(output_dir, "granules_to_download.csv"))
-        os.remove(os.path.join(output_dir, "hls_dataset.json"))
-        os.remove(os.path.join(output_dir, "hls_chips_dataset.csv"))
-    except FileNotFoundError:
-        pass
+    shutil.rmtree(output_dir, ignore_errors=True)
 
 
 @pytest.mark.auth
@@ -57,7 +47,7 @@ def test_chip_creator(
         "--min_count",
         "4",
         "--chip_size",
-        "512",
+        "256",
         "--temporal_tolerance",
         temporal_tolerance,
         "--temporal_step",
@@ -73,7 +63,7 @@ def test_chip_creator(
         "--processing_method",
         "download",
         "--cloud_coverage",
-        "0",
+        "30",
     ]
     FLAGS(argv)
     chip_creator.main("None")
@@ -85,9 +75,9 @@ def test_chip_creator(
     seg_map_path = os.path.join(output_directory, "seg_maps", seg_maps[0])
     chip = xr.open_dataset(chip_path)
     seg_map = xr.open_dataset(seg_map_path)
-    assert chip.band_data.shape == (num_bands, 512, 512)
+    assert chip.band_data.shape == (num_bands, 256, 256)
     assert np.unique(chip.band_data).size > 1
-    assert seg_map.band_data.shape == (1, 512, 512)
+    assert seg_map.band_data.shape == (1, 256, 256)
     assert np.unique(seg_map.band_data).size > 1
     if data_source != "S1":
         assert (
@@ -115,7 +105,7 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
         "--min_count",
         "4",
         "--chip_size",
-        "512",
+        "256",
         "--temporal_tolerance",
         "1",
         "--temporal_step",
@@ -128,7 +118,7 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
         "--data_source",
         "HLS",
         "--cloud_coverage",
-        "0",
+        "30",
     ]
     FLAGS(argv)
     chip_creator.main("None")
@@ -152,7 +142,7 @@ def test_chip_creator_cog(setup_and_teardown_output_dir):
         "--min_count",
         "4",
         "--chip_size",
-        "512",
+        "256",
         "--temporal_tolerance",
         "1",
         "--temporal_step",
@@ -166,7 +156,7 @@ def test_chip_creator_cog(setup_and_teardown_output_dir):
         "--processing_method",
         "cog",
         "--cloud_coverage",
-        "0",
+        "30",
     ]
     FLAGS(argv)
     chip_creator.main("None")
@@ -178,9 +168,9 @@ def test_chip_creator_cog(setup_and_teardown_output_dir):
     seg_map_path = os.path.join(output_directory, "seg_maps", seg_maps[0])
     chip = xr.open_dataset(chip_path)
     seg_map = xr.open_dataset(seg_map_path)
-    assert chip.band_data.shape == (6, 512, 512)
+    assert chip.band_data.shape == (6, 256, 256)
     assert np.unique(chip.band_data).size > 1
-    assert seg_map.band_data.shape == (1, 512, 512)
+    assert seg_map.band_data.shape == (1, 256, 256)
     assert np.unique(seg_map.band_data).size > 1
 
 

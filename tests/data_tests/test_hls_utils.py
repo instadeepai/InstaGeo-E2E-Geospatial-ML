@@ -128,6 +128,7 @@ def test_open_mf_tiff_dataset_cloud_mask():
         decode_fmask_value,
         "HLS",
         masking_strategy="any",
+        mask_types=["cloud"],
     )
     fmask = xr.open_dataset("tests/data/fmask.tif")
     cloud_mask = decode_fmask_value(fmask, 1)

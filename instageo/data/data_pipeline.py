@@ -37,7 +37,7 @@ from instageo.data.settings import NoDataValues
 
 # Masks decoding positions
 MASK_DECODING_POS: dict[str, dict] = {
-    "HLS": {"cloud": 1, "water": 5},
+    "HLS": {"cloud": 1, "near_cloud_or_shadow": 2, "cloud_shadow": 3, "water": 5},
     "S2": {"cloud": [8, 9], "water": [6]},
 }
 
