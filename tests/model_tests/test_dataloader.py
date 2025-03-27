@@ -9,23 +9,27 @@ from PIL import Image
 from instageo.model.dataloader import (
     InstaGeoDataset,
     crop_array,
+    crop_image_and_label,
     get_raster_data,
-    load_data_from_csv,
+    get_valid_filepaths,
     normalize_and_convert_to_tensor,
     process_and_augment,
     process_data,
     process_test,
-    random_crop_and_flip,
+    random_augs,
 )
 
 
-def test_random_crop_and_flip():
+def test_crop_andrandom_augs():
     # Create dummy images and label
     ims = [Image.new("L", (256, 256)) for _ in range(3)]
     label = Image.new("L", (256, 256))
 
     # Apply function
-    transformed_ims, transformed_label = random_crop_and_flip(ims, label, im_size=224)
+    ims, label = crop_image_and_label(ims, label, im_size=224)
+    transformed_ims, transformed_label = random_augs(
+        ims, label, chip_no_data_value=0, label_no_data_value=-1
+    )
 
     # Check output types and dimensions
     assert isinstance(transformed_ims, list)
@@ -165,7 +169,7 @@ def test_invalid_inputs():
         process_test(x, y, mean, std)
 
 
-def test_load_data_from_csv():
+def test_get_valid_filepaths():
     sample_filename = "/tmp/sample_data.csv"
     pd.DataFrame(
         {
@@ -173,7 +177,7 @@ def test_load_data_from_csv():
             "Label": ["sample.tif", "sample.tif"],
         }
     ).to_csv(sample_filename)
-    data = load_data_from_csv(sample_filename, input_root="tests/data")
+    data = get_valid_filepaths(sample_filename, input_root="tests/data")
     assert data == [
         ("tests/data/sample.tif", "tests/data/sample.tif"),
         ("tests/data/sample.tif", "tests/data/sample.tif"),
@@ -201,7 +205,8 @@ def test_instageo_dataset():
         bands=[0],
         replace_label=None,
         reduce_to_zero=False,
-        no_data_value=-1,
+        chip_no_data_value=-1,
+        label_no_data_value=-1,
         constant_multiplier=0.001,
     )
     im, label = next(iter(dataset))

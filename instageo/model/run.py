@@ -22,6 +22,7 @@
 import json
 import logging
 import os
+from collections import Counter
 from functools import partial
 from typing import Any, Callable, List, Optional, Tuple
 
@@ -53,7 +54,7 @@ torch.backends.cudnn.benchmark = False
 torch.set_float32_matmul_precision("high")
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.INFO)
+log.setLevel(logging.WARNING)
 logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
 
 
@@ -121,7 +122,7 @@ def create_dataloader(
     dataset: Dataset,
     batch_size: int,
     shuffle: bool = False,
-    num_workers: int = 1,
+    num_workers: int | None = 1,
     collate_fn: Optional[Callable] = None,
     pin_memory: bool = True,
 ) -> DataLoader:
@@ -142,6 +143,7 @@ def create_dataloader(
     Returns:
         DataLoader: An instance of the PyTorch DataLoader.
     """
+    num_workers = num_workers if num_workers is not None else 1
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -190,7 +192,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         )
         weight_tensor = torch.tensor(class_weights).float() if class_weights else None
         self.criterion = nn.CrossEntropyLoss(
-            ignore_index=ignore_index, weight=weight_tensor
+            ignore_index=ignore_index, weight=weight_tensor, reduction="none"
         )
         self.learning_rate = learning_rate
         self.ignore_index = ignore_index
@@ -220,6 +222,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         inputs, labels = batch
         outputs = self.forward(inputs)
         loss = self.criterion(outputs, labels.long())
+        loss = loss[labels != self.ignore_index].mean()
         self.log_metrics(outputs, labels, "train", loss)
 
         opt = self.optimizers()
@@ -248,6 +251,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         inputs, labels = batch
         outputs = self.forward(inputs)
         loss = self.criterion(outputs, labels.long())
+        loss = loss[labels != self.ignore_index].mean()
         self.log_metrics(outputs, labels, "val", loss)
         return loss
 
@@ -264,6 +268,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         inputs, labels = batch
         outputs = self.forward(inputs)
         loss = self.criterion(outputs, labels.long())
+        loss = loss[labels != self.ignore_index].mean()
         self.log_metrics(outputs, labels, "test", loss)
         return loss
 
@@ -453,8 +458,35 @@ class PrithviSegmentationModule(pl.LightningModule):
         }
 
 
-def compute_mean_std(data_loader: DataLoader) -> Tuple[List[float], List[float]]:
-    """Compute the mean and standard deviation of a dataset.
+def compute_class_weights(counts: dict[int, int]) -> list[float]:
+    """Compute Class Weights.
+
+    Args:
+        counts (dict[int, int]): Dictionary mapping class index to counts.
+
+    Returns:
+        list[int]: List containing the class weight at the corresponding list index
+    """
+    total_samples = sum(counts.values())
+    num_classes = len(counts)
+
+    class_weights_dict = {}
+    for cls, cnt in counts.items():
+        class_weights_dict[cls] = total_samples / (num_classes * cnt)
+
+    max_class_label = int(max(counts.keys()))
+    class_weights_list = [0.0] * (max_class_label + 1)
+    for cls, weight in class_weights_dict.items():
+        class_weights_list[int(cls)] = weight
+    return class_weights_list
+
+
+def compute_stats(
+    data_loader: DataLoader,
+) -> Tuple[List[float], List[float], List[float]]:
+    """Compute the statistics of train dataset.
+
+    Statistics computed includes mean, standard deviation and class weights.
 
     Args:
         data_loader (DataLoader): PyTorch DataLoader.
@@ -462,12 +494,13 @@ def compute_mean_std(data_loader: DataLoader) -> Tuple[List[float], List[float]]
     Returns:
         mean (list): List of means for each channel.
         std (list): List of standard deviations for each channel.
+        class_weights (list[float]): List of class weights.
     """
     mean = 0.0
     var = 0.0
     nb_samples = 0
-
-    for data, _ in data_loader:
+    class_counts: dict[int, int] = Counter()
+    for data, label in data_loader:
         # Reshape data to (B, C, T*H*W)
         batch_samples = data.size(0)
         data = data.view(batch_samples, data.size(1), -1)
@@ -478,11 +511,20 @@ def compute_mean_std(data_loader: DataLoader) -> Tuple[List[float], List[float]]
         mean += data.mean(2).sum(0)
 
         var += data.var(2, unbiased=False).sum(0)
-
+        class_counts.update(
+            {k: v for k, v in zip(*np.unique(label.numpy(), return_counts=True))}
+        )
     mean /= nb_samples
     var /= nb_samples
     std = torch.sqrt(var)
-    return mean.tolist(), std.tolist()  # type:ignore
+    try:
+        class_counts.pop(-1)  # remove ignore_index
+    except KeyError:
+        logging.info("No label pixel with value -1")
+    logging.info(f"Class Counts: {class_counts}")
+    class_weights = compute_class_weights(class_counts)
+    logging.info(f"Normalized Counts: {class_weights}")
+    return mean.tolist(), std.tolist(), class_weights  # type:ignore
 
 
 @hydra.main(config_path="configs", version_base=None, config_name="config")
@@ -523,22 +565,23 @@ def main(cfg: DictConfig) -> None:
                 std=[1] * len(STD),
                 temporal_size=TEMPORAL_SIZE,
                 im_size=IM_SIZE,
+                augment=False,
             ),
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,
             reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            no_data_value=cfg.dataloader.no_data_value,
+            chip_no_data_value=cfg.dataloader.no_data_value,
+            label_no_data_value=cfg.train.ignore_index,
             constant_multiplier=cfg.dataloader.constant_multiplier,
         )
         train_loader = create_dataloader(
             train_dataset,
             batch_size=batch_size,
             shuffle=True,
-            num_workers=1,
+            num_workers=os.cpu_count(),
         )
-        mean, std = compute_mean_std(train_loader)
-        print(mean)
-        print(std)
+        mean, std, class_weights = compute_stats(train_loader)
+        print(json.dumps({"mean": mean, "std": std, "class_weights": class_weights}))
         exit(0)
 
     if cfg.mode == "train":
@@ -560,11 +603,15 @@ def main(cfg: DictConfig) -> None:
                 std=STD,
                 temporal_size=TEMPORAL_SIZE,
                 im_size=IM_SIZE,
+                chip_no_data_value=cfg.dataloader.no_data_value,
+                label_no_data_value=cfg.train.ignore_index,
+                max_pixel_value=cfg.dataloader.max_pixel_value,
             ),
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,
             reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            no_data_value=cfg.dataloader.no_data_value,
+            chip_no_data_value=cfg.dataloader.no_data_value,
+            label_no_data_value=cfg.train.ignore_index,
             constant_multiplier=cfg.dataloader.constant_multiplier,
         )
 
@@ -577,18 +624,26 @@ def main(cfg: DictConfig) -> None:
                 std=STD,
                 temporal_size=TEMPORAL_SIZE,
                 im_size=IM_SIZE,
+                augment=False,
             ),
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,
             reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            no_data_value=cfg.dataloader.no_data_value,
+            chip_no_data_value=cfg.dataloader.no_data_value,
+            label_no_data_value=cfg.train.ignore_index,
             constant_multiplier=cfg.dataloader.constant_multiplier,
         )
         train_loader = create_dataloader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=1
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=os.cpu_count(),
         )
         valid_loader = create_dataloader(
-            valid_dataset, batch_size=batch_size, shuffle=False, num_workers=1
+            valid_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=os.cpu_count(),
         )
         model = PrithviSegmentationModule(
             image_size=IM_SIZE,
@@ -615,6 +670,7 @@ def main(cfg: DictConfig) -> None:
             max_epochs=cfg.train.num_epochs,
             callbacks=[checkpoint_callback],
             logger=neptune_logger,
+            deterministic=True,
         )
 
         # run training and validation
@@ -645,12 +701,16 @@ def main(cfg: DictConfig) -> None:
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,
             reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            no_data_value=cfg.dataloader.no_data_value,
+            chip_no_data_value=cfg.dataloader.no_data_value,
+            label_no_data_value=cfg.train.ignore_index,
             constant_multiplier=cfg.dataloader.constant_multiplier,
             include_filenames=True,
         )
         test_loader = create_dataloader(
-            test_dataset, batch_size=batch_size, collate_fn=eval_collate_fn
+            test_dataset,
+            batch_size=batch_size,
+            collate_fn=eval_collate_fn,
+            num_workers=os.cpu_count(),
         )
         model = PrithviSegmentationModule.load_from_checkpoint(
             checkpoint_path,
@@ -664,7 +724,6 @@ def main(cfg: DictConfig) -> None:
             weight_decay=cfg.train.weight_decay,
         )
         trainer = pl.Trainer(
-            precision="bf16",
             accelerator=get_device(),
             logger=neptune_logger,
         )
@@ -763,12 +822,16 @@ def main(cfg: DictConfig) -> None:
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,
             reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            no_data_value=cfg.dataloader.no_data_value,
+            chip_no_data_value=cfg.dataloader.no_data_value,
+            label_no_data_value=cfg.train.ignore_index,
             constant_multiplier=cfg.dataloader.constant_multiplier,
             include_filenames=True,
         )
         test_loader = create_dataloader(
-            test_dataset, batch_size=batch_size, collate_fn=infer_collate_fn
+            test_dataset,
+            batch_size=batch_size,
+            collate_fn=infer_collate_fn,
+            num_workers=os.cpu_count(),
         )
         model = PrithviSegmentationModule.load_from_checkpoint(
             checkpoint_path,
