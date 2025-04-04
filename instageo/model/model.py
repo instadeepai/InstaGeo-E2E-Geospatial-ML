@@ -126,6 +126,7 @@ class PrithviSeg(nn.Module):
         image_size: int = 224,
         num_classes: int = 2,
         freeze_backbone: bool = True,
+        load_pretrained_weights: bool = True,
     ) -> None:
         """Initialize the PrithviSeg model.
 
@@ -138,6 +139,7 @@ class PrithviSeg(nn.Module):
             image_size (int): Size of input image.
             num_classes (int): Number of target classes.
             freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
+            load_pretrained_weights (bool): Flag to load pretrained weights.
         """
         super().__init__()
         weights_dir = Path.home() / ".instageo" / "prithvi"
@@ -166,23 +168,24 @@ class PrithviSeg(nn.Module):
         if freeze_backbone:
             for param in model.parameters():
                 param.requires_grad = False
-        filtered_checkpoint_state_dict = {
-            key[len("encoder.") :]: value
-            for key, value in checkpoint.items()
-            if key.startswith("encoder.")
-        }
-        filtered_checkpoint_state_dict["pos_embed"] = (
-            torch.from_numpy(
-                get_3d_sincos_pos_embed(
-                    768,
-                    (temporal_step, image_size // 16, image_size // 16),
-                    cls_token=True,
+        if load_pretrained_weights:
+            filtered_checkpoint_state_dict = {
+                key[len("encoder.") :]: value
+                for key, value in checkpoint.items()
+                if key.startswith("encoder.")
+            }
+            filtered_checkpoint_state_dict["pos_embed"] = (
+                torch.from_numpy(
+                    get_3d_sincos_pos_embed(
+                        768,
+                        (temporal_step, image_size // 16, image_size // 16),
+                        cls_token=True,
+                    )
                 )
+                .float()
+                .unsqueeze(0)
             )
-            .float()
-            .unsqueeze(0)
-        )
-        _ = model.load_state_dict(filtered_checkpoint_state_dict)
+            _ = model.load_state_dict(filtered_checkpoint_state_dict)
 
         self.prithvi_100M_backbone = model
 

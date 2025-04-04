@@ -162,6 +162,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         image_size: int = 224,
         learning_rate: float = 1e-4,
         freeze_backbone: bool = True,
+        load_pretrained_weights: bool = True,
         num_classes: int = 2,
         temporal_step: int = 1,
         class_weights: List[float] = [1, 2],
@@ -179,6 +180,7 @@ class PrithviSegmentationModule(pl.LightningModule):
             temporal_step (int): Number of temporal steps for multi-temporal input.
             learning_rate (float): Learning rate for the optimizer.
             freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
+            load_pretrained_weights (bool): Flag to load pretrained weights.
             class_weights (List[float]): Class weights for mitigating class imbalance.
             ignore_index (int): Class index to ignore during loss computation.
             weight_decay (float): Weight decay for L2 regularization.
@@ -189,6 +191,7 @@ class PrithviSegmentationModule(pl.LightningModule):
             num_classes=num_classes,
             temporal_step=temporal_step,
             freeze_backbone=freeze_backbone,
+            load_pretrained_weights=load_pretrained_weights,
         )
         weight_tensor = torch.tensor(class_weights).float() if class_weights else None
         self.criterion = nn.CrossEntropyLoss(
@@ -578,7 +581,7 @@ def main(cfg: DictConfig) -> None:
             train_dataset,
             batch_size=batch_size,
             shuffle=True,
-            num_workers=os.cpu_count(),
+            num_workers=cfg.dataloader.num_workers,
         )
         mean, std, class_weights = compute_stats(train_loader)
         print(json.dumps({"mean": mean, "std": std, "class_weights": class_weights}))
@@ -637,13 +640,13 @@ def main(cfg: DictConfig) -> None:
             train_dataset,
             batch_size=batch_size,
             shuffle=True,
-            num_workers=os.cpu_count(),
+            num_workers=cfg.dataloader.num_workers,
         )
         valid_loader = create_dataloader(
             valid_dataset,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=os.cpu_count(),
+            num_workers=cfg.dataloader.num_workers,
         )
         model = PrithviSegmentationModule(
             image_size=IM_SIZE,
@@ -654,6 +657,7 @@ def main(cfg: DictConfig) -> None:
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
+            load_pretrained_weights=cfg.model.load_pretrained_weights,
         )
         hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         checkpoint_callback = ModelCheckpoint(
@@ -710,7 +714,7 @@ def main(cfg: DictConfig) -> None:
             test_dataset,
             batch_size=batch_size,
             collate_fn=eval_collate_fn,
-            num_workers=os.cpu_count(),
+            num_workers=cfg.dataloader.num_workers,
         )
         model = PrithviSegmentationModule.load_from_checkpoint(
             checkpoint_path,
@@ -831,7 +835,7 @@ def main(cfg: DictConfig) -> None:
             test_dataset,
             batch_size=batch_size,
             collate_fn=infer_collate_fn,
-            num_workers=os.cpu_count(),
+            num_workers=cfg.dataloader.num_workers,
         )
         model = PrithviSegmentationModule.load_from_checkpoint(
             checkpoint_path,

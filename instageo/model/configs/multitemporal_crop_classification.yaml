@@ -31,6 +31,7 @@ train:
 
 model:
   freeze_backbone: False
+  load_pretrained_weights: True
   num_classes: 13
 
 dataloader:
@@ -46,6 +47,7 @@ dataloader:
   no_data_value: null
   constant_multiplier: 1.0
   max_pixel_value: 10000
+  num_workers: 1
 
 test:
   img_size: 224
