@@ -350,6 +350,14 @@ class PrithviSegmentationModule(pl.LightningModule):
             prog_bar=True,
             logger=True,
         )
+        self.log(
+            f"{stage}_mF1",
+            out["f1"],
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
         for idx, value in enumerate(out["iou_per_class"]):
             self.log(
                 f"{stage}_IoU_{idx}",
@@ -386,21 +394,31 @@ class PrithviSegmentationModule(pl.LightningModule):
                 prog_bar=True,
                 logger=True,
             )
+        for idx, value in enumerate(out["f1_per_class"]):
+            self.log(
+                f"{stage}_F1_{idx}",
+                value,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+            )
 
     def compute_metrics(
         self, pred_mask: torch.Tensor, gt_mask: torch.Tensor
     ) -> dict[str, List[float]]:
         """Calculate Metrics.
 
-        The computed metrics includes Intersection over Union (IoU), Accuracy, Precision and Recall.
+        The computed metrics includes Intersection over Union (IoU), Accuracy, Precision, Recall,
+        and F1 Score.
 
         Args:
             pred_mask (np.array): Predicted segmentation mask.
             gt_mask (np.array): Ground truth segmentation mask.
 
         Returns:
-            dict: A dictionary containing 'iou', 'overall_accuracy', and
-                'accuracy_per_class', 'precision_per_class' and 'recall_per_class'.
+            dict: A dictionary containing 'iou', 'f1', 'overall_accuracy', and
+                'accuracy_per_class', 'precision_per_class', 'recall_per_class', and 'f1_per_class'.
         """
         prediction_proba = torch.nn.functional.softmax(pred_mask.detach(), dim=1)[
             :, 1, :, :
@@ -416,6 +434,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         accuracy_per_class = []
         precision_per_class = []
         recall_per_class = []
+        f1_per_class = []
 
         for clas in classes:
             pred_cls = pred_mask == clas
@@ -448,16 +467,26 @@ class PrithviSegmentationModule(pl.LightningModule):
             )
             recall_per_class.append(recall)
 
-        # Overall IoU and accuracy
+            f1 = (
+                (2 * precision * recall) / (precision + recall)
+                if (precision + recall) > 0
+                else 0
+            )
+            f1_per_class.append(f1)
+
+        # Overall IoU, F1 and accuracy
         mean_iou = np.mean(iou_per_class) if iou_per_class else 0.0
+        mean_f1 = np.mean(f1_per_class) if f1_per_class else 0.0
         overall_accuracy = np.sum(pred_mask == gt_mask) / gt_mask.size
         return {
             "iou": mean_iou,
+            "f1": mean_f1,
             "acc": overall_accuracy,
             "acc_per_class": accuracy_per_class,
             "iou_per_class": iou_per_class,
             "precision_per_class": precision_per_class,
             "recall_per_class": recall_per_class,
+            "f1_per_class": f1_per_class,
         }
 
 
