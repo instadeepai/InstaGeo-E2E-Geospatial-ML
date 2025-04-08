@@ -51,7 +51,7 @@ from instageo.data.data_pipeline import (
 
 BLOCKSIZE = 512
 COLLECTION = ["sentinel-2-l2a"]
-BANDS_ASSET = ["B02", "B03", "B04", "B8A", "B11", "B12"]
+S2_HLS_COMMON_BANDS_ASSET = ["B02", "B03", "B04", "B8A", "B11", "B12"]
 SCL_ASSET = ["SCL"]
 
 
@@ -344,7 +344,7 @@ def open_mf_jp2_dataset(
     band_paths = []
     scl_paths = []
     for granule in band_files["granules"]:
-        for band in BANDS_ASSET:
+        for band in S2_HLS_COMMON_BANDS_ASSET:
             pattern = os.path.join(
                 granule, "GRANULE/*", "IMG_DATA/R20m", f"*_{band}_20m.jp2"
             )
@@ -756,12 +756,16 @@ def create_s2_dataset(
 
 
 def search_and_open_s2_cogs(
-    client: Client, tile_dict: dict[str, Any], load_masks: bool = False
+    client: Client,
+    bands_to_load: List[str],
+    tile_dict: dict[str, Any],
+    load_masks: bool = False,
 ) -> tuple[xr.DataArray, xr.DataArray | None, str]:
     """Searches and opens multiple S2 COGs as an xarray DataArray from given granules IDs.
 
     Args:
         client (pystac_client.Client): pystac_client client to use to perform the search.
+        bands_to_load (List[str]): List of bands to load.
         tile_dict (dict[str, Any]): A dictionary containing granules IDs to retrieve
         for all timesteps of interest.
         load_masks (bool): Whether or not to load the masks COGs.
@@ -775,7 +779,7 @@ def search_and_open_s2_cogs(
     results = get_item_collection(search_objs)
 
     # Load the bands for all timesteps and stack them in a data array
-    assets_to_load = BANDS_ASSET + SCL_ASSET if load_masks else BANDS_ASSET
+    assets_to_load = bands_to_load + SCL_ASSET if load_masks else bands_to_load
     stacked_items = stackstac.stack(
         planetary_computer.sign(ItemCollection(results)),
         assets=assets_to_load,
@@ -785,7 +789,7 @@ def search_and_open_s2_cogs(
         fill_value=NO_DATA_VALUES.get("S2"),
     )
 
-    bands = adjust_dims(stacked_items.sel(band=BANDS_ASSET))
+    bands = adjust_dims(stacked_items.sel(band=bands_to_load))
     masks = adjust_dims(stacked_items.sel(band=SCL_ASSET)) if load_masks else None
 
     bands = bands.astype(np.uint16)

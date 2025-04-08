@@ -85,6 +85,7 @@ def create_and_save_chips_with_seg_maps(
     mask_types: list[str],
     masking_strategy: str,
     window_size: int,
+    task_type: str = "seg",
 ) -> tuple[list[str], list[str | None]]:
     """Chip Creator.
 
@@ -112,6 +113,7 @@ def create_and_save_chips_with_seg_maps(
         and "any" to exclude pixels if the mask is present for at least one timestep. The
         behavior is the same if the chip is extracted for one timestep.)
         window_size (int): Window size to use around the observation pixel.
+        task_type (str): Task type to use to adjust the data type of the segmentation maps.
 
     Returns:
         A tuple containing the lists of created chips and segmentation maps.
@@ -187,7 +189,7 @@ def create_and_save_chips_with_seg_maps(
             )
         if chip.where(chip != no_data_value).count().values == 0:
             continue
-        seg_map = create_segmentation_map(chip, df, window_size)
+        seg_map = create_segmentation_map(chip, df, window_size, task_type)
         seg_map = mask_segmentation_map(chip, seg_map, no_data_value)
         seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
         if seg_map.where(seg_map != seg_no_data_value).count().values == 0:
@@ -345,11 +347,12 @@ def get_tiles(
     """
     if src_crs != 4326:
         data = reproject_coordinates(data, source_epsg=src_crs)
-    mgrs_object = mgrs.MGRS()
-    get_mgrs_tile_id = lambda row: mgrs_object.toMGRS(
-        row["y"], row["x"], MGRSPrecision=0
-    )
-    data["mgrs_tile_id"] = data.apply(get_mgrs_tile_id, axis=1)
+    if "mgrs_tile_id" not in data.columns:
+        mgrs_object = mgrs.MGRS()
+        get_mgrs_tile_id = lambda row: mgrs_object.toMGRS(
+            row["y"], row["x"], MGRSPrecision=0
+        )
+        data["mgrs_tile_id"] = data.apply(get_mgrs_tile_id, axis=1)
     tile_counts = data.groupby("mgrs_tile_id").size().sort_values(ascending=False)
     data = pd.merge(
         data, tile_counts.reset_index(name="counts"), how="left", on="mgrs_tile_id"
@@ -360,7 +363,7 @@ def get_tiles(
 
 
 def create_segmentation_map(
-    chip: Any, df: pd.DataFrame, window_size: int
+    chip: Any, df: pd.DataFrame, window_size: int, task_type: str = "seg"
 ) -> xr.DataArray:
     """Create a segmentation map for the chip using the DataFrame.
 
@@ -370,12 +373,15 @@ def create_segmentation_map(
         df (pd.DataFrame): DataFrame containing the data to be used in the segmentation
             map.
         window_size (int): Window size to use around the observation pixel.
+        task_type (str): Task type to use to adjust the data type of the segmentation maps.
 
     Returns:
          xr.DataArray: The created segmentation map as an xarray DataArray.
     """
     seg_map = xr.full_like(
-        chip.isel(band=0), fill_value=NO_DATA_VALUES.get("SEG_MAP"), dtype=np.int16
+        chip.isel(band=0),
+        fill_value=NO_DATA_VALUES.get("SEG_MAP"),
+        dtype=np.int16 if task_type == "seg" else np.float32,
     )
     df = df[
         (chip["x"].min().item() <= df["geometry"].x)

@@ -21,6 +21,7 @@
 
 import logging
 import os
+from typing import List
 
 import earthaccess
 from pydantic_settings import BaseSettings
@@ -65,9 +66,30 @@ class GDALOptions(BaseSettings):
 
 
 class NoDataValues(BaseSettings):
-    """Settings for no-data values to use for HLS, S2 and segmentation maps."""
+    """Settings for no-data values to use for HLS, S2, S1 and segmentation maps."""
 
     HLS: int = -9999
     S2: int = 0
     S1: int = -1
     SEG_MAP: int = -1
+
+
+class S2Bands(BaseSettings):
+    """Settings for S2 band values."""
+
+    VALUES: List[str] = [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        # Cirrus band - "B10" is excluded from the L2A product as it doesn't contain any
+        # bottom of the atmosphere information.
+        "B11",
+        "B12",
+    ]

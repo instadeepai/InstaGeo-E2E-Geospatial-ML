@@ -19,6 +19,7 @@ data_dependencies = [
     "pystac_client==0.8.5",
     "stackstac==0.5.1",
     "planetary_computer==1.0.0",
+    "pyarrow==18.1.0",
 ]
 model_dependencies = [
     # Add dependencies specific to the model component

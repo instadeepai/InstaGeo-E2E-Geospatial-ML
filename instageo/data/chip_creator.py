@@ -19,11 +19,12 @@
 
 """InstaGeo Chip Creator Module."""
 
+import ast
 import json
 import logging as std_logging
 import os
 from functools import partial
-from typing import Any
+from typing import Any, List, Tuple
 
 import dask.distributed
 import earthaccess
@@ -42,15 +43,16 @@ from instageo.data.data_pipeline import (
     get_pystac_client,
     get_tiles,
 )
-from instageo.data.settings import GDALOptions
+from instageo.data.settings import GDALOptions, S2Bands
 
 load_dotenv(os.path.expanduser("~/.credentials"))
 logging.set_verbosity(logging.INFO)
 std_logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
 
 FLAGS = flags.FLAGS
+S2_BANDS = S2Bands().VALUES
 
-flags.DEFINE_string("dataframe_path", None, "Path to the DataFrame CSV file.")
+flags.DEFINE_string("dataframe_path", None, "Path to the DataFrame file.")
 flags.DEFINE_integer("chip_size", 256, "Size of each chip.")
 flags.DEFINE_integer("src_crs", 4326, "CRS of the geo-coordinates in `dataframe_path`")
 flags.DEFINE_string(
@@ -71,6 +73,16 @@ flags.DEFINE_boolean(
     True,
     """Indicates whether or not the current task is a time series one. The data will be then
     retrieved before the date of observation""",
+)
+flags.DEFINE_enum(
+    "task_type",
+    "seg",
+    ["seg", "reg"],
+    """Type of the task for which the chips are being generated. This will
+    impact the data type used to save the labels and thus the storage used.
+    - "seg" for segmentation tasks. The labels raster file will be saved as int16.
+    - "reg" for regression tasks. The labels raster file will be saved as float32.
+    """,
 )
 flags.DEFINE_integer(
     "num_steps",
@@ -93,6 +105,16 @@ flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
 flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2", "S1"], "Data source to use.")
+flags.DEFINE_list(
+    "s2_bands",
+    ["B02", "B03", "B04", "B8A", "B11", "B12"],
+    "List of different bands to extract. Applies only if `data_source` is set to 'S2'",
+)
+flags.register_validator(
+    "s2_bands",
+    lambda bands: all(b in S2_BANDS for b in bands),
+    message=f"Valid values are {S2_BANDS}",
+)
 flags.DEFINE_integer(
     "cloud_coverage",
     10,
@@ -142,8 +164,87 @@ flags.DEFINE_enum(
     - "any" to exclude pixels if the mask is present for at least one timestep.
     """,
 )
+flags.DEFINE_enum(
+    "data_format",
+    "csv",
+    ["csv", "parquet"],
+    """Format of the original file containing the observations. The data must contain
+    columns named 'date', 'x', 'y', 'label'.
+    In case of a Parquet file, the partitions must be done by the 'year' and 'mgrs_tile_id'
+    columns.
+    """,
+)
+flags.DEFINE_string(
+    "filters",
+    None,
+    """List of filters to use. Filters must be provided as tuples following the
+    structure ('col_to_filter_on' ? 'operator' ? value). Applies only in case of
+    Parquet files.
+    - The columns on which to filter and the operators should be provided as strings.
+    - The operators allowed are ['==', '=', '>', '>=', '<', '<=', '!=', 'in', 'not in']
+    Example: "('year' ? '==' ? 2016); ('mgrs_tile_id' ? '!=' ? 'BAN')"
+    "('year' ? 'in' ? [2016, 2020]); ('mgrs_tile_id' ? 'not in' ? ['13SCS', 'BAN'])"
+    """,
+)
 
 
+def parse_tuple_list(flag_value: str) -> List[Tuple]:
+    """Converts a string into a list of tuples.
+
+    Args:
+        flag_value (str): String containing values to parse as list of tuples.
+            Each tuple is separated by ';'. Within each tuple values are separated
+            by '?'.
+
+    Returns:
+        (List[Tuple]): List of tuples extracted from the original string.
+    """
+    try:
+        return [tuple(item.strip("()").split("?")) for item in flag_value.split(";")]
+    except Exception as e:
+        raise ValueError(
+            f"Error parsing string {flag_value} to extract filters list: {e}"
+        )
+
+
+def parse_filters(flag_value: str) -> List[Tuple[str, str, Any]]:
+    """Converts a list of tuples into valid filters.
+
+    Args:
+        flag_value (str): String containing values to parse as list of tuples.
+            Each tuple is separated by ';'. Within each tuple values are separated
+            by '?'.
+
+    Returns:
+        (List[Tuple[str, str, Any]]): A parsed version of the list of tuples to be used as filters.
+    """
+    try:
+        filters = parse_tuple_list(flag_value)
+        parsed_filters = []
+        ops = ["==", "=", ">", ">=", "<", "<=", "!=", "in", "not in"]
+        for filter in filters:
+            col, op, val = filter
+            try:
+                col = ast.literal_eval(col)
+                op = ast.literal_eval(op)
+                val = ast.literal_eval(val)
+            except Exception as e:
+                raise flags.ValidationError(
+                    f"Could not properly parse filter {filter}: {e}"
+                )
+            if not isinstance(col, str):
+                raise flags.ValidationError("Provide the filter column as a string")
+            if op not in ops:
+                raise flags.ValidationError(f"Operators must be one of {ops}")
+            parsed_filters.append((col, op, val))
+    except Exception as e:
+        raise flags.ValidationError(
+            f"Filters must be provided as tuple ('col_to_filter_on' ? 'operator' ? value): {e}"
+        )
+    return parsed_filters
+
+
+# TODO: Use flags.mark_flags_as_required
 def check_required_flags() -> None:
     """Check if required flags are provided."""
     required_flags = ["dataframe_path", "output_directory"]
@@ -163,14 +264,27 @@ def setup() -> None:
 
 
 def main(argv: Any) -> None:
-    """CSV Chip Creator.
+    """CSV/Parquet Chip Creator.
 
-    Given a csv file containing geo-located point observations and labels, the Chip
+    Given a file containing geo-located point observations and labels, the Chip
     Creator creates small chip from larger tiles which is suitable for training
     segmentation models.
     """
     del argv
-    data = pd.read_csv(FLAGS.dataframe_path)
+    if FLAGS.data_format == "parquet":
+        try:
+            filters = None
+            if FLAGS.filters:
+                filters = parse_filters(FLAGS.filters)
+            data = pd.read_parquet(
+                FLAGS.dataframe_path,
+                engine="pyarrow",
+                filters=filters,
+            )
+        except Exception as e:
+            raise ValueError(f"Provide valid path and filters: {e}")
+    else:
+        data = pd.read_csv(FLAGS.dataframe_path)
     data["date"] = (
         pd.to_datetime(data["date"]) - pd.offsets.MonthBegin(1)
         if FLAGS.shift_to_month_start
@@ -266,6 +380,7 @@ def main(argv: Any) -> None:
                         mask_types=FLAGS.mask_types,
                         masking_strategy=FLAGS.masking_strategy,
                         window_size=FLAGS.window_size,
+                        task_type=FLAGS.task_type,
                     )
                     all_chips.extend(chips)
                     all_seg_maps.extend(seg_maps)
@@ -354,7 +469,11 @@ def main(argv: Any) -> None:
                 try:
                     chips, seg_maps = create_and_save_chips_with_seg_maps(
                         data_reader=(
-                            partial(s2_utils.search_and_open_s2_cogs, s2_pystac_client)
+                            partial(
+                                s2_utils.search_and_open_s2_cogs,
+                                s2_pystac_client,
+                                FLAGS.s2_bands,
+                            )
                             if FLAGS.processing_method == "cog"
                             else s2_utils.open_mf_jp2_dataset
                         ),
@@ -371,6 +490,7 @@ def main(argv: Any) -> None:
                         mask_types=FLAGS.mask_types,
                         masking_strategy=FLAGS.masking_strategy,
                         window_size=FLAGS.window_size,
+                        task_type=FLAGS.task_type,
                     )
                     all_chips.extend(chips)
                     all_seg_maps.extend(seg_maps)
@@ -454,6 +574,7 @@ def main(argv: Any) -> None:
                         mask_types=[],
                         masking_strategy=FLAGS.masking_strategy,
                         window_size=FLAGS.window_size,
+                        task_type=FLAGS.task_type,
                     )
                     all_chips.extend(chips)
                     all_seg_maps.extend(seg_maps)
