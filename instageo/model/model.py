@@ -19,59 +19,232 @@
 
 """Model Module."""
 
-import os
-import time
-from pathlib import Path
+import logging
+from dataclasses import dataclass, field
+from typing import List
 
 import numpy as np
-import requests  # type: ignore
 import torch
 import torch.nn as nn
-import yaml  # type: ignore
-from absl import logging
+from huggingface_hub import hf_hub_download
 
-from instageo.model.Prithvi import ViTEncoder, get_3d_sincos_pos_embed
+from instageo.model.pritvhi import PrithviViT
+from instageo.model.utils import PRETRAINED_BANDS, HLSBands, checkpoint_filter_fn_vit
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
 
 
-def download_file(url: str, filename: str | Path, retries: int = 3) -> None:
-    """Downloads a file from the given URL and saves it to a local file.
+@dataclass
+class PrithviConfig:
+    """Configuration class for Prithvi model.
 
+    Attributes:
+        img_size: Size of input images
+        num_frames: Number of temporal frames
+        patch_size: Size of patches in [t, h, w] format
+        in_chans: Number of input channels
+        embed_dim: Embedding dimension
+        depth: Number of transformer layers
+        num_heads: Number of attention heads
+        decoder_embed_dim: Embedding dimension for decoder
+        decoder_depth: Number of decoder layers
+        decoder_num_heads: Number of decoder attention heads
+        mlp_ratio: Ratio of MLP hidden dim to embedding dim
+        coords_encoding: List of coordinate encodings to use
+        coords_scale_learn: Whether to learn coordinate scaling
+        bands: List of bands to use
+        mask_ratio: Masking ratio for MAE
+        norm_pix_loss: Whether to normalize pixel loss
+    """
+
+    img_size: int = 224
+    num_frames: int = 4
+    patch_size: List[int] = field(default_factory=lambda: [1, 16, 16])
+    in_chans: int = 6
+    embed_dim: int = 768
+    depth: int = 12
+    num_heads: int = 12
+    decoder_embed_dim: int = 512
+    decoder_depth: int = 8
+    decoder_num_heads: int = 16
+    mlp_ratio: int = 4
+    coords_encoding: List[str] = field(default_factory=lambda: [])
+    coords_scale_learn: bool = False
+    bands: List[HLSBands] = field(default_factory=lambda: PRETRAINED_BANDS)
+    mask_ratio: float = 0.75
+    norm_pix_loss: bool = False
+
+    def to_dict(self) -> dict:
+        """Convert the configuration to a dictionary.
+
+        Returns:
+            dict: Dictionary representation of the configuration.
+        """
+        return {
+            "img_size": self.img_size,
+            "num_frames": self.num_frames,
+            "patch_size": self.patch_size,
+            "in_chans": self.in_chans,
+            "embed_dim": self.embed_dim,
+            "depth": self.depth,
+            "num_heads": self.num_heads,
+            "decoder_embed_dim": self.decoder_embed_dim,
+            "decoder_depth": self.decoder_depth,
+            "decoder_num_heads": self.decoder_num_heads,
+            "mlp_ratio": self.mlp_ratio,
+            "coords_encoding": self.coords_encoding,
+            "coords_scale_learn": self.coords_scale_learn,
+            "bands": self.bands,
+            "mask_ratio": self.mask_ratio,
+            "norm_pix_loss": self.norm_pix_loss,
+        }
+
+
+pretrained_weights = {
+    "prithvi_eo_v1_100": {
+        "hf_hub_id": "ibm-nasa-geospatial/Prithvi-EO-1.0-100M",
+        "hf_hub_filename": "Prithvi_EO_V1_100M.pt",
+    },
+    "prithvi_eo_v2_300": {
+        "hf_hub_id": "ibm-nasa-geospatial/Prithvi-EO-2.0-300M",
+        "hf_hub_filename": "Prithvi_EO_V2_300M.pt",
+    },
+    "prithvi_eo_v2_300_tl": {
+        "hf_hub_id": "ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL",
+        "hf_hub_filename": "Prithvi_EO_V2_300M_TL.pt",
+    },
+    "prithvi_eo_v2_600": {
+        "hf_hub_id": "ibm-nasa-geospatial/Prithvi-EO-2.0-600M",
+        "hf_hub_filename": "Prithvi_EO_V2_600M.pt",
+    },
+    "prithvi_eo_v2_600_tl": {
+        "hf_hub_id": "ibm-nasa-geospatial/Prithvi-EO-2.0-600M-TL",
+        "hf_hub_filename": "Prithvi_EO_V2_600M_TL.pt",
+    },
+}
+
+prithvi_cfgs = {
+    "prithvi_eo_tiny": PrithviConfig(
+        num_frames=1,
+        embed_dim=256,
+        depth=4,
+        num_heads=4,
+        decoder_embed_dim=128,
+        decoder_depth=4,
+        decoder_num_heads=4,
+    ),
+    "prithvi_eo_v1_100": PrithviConfig(
+        num_frames=3,
+    ),
+    "prithvi_eo_v2_100": PrithviConfig(),
+    "prithvi_eo_v2_300": PrithviConfig(
+        embed_dim=1024,
+        depth=24,
+        num_heads=16,
+    ),
+    "prithvi_eo_v2_300_tl": PrithviConfig(
+        embed_dim=1024,
+        depth=24,
+        num_heads=16,
+        coords_encoding=["time", "location"],
+        coords_scale_learn=True,
+    ),
+    "prithvi_eo_v2_600": PrithviConfig(
+        embed_dim=1280,
+        depth=32,
+        num_heads=16,
+        patch_size=[1, 14, 14],
+    ),
+    "prithvi_eo_v2_600_tl": PrithviConfig(
+        embed_dim=1280,
+        depth=32,
+        num_heads=16,
+        patch_size=[1, 14, 14],
+        coords_encoding=["time", "location"],
+        coords_scale_learn=True,
+    ),
+}
+seg_head_kernel_sizes = {
+    "prithvi_eo_tiny": [3, 3, 3, 3],
+    "prithvi_eo_v1_100": [3, 3, 3, 3],
+    "prithvi_eo_v2_100": [3, 3, 3, 3],
+    "prithvi_eo_v2_300": [3, 3, 3, 3],
+    "prithvi_eo_v2_300_tl": [3, 3, 3, 3],
+    "prithvi_eo_v2_600": [5, 5, 5, 7],
+    "prithvi_eo_v2_600_tl": [5, 5, 5, 7],
+}
+
+
+def create_prithvi(
+    variant: str,
+    model_bands: list[HLSBands],
+    pretrained_bands: list[HLSBands],
+    pretrained: bool = False,
+    num_frames: int = 1,
+    img_size: int = 224,
+) -> PrithviViT:
+    """Builds the PrithviViT model.
+
+    This function constructs a PrithviViT model using the specified
+    variant and configurations.
     Args:
-        url (str): The URL from which to download the file.
-        filename (str): The local path where the file will be saved.
-        retries (int, optional): The number of times to retry the download
-                                 in case of failure. Defaults to 3.
-
-    Raises:
-        Exception: If the download fails after the specified number of retries.
+        variant (str): The variant of the PrithviViT model to build.
+        pretrained (bool): Whether to load pretrained weights.
+        model_bands (list[HLSBands]): A list of bands the model will use.
+        If None, it uses the pretrained bands.
+        pretrained_bands (list[HLSBands]): A list of pretrained bands to be used.
+        num_frames (int, optional): The number of frames for the model.
+        img_size: Image size used in the dataset.
 
     Returns:
-        None
+        PrithviViT: A fully constructed PrithviViT model.
     """
-    if os.path.exists(filename):
-        logging.info(f"File '{filename}' already exists. Skipping download.")
-        return
+    # Load default config
+    model_args = prithvi_cfgs[variant].to_dict()
 
-    for attempt in range(retries):
+    pretrained_bands = pretrained_bands or model_args.get("bands", PRETRAINED_BANDS)
+
+    kwargs = {}
+    kwargs["in_chans"] = len(model_bands)
+    kwargs["num_frames"] = num_frames
+    kwargs["img_size"] = img_size
+    model_args.update(kwargs)
+    model = PrithviViT(**model_args)
+
+    if pretrained:
+        assert variant in pretrained_weights, (
+            f"No pre-trained model found for variant {variant} "
+            f"(pretrained models: {pretrained_weights.keys()})"
+        )
+
         try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                with open(filename, "wb") as f:
-                    f.write(response.content)
-                logging.info(f"Download successful on attempt {attempt + 1}")
-                break
-            else:
-                logging.warning(
-                    f"Attempt {attempt + 1} failed with status code {response.status_code}"  # noqa
-                )
-        except requests.RequestException as e:
-            logging.warning(f"Attempt {attempt + 1} failed with error: {e}")
+            # Download config.json to count model downloads
+            _ = hf_hub_download(
+                repo_id=pretrained_weights[variant]["hf_hub_id"],
+                filename="config.json",
+            )
+            # Load model from Hugging Face
+            pretrained_path = hf_hub_download(
+                repo_id=pretrained_weights[variant]["hf_hub_id"],
+                filename=pretrained_weights[variant]["hf_hub_filename"],
+            )
+            state_dict = torch.load(
+                pretrained_path, map_location="cpu", weights_only=True
+            )
+            state_dict = checkpoint_filter_fn_vit(
+                state_dict, model, pretrained_bands, model_bands
+            )
+            model.load_state_dict(state_dict, strict=True)
+        except RuntimeError as e:
+            log.error(f"Failed to load the pre-trained weights for {variant}.")
+            raise e
 
-        if attempt < retries - 1:
-            time.sleep(2)
+    model.model_bands = model_bands
+    model.pretrained_bands = pretrained_bands
 
-    else:
-        raise Exception("Failed to download the file after several attempts.")
+    return model
 
 
 class Norm2D(nn.Module):
@@ -80,16 +253,6 @@ class Norm2D(nn.Module):
     This class implements a 2D normalization layer using Layer Normalization.
     It is designed to normalize 2D inputs (e.g., images or feature maps in a
     convolutional neural network).
-
-    Attributes:
-        ln (nn.LayerNorm): The layer normalization component.
-
-    Args:
-        embed_dim (int): The number of features of the input tensor (i.e., the number of
-            channels in the case of images).
-
-    Methods:
-        forward: Applies normalization to the input tensor.
     """
 
     def __init__(self, embed_dim: int):
@@ -125,8 +288,10 @@ class PrithviSeg(nn.Module):
         temporal_step: int = 1,
         image_size: int = 224,
         num_classes: int = 2,
-        freeze_backbone: bool = True,
         load_pretrained_weights: bool = True,
+        freeze_backbone: bool = True,
+        model_bands: list[int] = list(range(6)),
+        variant: str = "prithvi_eo_v1_100",
     ) -> None:
         """Initialize the PrithviSeg model.
 
@@ -138,63 +303,39 @@ class PrithviSeg(nn.Module):
             temporal_step (int): Size of temporal dimension.
             image_size (int): Size of input image.
             num_classes (int): Number of target classes.
+            load_pretrained_weights (bool): Flag to whether use the pretrained weights or not.
             freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
-            load_pretrained_weights (bool): Flag to load pretrained weights.
+            model_bands (list): Bands used in the dataset.
+            variant (str): The model architecture to use.
         """
         super().__init__()
-        weights_dir = Path.home() / ".instageo" / "prithvi"
-        weights_dir.mkdir(parents=True, exist_ok=True)
-        weights_path = weights_dir / "Prithvi_EO_V1_100M.pt"
-        cfg_path = weights_dir / "config.yaml"
-        download_file(
-            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-1.0-100M/resolve/main/Prithvi_EO_V1_100M.pt?download=true",  # noqa
-            weights_path,
+        model_bands_ = PRETRAINED_BANDS * (len(model_bands) // len(PRETRAINED_BANDS))
+        model = create_prithvi(
+            variant=variant,
+            pretrained=load_pretrained_weights,
+            model_bands=model_bands_,
+            pretrained_bands=PRETRAINED_BANDS,
+            num_frames=temporal_step,
+            img_size=image_size,
         )
-        download_file(
-            "https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M/raw/main/config.yaml",  # noqa
-            cfg_path,
-        )
-        checkpoint = torch.load(weights_path, map_location="cpu")
-        with open(cfg_path) as f:
-            model_config = yaml.safe_load(f)
-
-        model_args = model_config["model_args"]
-
-        model_args["num_frames"] = temporal_step
-        model_args["img_size"] = image_size
-        self.model_args = model_args
-        # instantiate model
-        model = ViTEncoder(**model_args)
         if freeze_backbone:
             for param in model.parameters():
                 param.requires_grad = False
-        if load_pretrained_weights:
-            filtered_checkpoint_state_dict = {
-                key[len("encoder.") :]: value
-                for key, value in checkpoint.items()
-                if key.startswith("encoder.")
-            }
-            filtered_checkpoint_state_dict["pos_embed"] = (
-                torch.from_numpy(
-                    get_3d_sincos_pos_embed(
-                        768,
-                        (temporal_step, image_size // 16, image_size // 16),
-                        cls_token=True,
-                    )
-                )
-                .float()
-                .unsqueeze(0)
-            )
-            _ = model.load_state_dict(filtered_checkpoint_state_dict)
+        self.prithvi_encoder = model
 
-        self.prithvi_100M_backbone = model
+        model_args = prithvi_cfgs[variant].to_dict()
+        self.model_args = model_args
+        model_args["num_frames"] = temporal_step
 
-        def upscaling_block(in_channels: int, out_channels: int) -> nn.Module:
+        def upscaling_block(
+            in_channels: int, out_channels: int, kernel_size: int
+        ) -> nn.Module:
             """Upscaling block.
 
             Args:
                 in_channels (int): number of input channels.
                 out_channels (int): number of output channels.
+                kernel_size (int): kernel size
 
             Returns:
                 An upscaling block configured to upscale spatially.
@@ -212,7 +353,7 @@ class PrithviSeg(nn.Module):
                 nn.Conv2d(
                     in_channels=out_channels,
                     out_channels=out_channels,
-                    kernel_size=3,
+                    kernel_size=kernel_size,
                     padding=1,
                 ),
                 nn.BatchNorm2d(out_channels),
@@ -223,8 +364,14 @@ class PrithviSeg(nn.Module):
             (model_args["embed_dim"] * model_args["num_frames"]) // (2**i)
             for i in range(5)
         ]
+
+        kernel_sizes = seg_head_kernel_sizes[variant]
+
         self.segmentation_head = nn.Sequential(
-            *[upscaling_block(embed_dims[i], embed_dims[i + 1]) for i in range(4)],
+            *[
+                upscaling_block(embed_dims[i], embed_dims[i + 1], kernel_sizes[i])
+                for i in range(4)
+            ],
             nn.Dropout(0.1),
             nn.Conv2d(
                 kernel_size=1, in_channels=embed_dims[-1], out_channels=num_classes
@@ -240,15 +387,17 @@ class PrithviSeg(nn.Module):
         Returns:
             torch.Tensor: Output tensor after image segmentation.
         """
-        features = self.prithvi_100M_backbone(img)
+        features = self.prithvi_encoder(img)
+
         # drop cls token
         reshaped_features = features[:, 1:, :]
+
         feature_img_side_length = int(
             np.sqrt(reshaped_features.shape[1] // self.model_args["num_frames"])
         )
         reshaped_features = reshaped_features.permute(0, 2, 1).reshape(
             features.shape[0], -1, feature_img_side_length, feature_img_side_length
         )
-
         out = self.segmentation_head(reshaped_features)
+
         return out

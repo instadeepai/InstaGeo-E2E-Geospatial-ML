@@ -168,6 +168,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         class_weights: List[float] = [1, 2],
         ignore_index: int = -100,
         weight_decay: float = 1e-2,
+        model_name: str = "pritvhi-eo1",
     ) -> None:
         """Initialization.
 
@@ -184,13 +185,16 @@ class PrithviSegmentationModule(pl.LightningModule):
             class_weights (List[float]): Class weights for mitigating class imbalance.
             ignore_index (int): Class index to ignore during loss computation.
             weight_decay (float): Weight decay for L2 regularization.
+            model_name (str): Model architecture chosen.
         """
         super().__init__()
+
         self.net = PrithviSeg(
             image_size=image_size,
             num_classes=num_classes,
             temporal_step=temporal_step,
             freeze_backbone=freeze_backbone,
+            variant=model_name,
             load_pretrained_weights=load_pretrained_weights,
         )
         weight_tensor = torch.tensor(class_weights).float() if class_weights else None
@@ -686,6 +690,7 @@ def main(cfg: DictConfig) -> None:
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
+            model_name=cfg.model.model_name,
             load_pretrained_weights=cfg.model.load_pretrained_weights,
         )
         hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
@@ -755,6 +760,8 @@ def main(cfg: DictConfig) -> None:
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
+            model_name=cfg.model.model_name,
+            pretrained=cfg.model.pretrained,
         )
         trainer = pl.Trainer(
             accelerator=get_device(),
@@ -774,6 +781,8 @@ def main(cfg: DictConfig) -> None:
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
+            model_name=cfg.model.model_name,
+            pretrained=cfg.model.pretrained,
         )
         model.eval()
         infer_filepath = os.path.join(root_dir, cfg.test_filepath)
@@ -876,6 +885,8 @@ def main(cfg: DictConfig) -> None:
             class_weights=cfg.train.class_weights,
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
+            model_name=cfg.model.model_name,
+            pretrained=cfg.model.pretrained,
         )
         chip_inference(test_loader, output_dir, model, device=get_device())
 

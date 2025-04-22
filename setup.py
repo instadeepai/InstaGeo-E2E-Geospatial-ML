@@ -25,11 +25,12 @@ model_dependencies = [
     # Add dependencies specific to the model component
     "pytorch_lightning",
     "torch",
-    "timm==0.4.12",
+    "timm==1.0.15",
     "einops",
     "tensorboard",
     "hydra-core",
     "omegaconf",
+    "huggingface_hub",
 ]
 apps_dependencies = [
     # Add dependencies specific to the apps component

@@ -1,8 +1,9 @@
 pytorch_lightning
 torch
-timm==0.4.12
+timm==1.0.15
 einops
 tensorboard
 omegaconf
 hydra-core
 torchvision
+huggingface_hub

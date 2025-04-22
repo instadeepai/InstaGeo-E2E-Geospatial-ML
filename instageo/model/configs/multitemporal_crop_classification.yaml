@@ -30,6 +30,7 @@ train:
   weight_decay: 0.01
 
 model:
+  model_name: prithvi_eo_v1_100 #prithvi_eo_v1_100 or prithvi_eo_v2_300 or prithvi_eo_v2_300_tl or prithvi_eo_v2_600 or prithvi_eo_v2_600_tl
   freeze_backbone: False
   load_pretrained_weights: True
   num_classes: 13
