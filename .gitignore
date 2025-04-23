@@ -143,10 +143,10 @@ __pycache__/
 *.ipynb
 nul/
 !*InstaGeo_Demo.ipynb
-*.tif*
-*.csv
+*.tif
 *.json
-*.html
+*.csv
 .neptune/
-*.gpkg
+*.yaml
 *.ckpt
+*.gpkg

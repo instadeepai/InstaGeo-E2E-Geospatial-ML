@@ -21,7 +21,7 @@
 
 import logging
 import os
-from typing import List
+from typing import Dict, List
 
 import earthaccess
 from pydantic_settings import BaseSettings
@@ -66,9 +66,9 @@ class GDALOptions(BaseSettings):
 
 
 class NoDataValues(BaseSettings):
-    """Settings for no-data values to use for HLS, S2, S1 and segmentation maps."""
+    """Settings for no-data values to use for HLS, S2 and segmentation maps."""
 
-    HLS: int = -9999
+    HLS: int = 0
     S2: int = 0
     S1: int = -1
     SEG_MAP: int = -1
@@ -93,3 +93,53 @@ class S2Bands(BaseSettings):
         "B11",
         "B12",
     ]
+
+
+class HLSBlockSizes(BaseSettings):
+    """Settings for block sizes used in COG tiling."""
+
+    X: int = 256
+    Y: int = 256
+
+
+class HLSBandsSettings(BaseSettings):
+    """Settings for HLS bands configuration."""
+
+    ASSET: List[str] = ["blue", "green", "red", "nir narrow", "swir 1", "swir 2"]
+
+    NAMEPLATE: Dict[str, Dict[str, str]] = {
+        "HLSL30_2.0": {
+            "B01": "coastal aerosol",
+            "B02": "blue",
+            "B03": "green",
+            "B04": "red",
+            "B05": "nir narrow",
+            "B06": "swir 1",
+            "B07": "swir 2",
+            "B09": "cirrus",
+            "B10": "thermal infrared 1",
+            "B11": "thermal",
+        },
+        "HLSS30_2.0": {
+            "B01": "coastal aerosol",
+            "B02": "blue",
+            "B03": "green",
+            "B04": "red",
+            "B05": "red-edge 1",
+            "B06": "red-edge 2",
+            "B07": "red-edge 3",
+            "B08": "nir broad",
+            "B8A": "nir narrow",
+            "B09": "water vapor",
+            "B10": "cirrus",
+            "B11": "swir 1",
+            "B12": "swir 2",
+        },
+    }
+
+
+class HLSAPISettings(BaseSettings):
+    """Settings for API configuration."""
+
+    URL: str = "https://cmr.earthdata.nasa.gov/stac/LPCLOUD"
+    COLLECTIONS: List[str] = ["HLSL30_2.0", "HLSS30_2.0"]

@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 
 data_dependencies = [
     # Add dependencies specific to the data component
-    "geopandas==0.14.1",
+    "geopandas==0.14.4",
     "shapely",
     "cftime",
     "h5pyd",

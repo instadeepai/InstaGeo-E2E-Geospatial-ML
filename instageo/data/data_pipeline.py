@@ -21,9 +21,11 @@
 
 import logging
 import os
+from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Tuple
 
+import dask
 import geopandas as gpd
 import mgrs
 import numpy as np
@@ -31,7 +33,7 @@ import pandas as pd
 import xarray as xr
 from pyproj import Transformer
 from pystac_client import Client
-from shapely.geometry import box
+from tqdm import tqdm
 
 from instageo.data.settings import NoDataValues
 
@@ -315,10 +317,9 @@ def reproject_coordinates(df: pd.DataFrame, source_epsg: int = 4326) -> pd.DataF
         f"EPSG:{source_epsg}", "EPSG:4326", always_xy=True
     )
 
-    # Reproject the invalid rows
-    df[["x", "y"]] = df.apply(
-        lambda row: transformer.transform(row["x"], row["y"]), axis=1
-    )
+    # Reproject the invalid rows using Vectorized transformation
+    x, y = transformer.transform(df["x"].values, df["y"].values)
+    df[["x", "y"]] = np.column_stack((x, y))
 
     return df
 
@@ -429,35 +430,6 @@ def get_chip_coords(
     return np.unique(np.stack((cols // chip_size, rows // chip_size), axis=-1), axis=0)
 
 
-def make_valid_bbox(
-    lon_min: float, lat_min: float, lon_max: float, lat_max: float
-) -> tuple[float, float, float, float]:
-    """Create a valid bounding box to search for tiles.
-
-    The purpose of this function is to still be able to extract data through
-    earthaccess even given just a single observation in a tile (min_count = 1).
-    When the number of observations in a tile is 1, or if we only have aligned
-    observations, the lon_min, lat_min, lon_max, lat_max extracted from those
-    won't produce a valid bounding box. Thus, we attempt to create a small buffer
-    around the observation(s) to produce a valid bounding box.
-
-    Args:
-        lon_min (float): Minimum longitude
-        lat_min (float): Minimum latitude
-        lon_max (float): Maximum longitude
-        lat_max (float): Maximum latitude
-
-    Returns:
-        A tuple of coordinates to use for a bounding box
-
-    """
-    epsilon = 1e-3
-    if box(lon_min, lat_min, lon_max, lat_max).is_valid:
-        return lon_min, lat_min, lon_max, lat_max
-    else:
-        return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
-
-
 def get_pystac_client() -> Client:
     """Opens a pystac_client Client instance using MPC STAC API URL.
 
@@ -489,3 +461,140 @@ def adjust_dims(data: xr.DataArray) -> xr.DataArray:
     data.coords["time_band"] = new_bands_indices
     data = data.rename({"time_band": "band"}).transpose("band", "y", "x")
     return data
+
+
+class BaseRasterDataPipeline(ABC):
+    """Abstract Base Class for Raster-Based Data Pipelines.
+
+    This class defines the structure for geospatial data processing pipelines that
+    work with raster imagery and associated masks. It is designed to support large-scale,
+    distributed processing using Dask, and to streamline the generation of data chips
+    and segmentation labels for machine learning applications.
+    """
+
+    def __init__(
+        self,
+        output_directory: str,
+        chip_size: int,
+        raster_path: str,
+        mask_types: List[str],
+        masking_strategy: str,
+        src_crs: int,
+        spatial_resolution: float,
+        qa_check: bool = True,
+        task_type: str = "seg",
+    ) -> None:
+        """Init."""
+        self.output_directory = output_directory
+        self.chip_size = chip_size
+        self.raster_path = raster_path
+        self.mask_types = mask_types
+        self.masking_strategy = masking_strategy
+        self.src_crs = src_crs
+        self.spatial_resolution = spatial_resolution
+        self.qa_check = qa_check
+        self.task_type = task_type
+
+    @abstractmethod
+    def setup(self) -> None:
+        """Set up necessary configurations on Dask workers.
+
+        Configures relevant GDAL options for reading COGs.
+        """
+        pass
+
+    @abstractmethod
+    def load_data(
+        self, tile_dict: Dict[str, Any]
+    ) -> Tuple[xr.Dataset, xr.Dataset, str]:
+        """Loads data for a specific tile.
+
+        Arguments:
+            A dictionary with a `granules` key. The value of the key should be a
+            list of STAC items.
+
+        Returns:
+            After loading the granules, it should return a tuple containing the following:
+                - Xarray dataset containing data from the granules
+                - Xarray dataset containing the mask information
+                - CRS string
+        """
+        pass
+
+    @abstractmethod
+    def process_row(
+        self,
+        row_dict: Dict[str, Any],
+        flags_dict: Dict[str, Any],
+        data_bundle: Tuple[xr.Dataset, xr.Dataset, str],
+    ) -> Tuple[str, str] | None:
+        """Processes a single row of data.
+
+        Arguments:
+            row_dict: Dictionary created from a row in the observation records dataframe.
+            flags_dict: Dictionary mapping all arguments and values needed to process the row.
+            data_bundle: Output of `self.load_data`.
+
+        Returns: None if successful or a tuple of the chip and label filenames.
+        """
+        pass
+
+    def run(self, dataset: Dict[str, Any], obsv_records: pd.DataFrame) -> None:
+        """Main method to run the pipeline and create all chips and corresponding labels.
+
+        Arguments:
+            dataset: A dataset mapping `key` to STAC Items.
+            obsv_records: A dataframe containing a column that match each row to STAC items in
+                `dataset` using `key`
+
+        Returns:
+            None.
+        """
+        with dask.distributed.Client() as client:
+            with dask.distributed.performance_report(
+                filename=os.path.join(self.output_directory, "dask-report.html")
+            ):
+                client.run(self.setup)
+                logging.info(
+                    f"View Dask Distributed Dashboard at {client.dashboard_link}."
+                )
+                os.makedirs(os.path.join(self.output_directory, "chips"), exist_ok=True)
+                os.makedirs(
+                    os.path.join(self.output_directory, "seg_maps"), exist_ok=True
+                )
+
+                # Prepare flags for serialization
+                flags_dict = {
+                    "output_directory": self.output_directory,
+                    "chip_size": self.chip_size,
+                    "raster_path": self.raster_path,
+                    "mask_types": self.mask_types,
+                    "masking_strategy": self.masking_strategy,
+                }
+
+                chip_paths = []
+                label_paths = []
+                for stac_items_str, tile_dict in tqdm(
+                    dataset.items(), desc="Processing HLS Dataset"
+                ):
+                    df = obsv_records[obsv_records["stac_items_str"] == stac_items_str]
+                    data_bundle = self.load_data(tile_dict)
+                    futures = []
+                    for _, row in df.iterrows():
+                        row_dict = row.to_dict()
+                        row_dict["geometry"] = row.geometry.__geo_interface__
+                        futures.append(
+                            client.submit(
+                                self.process_row, row_dict, flags_dict, data_bundle
+                            )
+                        )
+
+                    results = client.gather(futures)
+                    for result in results:
+                        if result:
+                            chip_paths.append(result[0])
+                            label_paths.append(result[1])
+        logging.info("Saving dataframe of chips and segmentation maps.")
+        pd.DataFrame({"Input": chip_paths, "Label": label_paths}).to_csv(
+            os.path.join(self.output_directory, "hls_raster_dataset.csv")
+        )

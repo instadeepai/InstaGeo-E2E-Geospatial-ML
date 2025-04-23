@@ -1,11 +1,9 @@
-# InstaGeo - Data (Chip Creator)
+# InstaGeo - Data
 
 ## Overview
 Working with raw satellite data typically demands a deep understanding of data processing techniques and specialized expertise, which can create significant barriers for those looking to utilize this data effectively, particularly in initiatives aimed at driving social good
 
-InstaGeo's Chip Creator aims to fill this gap by enabling researchers to leverage multispectral imagery without the need to handle or process raw satellite data, making it easier to focus on analysis and application.
-
-By providing gelocated observation records containing 'longitude', 'latitude', 'date' and 'label', chip creator sources the appropriate tiles and creates valid chips with corresponding segmentation maps.
+InstaGeo aims to fill this gap by enabling researchers to leverage multispectral imagery without the need to handle or process raw satellite data, making it easier to focus on analysis and application.
 
 ## Data Sources
 ### Harmonized Landsat Sentinel - HLS
@@ -16,20 +14,6 @@ Sentinel-2, part of [ESA](https://www.esa.int/)'s [Copernicus Program](https://w
 
 ### Sentinel-1
 Sentinel-1, part of [ESA](https://www.esa.int/)'s [Copernicus Program](https://www.copernicus.eu/en), provides all-weather, day-and-night radar imagery using C-band Synthetic Aperture Radar (SAR). It offers global coverage with revisit times of 6 to 12 days, supporting applications like land and ocean monitoring, emergency response, and environmental surveillance with free and open access to its data.
-
-## Workflow
-- Input geolocated observation records in a CSV file with the following columns:
-    - x (longitude)
-    - y (latitude)
-    - date
-    - label
-- Group records based on Military Grid Reference System (MGRS)
-- For each record, create a corresponding temporal series of granules
-- Create a set of all granules
-- Download the required bands from each granule
-- Create and save chips and segmentation maps
-
-Chip creator is particularly useful for geospatial image segmentation where large satellite images are segmented into smaller chips for training geospatial models (such as [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M)) using image segmentation objective.
 
 ## Requirements
 - Python >= 3.10
@@ -71,6 +55,25 @@ CLIENT_ID=cdse-public
 ```
 Replace `your_email@example.com` and `your_password`  with those of your account.
 The CLIENT_ID must remain cdse-public.
+
+
+
+# Chip Creator
+The Chip Creator script is designed for scenarios where label data is provided in a CSV file format. It automates the extraction of relevant satellite tiles and the generation of image chips with corresponding segmentation maps. By using geolocated observation records that include longitude, latitude, date, and label, the script sources the appropriate satellite tiles and creates valid chips, each paired with an accurate segmentation map.
+
+## Workflow
+- Input geolocated observation records in a CSV file with the following columns:
+    - x (longitude)
+    - y (latitude)
+    - date
+    - label
+- Group records based on Military Grid Reference System (MGRS)
+- For each record, create a corresponding temporal series of granules
+- Create a set of all granules
+- Download the required bands from each granule
+- Create and save chips and segmentation maps
+
+Chip creator is particularly useful for geospatial image segmentation where large satellite images are segmented into smaller chips for training geospatial models (such as [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M)) using image segmentation objective.
 
 ## Usage
 
@@ -163,4 +166,77 @@ python -m "instageo.data.chip_creator" \
      --temporal_step=30 \
      --num_steps=3 \
      --data_source=S1
+```
+
+
+
+
+
+# Raster Chip Creator
+Raster Chip Creator is a script designed for scenarios where no CSV file containing labels or metadata is provided. Instead, all necessary pieces of information are extracted directly from raster files or a directory containing multiple rasters. These raster files encode target values as pixel-level data, where each pixel represents a specific label or class tied to its geographic location. Acting as built-in segmentation maps, the rasters guide the generation of satellite image chips and corresponding segmentation masks. The script automates the entire process, from tile extraction to chip creation, based on a chip size parameter provided by the user.
+
+It is ideal for situations where you have geospatial data in raster format, and you want to generate image chips for further analysis or training machine learning models.
+
+## Workflow
+- Input Data:
+Provide a folder containing one or more raster files. Each raster will contain geospatial information, and the tool will use the raster's pixel values to generate segmentation maps.
+
+- Extract Tiles:
+The tool will automatically extract tiles from the provided raster(s) based on the geolocation information encoded in the raster file(s).
+
+- Crop Tiles to Chips:
+For each tile, the tool will crop it into smaller, fixed-size chips (e.g., 256x256 pixels or another defined size). Each chip will be created from a specific part of the raster.
+
+- Generate Segmentation Maps:
+Each chip will be paired with a corresponding segmentation map, which is derived from the pixel values of the raster.
+
+- Save Chips and Segmentation Maps:
+The cropped chips and their segmentation maps will be saved to a specified output directory, ready for use in downstream tasks like analysis or model training.
+
+## Usage
+
+### Command-line Arguments
+- `--raster_path`: Path to a single raster file or a folder containing multiple raster files. These files will be used to extract the tiles and generate the chips.
+
+- `--records_file`: Path to input records file containing at least date and geometry columns.
+
+- `--src_crs`: Coordinate Reference System (CRS) for the input raster data.
+
+- `--spatial_resolution`: Defines the ground sampling distance (in units of the specified CRS) for both the output chips and segmentation maps. Both outputs will use the same CRS specified by `src_crs` and will have the specified resolution. For the raster chip creator, the input segmentation map must have this resolution. For the regular chip creator, the output segmentation map will be generated at this resolution.
+
+- `--chip_size`: Size of each chip in pixels.
+
+- `--output_directory`: Directory where the generated chips and segmentation maps will be saved.
+
+- `--num_steps`: Defines the number of temporal steps to retrieve from the raster(s). For time series data, this will retrieve chips from num_steps prior to the observation date.
+
+- `--temporal_step`: Temporal step size (in days) for fetching data in time-series tasks.
+
+- `--temporal_tolerance`: Tolerance in days for finding the closest tile in temporal data.
+
+- `--data_source`: Select the satellite data source (e.g., HLS, S2, S1).
+
+- `--cloud_coverage`: Defines the maximum allowed cloud coverage for tiles. Valid values are between 0 and 100.
+
+- `--mask_types`: List which quality masks to apply using the HLS QA bitmask. These masks help exclude unwanted regions (like clouds or water) from your chips (cloud, near_cloud_or_shadow, cloud_shadow and water). See section 6.4 of [HLS User Guide](https://lpdaac.usgs.gov/documents/1698/HLS_User_Guide_V2.pdf) for more details on the mask types.
+
+- `--masking_strategy`: Defines the masking strategy:
+
+    \- **"each"**: Masking applied for each individual timestep.
+
+    \- **"any"**: Masking applied if any timestep contains a mask.
+
+- `--qa_check`: Enables quality control checks to filter out invalid chips. Removes chips that have no valid data after cloud masking, as well as segmentation maps that contain no valid labels after masking.
+
+- `--daytime_only`: Filters out nighttime observations. Using the `datetime` and `bbox` fields of a STAC item, it checks if the satellite data was recorded between sunrise and sunset.
+
+
+### Running the Module
+To run the module, use the following command in the terminal:
+
+```bash
+python raster_chip_creator.py \
+ --raster_path /path/to/raster.tif \
+ --output_dir /path/to/output \
+ --chip_size 256
 ```

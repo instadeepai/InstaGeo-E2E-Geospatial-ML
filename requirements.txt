@@ -1,4 +1,4 @@
-geopandas==0.14.1
+geopandas==0.14.4
 shapely
 pandas
 xarray[complete]
@@ -14,12 +14,14 @@ isort
 jupyter
 mypy
 neptune-client
-numpy
-pre-commit
-pytest
+numpy==1.26.4
+pre-commit==3.7.1
+pytest==8.3.2
 setuptools
 streamlit
 tqdm
 pytest-cov
 rioxarray
 typer
+tomli
+astral

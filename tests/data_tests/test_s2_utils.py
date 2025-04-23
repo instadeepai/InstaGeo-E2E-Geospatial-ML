@@ -1,20 +1,26 @@
 import os
 import tempfile
+import time
 import zipfile
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from pystac import Item
 
 from instageo.data.s2_utils import (
+    ItemSearch,
     S2AuthState,
     add_s2_granules,
     create_mask_from_scl,
     create_s2_dataset,
     extract_and_delete_zip_files,
     find_best_tile,
+    get_item_collection,
+    get_item_search_objs,
     process_s2_metadata,
     retrieve_s2_metadata,
 )
@@ -812,3 +818,127 @@ def test_extract_and_delete_zip_files():
         with open(extracted_file_path) as extracted_file:
             content = extracted_file.read()
             assert content == "This is a test file."
+
+
+@pytest.fixture
+def auth_instance():
+    """Fixture to create an instance of S2AuthState."""
+    return S2AuthState(
+        client_id="test_client", username="test_user", password="test_pass"
+    )
+
+
+def test_authenticate_success(auth_instance):
+    """Test successful authentication."""
+    with patch.object(
+        auth_instance,
+        "_get_access_and_refresh_token",
+        return_value=("access123", "refresh123", 3600),
+    ):
+        auth_instance.authenticate()
+
+        assert auth_instance.access_token == "access123"
+        assert auth_instance.refresh_token == "refresh123"
+        assert auth_instance.token_expiry_time is not None
+        assert auth_instance.token_expiry_time > time.time()
+
+
+def test_authenticate_failure(auth_instance):
+    """Test authentication failure scenario."""
+    with patch.object(
+        auth_instance, "_get_access_and_refresh_token", return_value=(None, None, None)
+    ):
+        with pytest.raises(
+            ValueError, match="Failed to authenticate and obtain tokens."
+        ):
+            auth_instance.authenticate()
+
+
+class MockClient:
+    def search(self, collections, datetime, query):
+        mock_item_search = MagicMock(spec=ItemSearch)
+        mock_item_search.collections = ["sentinel-2-l2a"]
+        mock_item_search.datetime = datetime
+        mock_item_search.query = {"s2:mgrs_tile": {"eq": "some_tile"}}
+        return mock_item_search
+
+
+@pytest.fixture
+def mock_client():
+    return MockClient()
+
+
+def test_get_item_search_objs(mock_client):
+    tile_dict = {
+        "granules": [
+            "some/path/to/granule_20220101T123456_20220101T123457_some_other_data",
+            "some/path/to/granule_20220102T123456_20220102T123457_some_other_data",
+        ]
+    }
+    result = get_item_search_objs(mock_client, tile_dict)
+
+    assert len(result) == 2
+    assert isinstance(result[0], ItemSearch)
+    assert result[0].collections == ["sentinel-2-l2a"]
+    assert result[1].datetime == "2022-01-02"
+    assert result[1].query == {"s2:mgrs_tile": {"eq": "some_tile"}}
+
+
+def test_single_item_in_search_object():
+    search_obj = MagicMock(spec=ItemSearch)
+    geometry = {"type": "Point", "coordinates": [102.0, 0.5]}
+    bbox = [100.0, 0.0, 105.0, 1.0]
+    datetime_str = "2023-03-28T12:00:00Z"
+    datetime_obj = datetime.fromisoformat(datetime_str[:-1])
+    item = Item(
+        id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
+    )
+    search_obj.item_collection.return_value = [item]
+    result = get_item_collection([search_obj])
+
+    assert result == [item]
+
+
+def test_multiple_items_in_search_object():
+    search_obj = MagicMock(spec=ItemSearch)
+    geometry = {"type": "Point", "coordinates": [102.0, 0.5]}
+    bbox = [100.0, 0.0, 105.0, 1.0]
+    datetime_str = "2023-03-28T12:00:00Z"
+    datetime_obj = datetime.fromisoformat(datetime_str[:-1])
+
+    item1 = Item(
+        id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
+    )
+    item2 = Item(
+        id="item2", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
+    )
+
+    search_obj.item_collection.return_value = [item1, item2]
+    result = get_item_collection([search_obj])
+
+    assert result == [item1]
+
+
+def test_multiple_search_objects():
+    search_obj1 = MagicMock(spec=ItemSearch)
+    geometry = {"type": "Point", "coordinates": [102.0, 0.5]}
+    bbox = [100.0, 0.0, 105.0, 1.0]
+    datetime_str = "2023-03-28T12:00:00Z"
+    datetime_obj = datetime.fromisoformat(datetime_str[:-1])
+    item1 = Item(
+        id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
+    )
+    search_obj1.item_collection.return_value = [item1]
+    search_obj2 = MagicMock(spec=ItemSearch)
+    item2 = Item(
+        id="item2", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
+    )
+    search_obj2.item_collection.return_value = [item2]
+    result = get_item_collection([search_obj1, search_obj2])
+
+    assert result == [item1, item2]
+
+
+def test_edge_case_no_search_objects():
+    result = get_item_collection([])
+    assert result == []

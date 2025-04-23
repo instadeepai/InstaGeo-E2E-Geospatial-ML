@@ -80,13 +80,12 @@ def test_create_chips(setup_and_teardown_output_dir):
 def test_segmentation_map_masking():
     chip_path = "tests/data/chip_178_022.tif"
     seg_map_path = "tests/data/chip_178_022.mask.tif"
-    no_data_value = NO_DATA_VALUES.get("HLS")
+    chipno_data_value = -9999
     chip = rioxarray.open_rasterio(chip_path)
     seg_map = rioxarray.open_rasterio(seg_map_path)
     seg_map = seg_map.assign_coords(x=chip.x.values, y=chip.y.values)
-    seg_map = mask_segmentation_map(chip, seg_map, no_data_value)
-    seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
-    assert seg_map.where(seg_map != seg_no_data_value).count().values == 0
+    seg_map = mask_segmentation_map(chip, seg_map, chipno_data_value)
+    assert seg_map.where(seg_map != NO_DATA_VALUES.get("SEG_MAP")).count().values == 0
 
 
 def test_segmentation_map_masking_pass():

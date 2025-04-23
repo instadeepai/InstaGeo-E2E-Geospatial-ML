@@ -34,12 +34,8 @@ from pystac.item import Item
 from pystac.item_collection import ItemCollection
 from pystac_client import Client
 
-from instageo.data.data_pipeline import (
-    NO_DATA_VALUES,
-    adjust_dims,
-    get_tile_info,
-    make_valid_bbox,
-)
+from instageo.data.data_pipeline import NO_DATA_VALUES, adjust_dims, get_tile_info
+from instageo.data.geo_utils import make_valid_bbox
 
 BLOCKSIZE = 512
 COLLECTION = "sentinel-1-rtc"

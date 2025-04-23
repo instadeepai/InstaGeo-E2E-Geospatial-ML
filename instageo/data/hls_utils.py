@@ -20,28 +20,57 @@
 """Utility Functions for Reading and Processing Harmonized Landsat Sentinel-2 Dataset."""
 
 import bisect
+import logging
 import os
 import re
 import time
 from datetime import datetime, timedelta
 from itertools import chain
-from typing import Any
+from typing import Any, List
 
 import dask
 import dask.delayed
 import earthaccess
+import geopandas as gpd
+import numpy as np
 import pandas as pd
 import rasterio
 import rioxarray as rxr
+import stackstac
 import xarray as xr
-from absl import logging
+from astral import LocationInfo
+from astral.sun import sun
+from pystac.item import Item
+from pystac.item_collection import ItemCollection
+from pystac_client import Client
+from pystac_client.exceptions import APIError
 from rasterio.crs import CRS
+from shapely.geometry import box, shape
+from shapely.ops import unary_union
 
-from instageo.data.data_pipeline import get_tile_info, make_valid_bbox
+from instageo.data import geo_utils, hls_utils
+from instageo.data.data_pipeline import (
+    BaseRasterDataPipeline,
+    adjust_dims,
+    apply_mask,
+    get_tile_info,
+    mask_segmentation_map,
+)
+from instageo.data.settings import (
+    GDALOptions,
+    HLSAPISettings,
+    HLSBandsSettings,
+    HLSBlockSizes,
+    NoDataValues,
+)
 
-# Block sizes for the internal tiling of HLS COGs
-BLOCKSIZE_X = 256
-BLOCKSIZE_Y = 256
+# Create instances of the settings classes
+NO_DATA_VALUES = NoDataValues()
+BLOCKSIZE = HLSBlockSizes()
+BANDS = HLSBandsSettings()
+API = HLSAPISettings()
+
+client = Client.open(API.URL)
 
 
 def parse_date_from_entry(hls_tile_name: str) -> datetime | None:
@@ -157,13 +186,6 @@ def decode_fmask_value(
 ) -> xr.Dataset | xr.DataArray:
     """Decodes HLS v2.0 Fmask.
 
-    The decoding strategy is described in Appendix A of the user manual
-    (https://lpdaac.usgs.gov/documents/1698/HLS_User_Guide_V2.pdf).
-
-    Arguments:
-        value: Input xarray Dataset created from Fmask.tif
-        position: Bit position to decode.
-
     Returns:
         Xarray dataset containing decoded bits.
     """
@@ -201,7 +223,9 @@ def retrieve_hls_metadata(
         try:
             results = earthaccess.search_data(
                 short_name=["HLSL30", "HLSS30"],
-                bounding_box=(make_valid_bbox(lon_min, lat_min, lon_max, lat_max)),
+                bounding_box=(
+                    geo_utils.make_valid_bbox(lon_min, lat_min, lon_max, lat_max)
+                ),
                 temporal=(f"{start_date}T00:00:00", f"{end_date}T23:59:59"),
                 cloud_cover=(0, max(0.001, cloud_coverage)),
             )
@@ -270,7 +294,7 @@ def load_cog(url: str) -> xr.DataArray:
     """
     return rxr.open_rasterio(
         url,
-        chunks=dict(band=1, x=BLOCKSIZE_X, y=BLOCKSIZE_Y),
+        chunks=dict(band=1, x=BLOCKSIZE.X, y=BLOCKSIZE.Y),
         lock=False,
         mask_and_scale=False,  # Scaling will be applied manually
     )
@@ -477,3 +501,566 @@ def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None
         logging.warning(
             f"Couldn't download the following granules after {max_retries} retries:\n{urls}"  # noqa
         )
+
+
+def is_daytime(item: Item) -> bool:
+    """Check if it's daytime.
+
+    Checks if it's daytime using `datetime` and `bbox` properties of a HLS PySTAC item.
+
+    It uses Astral to get the sunrise and sunset times for the item's centroid.
+
+    Args:
+        item (Item): HLS PySTAC item
+
+    Returns:
+        bool: A boolean that is True if it's daytime
+    """
+    item_datetime = pd.to_datetime(item.properties["datetime"])
+    if not item_datetime:
+        return False
+
+    centroid = box(*item.bbox).centroid
+    city = LocationInfo(
+        "Unknown", "Unknown", "UTC", latitude=centroid.y, longitude=centroid.x
+    )
+    s = sun(city.observer, date=item_datetime)
+
+    # Check if the item datetime is between sunrise and sunset
+    return s["sunrise"] <= item_datetime <= s["sunset"]
+
+
+def rename_hls_stac_items(item_collection: List[Item]) -> List[Item]:
+    """Rename STAC Assets.
+
+    HLSS30 and HLSL30 have different asset names. To make processing easier we map the asset names
+    to a common naming convention defined in `BANDS.NAMEPLATE`.
+
+    Arguments:
+        item_collection (List[Item]): A list of PySTAC items.
+
+    Returns:
+        List of renamed PySTAC items.
+    """
+    for item in item_collection:
+        for original_band, new_band in BANDS.NAMEPLATE[item.collection_id].items():
+            item.assets[new_band] = item.assets.pop(original_band)
+    return item_collection
+
+
+def get_raster_tile_info(
+    data: gpd.GeoDataFrame,
+    num_steps: int = 3,
+    temporal_step: int = 10,
+    temporal_tolerance: int = 5,
+) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
+    """Get Raster Tile Info.
+
+    Retrieves a summary of all tiles required for a given dataset. The summary contains
+    the desired start and end date for each tile. Also retrieves a list of queries
+    that can be used to retrieve the tiles for each observation in `data`.
+
+    Args:
+        data (pd.DataFrame): A dataframe containing observation records.
+        num_steps (int): Number of temporal time steps
+        temporal_step (int): Size of each temporal step.
+        temporal_tolerance (int): Number of days used as offset for the
+        start and end dates to search for each tile.
+
+    Returns:
+        A `tile_info` dataframe and a list of `tile_queries`
+    """
+    data = data[["mgrs_tile_id", "input_features_date", "geometry_4326"]].reset_index(
+        drop=True
+    )
+    tile_queries = []
+    tile_info: Any = []
+    for _, (tile_id, date, polygon) in data.iterrows():
+        history = []
+        for i in range(num_steps):
+            curr_date = pd.to_datetime(date) - pd.Timedelta(days=temporal_step * i)
+            history.append(curr_date.strftime("%Y-%m-%d"))
+            tile_info.append([tile_id, curr_date, polygon])
+        tile_queries.append((tile_id, history))
+    tile_info = (
+        gpd.GeoDataFrame(
+            tile_info,
+            columns=["tile_id", "date", "geometry"],
+            geometry="geometry",
+            crs="EPSG:4326",
+        )
+        .groupby("tile_id")
+        .agg(
+            {
+                "geometry": lambda geom: unary_union(geom),
+                "date": lambda x: (x.min(), x.max()),
+            }
+        )
+    ).reset_index()
+    tile_info[["min_date", "max_date"]] = tile_info["date"].apply(pd.Series)
+    tile_info[["lon_min", "lat_min", "lon_max", "lat_max"]] = tile_info[
+        "geometry"
+    ].apply(lambda geom: pd.Series(geom.bounds))
+    tile_info["min_date"] -= pd.Timedelta(days=temporal_tolerance)
+    tile_info["max_date"] += pd.Timedelta(days=temporal_tolerance)
+    tile_info["min_date"] = tile_info["min_date"].dt.strftime("%Y-%m-%d")
+    tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%d")
+    tile_info = tile_info[
+        ["tile_id", "min_date", "max_date", "lon_min", "lon_max", "lat_min", "lat_max"]
+    ]
+    return tile_info, tile_queries
+
+
+def retrieve_hls_stac_metadata(
+    client: Client,
+    tile_info_df: pd.DataFrame,
+    cloud_coverage: int = 10,
+    daytime_only: bool = False,
+) -> dict[str, List[Item]]:
+    """Retrieve HLS items Metadata.
+
+    Given a tile_id, start_date and end_date, this function searches all the items
+    available for this tile_id in this time window. A pystac_client Client is used
+    to query a STAC API.
+
+    Args:
+        client (pystac_client.Client): pystac_client client to use to perform the search.
+        tile_info_df (pd.DataFrame): A dataframe containing tile_id, start_date and
+            end_date in each row.
+        cloud_coverage (int): Maximum percentage of cloud cover allowed for a HLS granule.
+        daytime_only (bool): Whether to filter out night time granules.
+
+    Returns:
+        A dictionary mapping tile_id to a list of available HLS PySTAC items
+          representing granules that contain all the polarizations needed.
+    """
+    items_dict: Any = {}
+
+    for _, (
+        tile_id,
+        start_date,
+        end_date,
+        lon_min,
+        lon_max,
+        lat_min,
+        lat_max,
+    ) in tile_info_df.iterrows():
+        try:
+            search = client.search(
+                collections=API.COLLECTIONS,
+                datetime=f"{start_date}/{end_date}",
+                bbox=geo_utils.make_valid_bbox(lon_min, lat_min, lon_max, lat_max),
+                sortby=[{"field": "datetime"}],
+                query={"eo:cloud_cover": {"lte": cloud_coverage}},
+            )
+            candidate_items = search.item_collection()
+        except APIError:
+            logging.info("Sleeping to retry after 30 minutes...")
+            time.sleep(30 * 60)
+            continue
+
+        if daytime_only:
+            # select daytime observations only
+            candidate_items = list(filter(is_daytime, candidate_items))
+        if len(candidate_items) == 0:
+            logging.warning(f"No items found for {tile_id}")
+            continue
+        # rename stac items to a common naming convention
+        candidate_items = rename_hls_stac_items(candidate_items)
+
+        items_dict[tile_id] = candidate_items
+    return items_dict
+
+
+def dispatch_hls_candidate_items(
+    tile_observations: gpd.GeoDataFrame,
+    tile_candidate_items: List[Item],
+) -> pd.DataFrame | None:
+    """Dispatches appropriate HLS PySTAC items to each observation.
+
+    A given observation will have a candidate item if it's geometry falls within the
+    geometry of the granule.
+
+    Args:
+        tile_observations (pandas.DataFrame): DataFrame containing observations
+            of the same tile.
+        tile_candidate_items (List[Item]): List of candidate items for a given tile
+    Returns:
+        A DataFrame with observations and their containing granules (items)
+        when possible.
+    """
+    hls_item_ids = [item.id for item in tile_candidate_items]
+    candidate_items_gdf = gpd.GeoDataFrame.from_features(tile_candidate_items, crs=4326)
+    candidate_items_gdf["hls_item_id"] = hls_item_ids
+    candidate_items_gdf = candidate_items_gdf[["hls_item_id", "geometry"]]
+
+    tile_observations = tile_observations.set_geometry("geometry_4326")
+
+    matches = gpd.sjoin(
+        tile_observations,
+        candidate_items_gdf,
+        predicate="within",
+    )
+    if matches.empty:
+        return None
+    else:
+        tile_observations["hls_candidate_items"] = (
+            matches.groupby(matches.index)
+            .agg(
+                {
+                    "index_right": (
+                        lambda indices: [tile_candidate_items[id] for id in indices]
+                    )
+                }
+            )
+            .reindex(tile_observations.index, fill_value=[])
+        )
+        return tile_observations
+
+
+def find_closest_hls_items(
+    obsv: pd.Series, temporal_tolerance: int = 3
+) -> List[Item | None]:
+    """Finds closest PySTAC items in time with least cloud coverage.
+
+    Retrieves all PySTAC items within `temporal_tolerance` time window for a given observation and
+    select the one with least cloud_coverage.
+
+    Args:
+        obsv (pandas.Series): Observation data containing the observation date
+         and the HLS candidate items from which to pick.
+        temporal_tolerance (int): Number of days that can be tolerated for matching
+            granules from the candidate items.
+
+    Returns:
+        List[Item | None]: A list containing items if found within the temporal
+           tolerance or None values.
+
+    """
+    dates = obsv.tile_queries[1]
+    items = obsv.hls_candidate_items
+    if not items:
+        return [None] * len(dates)
+    closest_items: list[Item] = []
+    for date in dates:
+        query_date = pd.to_datetime(date, utc=True)
+
+        # Filter items within the temporal tolerance window
+        candidate_items = [
+            item
+            for item in items
+            if abs((item.datetime - query_date).days) <= temporal_tolerance
+        ]
+
+        if not candidate_items:
+            closest_items.append(None)
+            continue
+
+        # Select the item with the least cloud coverage
+        selected_item = min(
+            candidate_items, key=lambda item: item.properties["eo:cloud_cover"]
+        )
+        closest_items.append(selected_item)
+    return closest_items
+
+
+def find_best_hls_items(
+    data: pd.DataFrame,
+    tiles_database: dict[str, List[Item]],
+    temporal_tolerance: int = 12,
+) -> dict[str, pd.DataFrame]:
+    """Finds best HLS PySTAC items for all observations when possible.
+
+    For each observation, an attempt is made to retrieve the HLS granules
+    that actually contain the observation. The `dispatch_candidate_items` function is
+    thus used to ensure that the best HLS PySTAC items are not just
+    the closest in terms of datetime.
+
+    Args:
+        data (pd.DataFrame): A dataframe containing observations that fall within a
+            dense tile.
+        src_crs (int): Source CRS of the observations.
+        tiles_database(dict[str, List[Item]]): A dictionary mapping a tile ID to a list
+          of available HLS PySTAC items.
+        temporal_tolerance (int): Tolerance (in days) for finding closest HLS items.
+
+    Returns:
+        A dictionary mapping each MGRS tile ID to a DataFrame containing the observations
+        that fall within that tile with their associated best PySTAC items representing
+        the HLS granules.
+
+    """
+    best_hls_items = {}
+    for tile_id in tiles_database:
+        tile_obsvs = data[data["mgrs_tile_id"] == tile_id]
+
+        # Before retrieving the temporally closest items, let's filter
+        # the items by making sure only the ones with geometry in which
+        # the observations fall are kept.
+        tile_obsvs_with_hls_items = dispatch_hls_candidate_items(
+            tile_obsvs, tiles_database[tile_id]
+        )
+        if tile_obsvs_with_hls_items is None:
+            continue
+        # We can then retrieve the item with the least cloud coverage within the temporal tolerance.
+        tile_obsvs_with_hls_items["hls_items"] = tile_obsvs_with_hls_items.apply(
+            lambda obsv: find_closest_hls_items(obsv, temporal_tolerance), axis=1
+        )
+
+        best_hls_items[tile_id] = tile_obsvs_with_hls_items.drop(
+            columns=["hls_candidate_items"]
+        )
+    return best_hls_items
+
+
+def add_hls_stack_items(
+    client: Client,
+    data: pd.DataFrame,
+    num_steps: int = 3,
+    temporal_step: int = 10,
+    temporal_tolerance: int = 12,
+    cloud_coverage: int = 10,
+    daytime_only: bool = False,
+) -> dict[str, pd.DataFrame]:
+    """Searches and adds HLS Granules.
+
+    Data contains tile_id and a series of date for which the tile is desired. This
+    function takes the tile_id and the dates and finds the HLS granules with the least cloud
+    coverage closest to the desired date with a tolerance of `temporal_tolerance`.
+
+    Args:
+        client (pystac_client.Client): pystac_client client to use to perform the search.
+        data (pd.DataFrame): A dataframe containing observations that fall within a
+            dense tile.
+        num_steps (int): Number of temporal steps into the past to fetch.
+        temporal_step (int): Step size (in days) for creating temporal steps.
+        temporal_tolerance (int): Tolerance (in days) for finding closest HLS items.
+        cloud_coverage (int): Maximum percentage of cloud coverage to be tolerated for a granule.
+        daytime_only (bool): Flag to determine whether to filter out night time granules.
+
+    Returns:
+        A dictionary mapping each MGRS tile ID to a DataFrame containing the observations
+          that fall within that tile with their associated PySTAC items representing granules.
+    """
+    data = data.rename(columns={"date": "input_features_date"})
+    tiles_info, tile_queries = get_raster_tile_info(
+        data,
+        num_steps=num_steps,
+        temporal_step=temporal_step,
+        temporal_tolerance=temporal_tolerance,
+    )
+    data["tile_queries"] = tile_queries
+    tiles_database = retrieve_hls_stac_metadata(
+        client, tiles_info, cloud_coverage=cloud_coverage, daytime_only=daytime_only
+    )
+    best_items = find_best_hls_items(data, tiles_database, temporal_tolerance)
+    return best_items
+
+
+def is_valid_dataset_entry(obsv: pd.Series) -> bool:
+    """Checks HLS granules validity for a given observation.
+
+    The granules will be added to the dataset if they are all non
+    null and unique for all timesteps.
+
+    Args:
+        obsv (pandas.Series): Observation data for which to assess the validity
+
+    Returns:
+        True if the granules are unique and non null.
+    """
+    if any(granule is None for granule in obsv["hls_granules"]) or (
+        len(obsv["hls_granules"]) != len(set(obsv["hls_granules"]))
+    ):
+        return False
+    return True
+
+
+def create_hls_records_with_items(
+    best_items: dict[str, pd.DataFrame],
+) -> tuple[gpd.GeoDataFrame, dict[str, Any]]:
+    """Creates the HLS dataset from granules found.
+
+    Args:
+        best_items: A dictionary mapping each MGRS tile ID to
+        a DataFrame containing the observations that fall within that tile with their
+        associated PySTAC items representing granules.
+
+    Returns:
+        A tuple containing a geopandas dataframe with `stac_items_str` column and a dictionary
+        mapping `stac_items_str` to the to PySTAC items representing the granules.
+    """
+    records_with_items = []
+    hls_dataset = {}
+    for tile_id in best_items:
+        obsvs = best_items[tile_id]
+        obsvs["hls_granules"] = obsvs.apply(
+            lambda obsv: [
+                item.id if isinstance(item, Item) else None
+                for item in obsv["hls_items"]
+            ],
+            axis=1,
+        )
+        obsvs = obsvs[obsvs.apply(is_valid_dataset_entry, axis=1)]
+        obsvs["stac_items_str"] = obsvs["hls_granules"].apply(lambda x: "_".join(x))
+        for _, obsv in obsvs.drop_duplicates(subset=["hls_granules"]).iterrows():
+            hls_dataset[obsv["stac_items_str"]] = {
+                "granules": [item.to_dict() for item in obsv["hls_items"]]
+            }
+        obsvs = obsvs.drop(
+            ["geometry_4326", "hls_items", "tile_queries", "hls_granules"], axis=1
+        )
+        records_with_items.append(obsvs)
+    filtered_records = pd.concat(records_with_items, ignore_index=True).set_geometry(
+        "geometry"
+    )
+    return filtered_records, hls_dataset
+
+
+class HLSRasterPipeline(BaseRasterDataPipeline):
+    """HLS Raster Data Pipeline."""
+
+    def setup(self) -> None:
+        """Setup for environment to be used by Dask workers.
+
+        Configures relevant GDAL options for reading COGs
+        """
+        earthaccess.login(persist=True)
+        env = rasterio.Env(**GDALOptions().model_dump())
+        env.__enter__()
+
+    def load_data(
+        self, tile_dict: dict[str, Any]
+    ) -> tuple[xr.DataArray, xr.DataArray, str]:
+        """See parent class. Load Granules."""
+        dsb, dsm, crs = open_hls_stac_items(
+            tile_dict["granules"],
+            self.src_crs,
+            self.spatial_resolution,
+            load_masks=True,
+            fill_value=NO_DATA_VALUES.get("HLS"),
+        )
+        return dsb, dsm, crs
+
+    def process_row(
+        self, row_dict: dict[str, Any], flags_dict: dict[str, Any], data_bundle: Any
+    ) -> None | tuple[str, str]:
+        """See parent class. Process a single row."""
+        (
+            dsb,
+            dsm,
+            _,
+        ) = data_bundle
+        geometry = shape(row_dict["geometry"])
+
+        label_filename = f"{os.path.splitext(row_dict['label_filename'])[0]}_{row_dict['mgrs_tile_id']}"  # noqa
+        chip_filename = label_filename.replace("mask", "merged")
+
+        chip_path = os.path.join(self.output_directory, "chips", f"{chip_filename}.tif")
+        label_path = os.path.join(
+            self.output_directory, "seg_maps", f"{label_filename}.tif"
+        )
+        if os.path.exists(chip_path) and os.path.exists(label_path):
+            logging.info(f"Skipping {chip_path} because it's already created")
+            return chip_path, label_path
+        try:
+            # Process chip
+            chip = geo_utils.slice_xr_dataset(dsb, geometry, chip_size=self.chip_size)
+            seg_map = xr.open_dataarray(
+                os.path.join(self.raster_path, row_dict["label_filename"])
+            )
+
+            if dsm is not None:
+                chip_mask = geo_utils.slice_xr_dataset(
+                    dsm, geometry, chip_size=self.chip_size
+                )
+                chip = apply_mask(
+                    chip=chip,
+                    mask=chip_mask,
+                    no_data_value=0,
+                    mask_decoder=hls_utils.decode_fmask_value,
+                    data_source="HLS",
+                    mask_types=self.mask_types,
+                    masking_strategy=self.masking_strategy,
+                )
+
+            if (
+                chip is not None
+                and chip.sizes["x"] == seg_map.sizes["x"]
+                and chip.sizes["y"] == seg_map.sizes["y"]
+            ):
+                # Overrides the chip coordinates to match the segmentation map.
+                seg_map, chip = xr.align(
+                    seg_map, chip, join="override", exclude=["band"]
+                )
+                # Clip values to valid HLS range (0-10000)
+                chip = chip.clip(min=0, max=10000)
+
+                if self.qa_check:
+                    if chip.where(chip > 0).count().values == 0:
+                        logging.warning(f"Skipping {chip_filename} due to cloud")
+                        return None
+                    seg_map = mask_segmentation_map(
+                        chip, seg_map, NoDataValues.get("SEG_MAP")
+                    )
+                    if seg_map.where(seg_map > 0).count().values == 0:
+                        logging.warning(f"Skipping {label_filename} due to empty label")
+                        return None
+                seg_map = seg_map.where(
+                    ~np.isnan(seg_map), NO_DATA_VALUES.get("SEG_MAP")
+                ).astype(np.int8 if self.task_type == "seg" else np.float32)
+                chip = chip.where(~np.isnan(chip), 0).astype(np.uint16)
+
+                seg_map.squeeze().rio.to_raster(label_path)
+                chip.squeeze().rio.to_raster(chip_path)
+                return chip_path, label_path
+            else:
+                logging.warning(f"Skipping {label_filename} due to invalid shapes")
+            return None
+        except Exception as e:
+            logging.error(f"Error processing row {row_dict}: {str(e)}")
+            return None
+
+
+def open_hls_stac_items(
+    tile_dict: dict[str, Any],
+    epsg: int,
+    resolution: float,
+    load_masks: bool = False,
+    fill_value: int = 0,
+) -> tuple[xr.DataArray, xr.DataArray | None, str]:
+    """Opens multiple HLS STAC Items as an xarray DataArray from given granules `tile_dict`.
+
+    Args:
+        tile_dict (dict[str, Any]): A dictionary containing granules IDs to retrieve
+        for all timesteps of interest.
+        epsg (int): CRS EPSG code.
+        resolution (float): Spatial resolution in the specified CRS.
+        load_masks (bool): Whether or not to load the masks COGs.
+        fill_value (int): Fill value for the data array.
+
+    Returns:
+        (xr.DataArray, xr.DataArray | None, str): A tuple of xarray DataArray combining
+        data from all the COGs bands of interest, (optionally) the COGs masks and the
+        CRS used.
+    """
+    # Load the bands for all timesteps and stack them in a data array
+    assets_to_load = BANDS.ASSET + ["Fmask"] if load_masks else BANDS.ASSET
+    stacked_items = stackstac.stack(
+        ItemCollection(tile_dict),
+        assets=assets_to_load,
+        chunksize=(BLOCKSIZE.X, BLOCKSIZE.Y),
+        properties=False,
+        rescale=False,
+        fill_value=fill_value,
+        epsg=epsg,
+        resolution=resolution,
+    )
+
+    bands = adjust_dims(stacked_items.sel(band=BANDS.ASSET))
+    masks = adjust_dims(stacked_items.sel(band=["Fmask"])) if load_masks else None
+
+    bands = bands.astype(np.uint16)
+    bands.attrs["scale_factor"] = 1
+
+    return bands, masks, bands.crs

@@ -25,6 +25,7 @@ follow_imports = "skip"
 module = [
     "numpy.*",
     "pytest.*",
+    "pytz.*"
 ]
 ignore_missing_imports = true
 

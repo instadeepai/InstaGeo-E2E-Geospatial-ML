@@ -42,12 +42,8 @@ from pystac_client import Client, ItemSearch
 from rasterio.crs import CRS
 from tqdm import tqdm
 
-from instageo.data.data_pipeline import (
-    NO_DATA_VALUES,
-    adjust_dims,
-    get_tile_info,
-    make_valid_bbox,
-)
+from instageo.data.data_pipeline import NO_DATA_VALUES, adjust_dims, get_tile_info
+from instageo.data.geo_utils import make_valid_bbox
 
 BLOCKSIZE = 512
 COLLECTION = ["sentinel-2-l2a"]

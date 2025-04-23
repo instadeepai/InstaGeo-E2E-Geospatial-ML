@@ -13,6 +13,7 @@ from instageo.data.data_pipeline import (
     get_chip_coords,
     get_tile_info,
     get_tiles,
+    reproject_coordinates,
 )
 
 
@@ -168,3 +169,23 @@ def test_adjust_dims():
     dummy_chip = adjust_dims(dummy_chip)
     assert dummy_chip.dims == ("band", "y", "x")
     assert dummy_chip.shape == (18, 100, 100)
+
+
+@pytest.mark.parametrize(
+    "x, y, expected_x, expected_y, source_epsg",
+    [
+        (0, 0, 0.0, 0.0, 3857),
+        (10_000_000, 0, 89.83, 0.0, 3857),
+        (5000000, 5000000, 44.91, 40.91, 3857),
+        (0, -10_000_000, 0.0, -66.44, 3857),
+        (-1000000, -1000000, -8.98, -8.94, 3857),
+        (1000000, -500000, 8.98, -4.48, 3857),
+        (500000, 6200000, 15, 55.94, 32633),
+    ],
+)
+def test_reproject_coordinates(x, y, expected_x, expected_y, source_epsg):
+    df = pd.DataFrame({"x": [x], "y": [y]})
+    result_df = reproject_coordinates(df, source_epsg)
+
+    assert np.isclose(result_df["x"][0], expected_x, atol=0.01)
+    assert np.isclose(result_df["y"][0], expected_y, atol=0.01)
