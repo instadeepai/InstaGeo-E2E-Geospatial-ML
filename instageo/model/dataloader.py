@@ -216,7 +216,7 @@ def random_augs(
 
     # Random Rotation
     if random.random() < 0.5:
-        angle = random.uniform(-45, 45)
+        angle = random.uniform(-15, 15)
         ims = [
             transforms.functional.rotate(im, angle, fill=chip_no_data_value)
             for im in ims

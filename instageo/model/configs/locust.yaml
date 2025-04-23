@@ -16,7 +16,6 @@ train:
 
 model:
   model_name: prithvi_eo_v1_100 #prithvi_eo_v1_100 or prithvi_eo_v2_300 or prithvi_eo_v2_300_tl or prithvi_eo_v2_600 or prithvi_eo_v2_600_tl
-  pretrained: True
   freeze_backbone: False
   load_pretrained_weights: True
   num_classes: 2
@@ -42,7 +41,7 @@ dataloader:
       2398.52685546875,
       2292.96435546875,
     ]
-  img_size: 256
+  img_size: 224
   temporal_dim: 3
   replace_label: [-9999, -1]
   reduce_to_zero: False
@@ -52,7 +51,7 @@ dataloader:
   num_workers: 1
 
 test:
-  img_size: 256
-  crop_size: 256
-  stride: 256
+  img_size: 224
+  crop_size: 224
+  stride: 224
   mask_cloud: False

@@ -23,5 +23,6 @@ tqdm
 pytest-cov
 rioxarray
 typer
+scikit-learn
 tomli
 astral

@@ -51,6 +51,7 @@ setup(
         "xarray[complete]",
         "rasterio",
         "rioxarray",
+        "scikit-learn",
     ],
     extras_require={
         "data": data_dependencies,

@@ -27,6 +27,7 @@ from functools import partial
 from typing import Any, Callable, List, Optional, Tuple
 
 import hydra
+import neptune
 import numpy as np
 import pytorch_lightning as pl
 import rasterio
@@ -35,6 +36,14 @@ import torch.nn as nn
 from neptune.utils import stringify_unsupported
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    jaccard_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -205,6 +214,14 @@ class PrithviSegmentationModule(pl.LightningModule):
         self.ignore_index = ignore_index
         self.weight_decay = weight_decay
 
+        # Initialize lists to store predictions and labels for global metric computation
+        self.train_preds: List[torch.Tensor] = []
+        self.train_labels: List[torch.Tensor] = []
+        self.val_preds: List[torch.Tensor] = []
+        self.val_labels: List[torch.Tensor] = []
+        self.test_preds: List[torch.Tensor] = []
+        self.test_labels: List[torch.Tensor] = []
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Define the forward pass of the model.
 
@@ -230,7 +247,15 @@ class PrithviSegmentationModule(pl.LightningModule):
         outputs = self.forward(inputs)
         loss = self.criterion(outputs, labels.long())
         loss = loss[labels != self.ignore_index].mean()
-        self.log_metrics(outputs, labels, "train", loss)
+
+        # Store predictions and labels for global metric computation
+        self.train_preds.append(outputs.detach())
+        self.train_labels.append(labels.detach())
+
+        # Log the loss
+        self.log(
+            "train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True
+        )
 
         opt = self.optimizers()
         current_lr = opt.param_groups[0]["lr"]
@@ -256,10 +281,20 @@ class PrithviSegmentationModule(pl.LightningModule):
             torch.Tensor: The loss value for the batch.
         """
         inputs, labels = batch
-        outputs = self.forward(inputs)
-        loss = self.criterion(outputs, labels.long())
-        loss = loss[labels != self.ignore_index].mean()
-        self.log_metrics(outputs, labels, "val", loss)
+        with torch.no_grad():
+            outputs = self.forward(inputs)
+            loss = self.criterion(outputs, labels.long())
+            loss = loss[labels != self.ignore_index].mean()
+
+        # Store predictions and labels for global metric computation
+        self.val_preds.append(outputs.detach())
+        self.val_labels.append(labels.detach())
+
+        # Log the loss
+        self.log(
+            "val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True
+        )
+
         return loss
 
     def test_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
@@ -273,11 +308,51 @@ class PrithviSegmentationModule(pl.LightningModule):
             torch.Tensor: The loss value for the batch.
         """
         inputs, labels = batch
-        outputs = self.forward(inputs)
-        loss = self.criterion(outputs, labels.long())
-        loss = loss[labels != self.ignore_index].mean()
-        self.log_metrics(outputs, labels, "test", loss)
+        with torch.no_grad():
+            outputs = self.forward(inputs)
+            loss = self.criterion(outputs, labels.long())
+            loss = loss[labels != self.ignore_index].mean()
+
+        # Store predictions and labels for global metric computation
+        self.test_preds.append(outputs.detach())
+        self.test_labels.append(labels.detach())
+
+        # Log the loss
+        self.log(
+            "test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True
+        )
+
         return loss
+
+    def on_train_epoch_end(self) -> None:
+        """Compute and log metrics at the end of training epoch."""
+        if self.train_preds and self.train_labels:
+            all_preds = torch.cat(self.train_preds)
+            all_labels = torch.cat(self.train_labels)
+            self.log_metrics(all_preds, all_labels, "train")
+            # Clear the lists
+            self.train_preds = []
+            self.train_labels = []
+
+    def on_validation_epoch_end(self) -> None:
+        """Compute and log metrics at the end of validation epoch."""
+        if self.val_preds and self.val_labels:
+            all_preds = torch.cat(self.val_preds)
+            all_labels = torch.cat(self.val_labels)
+            self.log_metrics(all_preds, all_labels, "val")
+            # Clear the lists
+            self.val_preds = []
+            self.val_labels = []
+
+    def on_test_epoch_end(self) -> None:
+        """Compute and log metrics at the end of test epoch."""
+        if self.test_preds and self.test_labels:
+            all_preds = torch.cat(self.test_preds)
+            all_labels = torch.cat(self.test_labels)
+            self.log_metrics(all_preds, all_labels, "test")
+            # Clear the lists
+            self.test_preds = []
+            self.test_labels = []
 
     def predict_step(self, batch: Any) -> torch.Tensor:
         """Perform a prediction step.
@@ -316,7 +391,6 @@ class PrithviSegmentationModule(pl.LightningModule):
         predictions: torch.Tensor,
         labels: torch.Tensor,
         stage: str,
-        loss: torch.Tensor,
     ) -> None:
         """Log all metrics for any stage.
 
@@ -329,168 +403,123 @@ class PrithviSegmentationModule(pl.LightningModule):
         Returns:
             None.
         """
-        out = self.compute_metrics(predictions, labels)
+        out = self.compute_metrics(predictions, labels, stage)
         self.log(
-            f"{stage}_loss",
-            loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-        )
-        self.log(
-            f"{stage}_aAcc",
+            f"{stage}_Acc",
             out["acc"],
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
             logger=True,
         )
         self.log(
-            f"{stage}_mIoU",
+            f"{stage}_IoU",
             out["iou"],
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
             logger=True,
         )
         self.log(
-            f"{stage}_mF1",
+            f"{stage}_F1",
             out["f1"],
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
             logger=True,
         )
-        for idx, value in enumerate(out["iou_per_class"]):
-            self.log(
-                f"{stage}_IoU_{idx}",
-                value,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-            )
-        for idx, value in enumerate(out["acc_per_class"]):
+        self.log(
+            f"{stage}_Precision",
+            out["precision"],
+            logger=True,
+        )
+        self.log(
+            f"{stage}_Recall",
+            out["recall"],
+            logger=True,
+        )
+        self.log(
+            f"{stage}_roc_auc",
+            out["roc_auc_ovr"],
+            logger=True,
+        )
+        for idx, value in enumerate(out["acc_per_class"]):  # type: ignore
             self.log(
                 f"{stage}_Acc_{idx}",
                 value,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-            )
-        for idx, value in enumerate(out["precision_per_class"]):
-            self.log(
-                f"{stage}_Precision_{idx}",
-                value,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-            )
-        for idx, value in enumerate(out["recall_per_class"]):
-            self.log(
-                f"{stage}_Recall_{idx}",
-                value,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-            )
-        for idx, value in enumerate(out["f1_per_class"]):
-            self.log(
-                f"{stage}_F1_{idx}",
-                value,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
                 logger=True,
             )
 
     def compute_metrics(
-        self, pred_mask: torch.Tensor, gt_mask: torch.Tensor
-    ) -> dict[str, List[float]]:
+        self, pred_mask: torch.Tensor, gt_mask: torch.Tensor, stage: str = "train"
+    ) -> dict[str, float | List[float]]:
         """Calculate Metrics.
 
         The computed metrics includes Intersection over Union (IoU), Accuracy, Precision, Recall,
-        and F1 Score.
+        F1 Score, and ROC AUC (only during test phase) using scikit-learn metrics.
 
         Args:
             pred_mask (np.array): Predicted segmentation mask.
             gt_mask (np.array): Ground truth segmentation mask.
+            stage (str): Current stage (train/val/test). Defaults to "train".
 
         Returns:
             dict: A dictionary containing 'iou', 'f1', 'overall_accuracy', and
-                'accuracy_per_class', 'precision_per_class', 'recall_per_class', and 'f1_per_class'.
+                'accuracy_per_class', 'precision_per_class', 'recall_per_class', 'f1_per_class',
+                'roc_auc_per_class' (only during test), and multiclass metrics.
         """
-        prediction_proba = torch.nn.functional.softmax(pred_mask.detach(), dim=1)[
-            :, 1, :, :
-        ]
+        prediction_proba = torch.nn.functional.softmax(pred_mask.detach(), dim=1)
         pred_mask = torch.argmax(pred_mask, dim=1)
-        no_ignore = gt_mask.ne(self.ignore_index).to(self.device)
-        prediction_proba = prediction_proba.masked_select(no_ignore).cpu().numpy()
-        pred_mask = pred_mask.masked_select(no_ignore).cpu().numpy()
-        gt_mask = gt_mask.masked_select(no_ignore).cpu().numpy()
+        no_ignore = gt_mask.ne(self.ignore_index)
+
+        # Get flattened indices of valid pixels
+        valid_indices = no_ignore.reshape(-1).nonzero().squeeze()
+
+        # Flatten prediction_proba and select valid pixels
+        prediction_proba = prediction_proba.permute(0, 2, 3, 1)  # (B, H, W, C)
+        prediction_proba = prediction_proba.reshape(
+            -1, prediction_proba.size(-1)
+        )  # (B*H*W, C)
+        prediction_proba = prediction_proba[valid_indices].cpu().numpy()
+        # Flatten and select valid pixels for pred_mask and gt_mask
+        pred_mask = pred_mask.reshape(-1)[valid_indices].cpu().numpy()
+        gt_mask = gt_mask.reshape(-1)[valid_indices].cpu().numpy()
         classes = np.unique(np.concatenate((gt_mask, pred_mask)))
 
-        iou_per_class = []
         accuracy_per_class = []
-        precision_per_class = []
-        recall_per_class = []
-        f1_per_class = []
-
         for clas in classes:
-            pred_cls = pred_mask == clas
-            gt_cls = gt_mask == clas
+            # Convert to binary classification for each class
+            pred_cls = (pred_mask[gt_mask == clas] == clas).astype(int)
+            gt_cls = (gt_mask[gt_mask == clas] == clas).astype(int)
+            accuracy_per_class.append(accuracy_score(gt_cls, pred_cls))
 
-            intersection = np.logical_and(pred_cls, gt_cls)
-            union = np.logical_or(pred_cls, gt_cls)
-            true_positive = np.sum(intersection)
-            false_positive = np.sum(pred_cls) - true_positive
-            false_negative = np.sum(gt_cls) - true_positive
+        # Calculate overall metrics
+        mean_iou = jaccard_score(gt_mask, pred_mask, average="macro", zero_division=0)
+        macro_f1 = f1_score(gt_mask, pred_mask, average="macro", zero_division=0)
+        macro_precision = precision_score(
+            gt_mask, pred_mask, average="macro", zero_division=0
+        )
+        macro_recall = recall_score(
+            gt_mask, pred_mask, average="macro", zero_division=0
+        )
+        overall_accuracy = accuracy_score(gt_mask, pred_mask)
 
-            if np.any(union):
-                iou = np.sum(intersection) / np.sum(union)
-                iou_per_class.append(iou)
+        # Only compute ROC AUC during test phase
+        roc_auc_ovr = 0.0
+        if stage == "test":
+            try:
+                if len(classes) > 2:
+                    # For multiclass, use one-vs-rest approach
+                    roc_auc_ovr = roc_auc_score(
+                        gt_mask, prediction_proba, multi_class="ovr", average="macro"
+                    )
+                else:
+                    # For binary case, use the probability for the positive class
+                    roc_auc_ovr = roc_auc_score(
+                        gt_mask, prediction_proba[:, 1]  # Use probability for class 1
+                    )
+            except ValueError:
+                roc_auc_ovr = 0.0
 
-            accuracy = true_positive / np.sum(gt_cls) if np.sum(gt_cls) > 0 else 0
-            accuracy_per_class.append(accuracy)
-
-            precision = (
-                true_positive / (true_positive + false_positive)
-                if (true_positive + false_positive) > 0
-                else 0
-            )
-            precision_per_class.append(precision)
-
-            recall = (
-                true_positive / (true_positive + false_negative)
-                if (true_positive + false_negative) > 0
-                else 0
-            )
-            recall_per_class.append(recall)
-
-            f1 = (
-                (2 * precision * recall) / (precision + recall)
-                if (precision + recall) > 0
-                else 0
-            )
-            f1_per_class.append(f1)
-
-        # Overall IoU, F1 and accuracy
-        mean_iou = np.mean(iou_per_class) if iou_per_class else 0.0
-        mean_f1 = np.mean(f1_per_class) if f1_per_class else 0.0
-        overall_accuracy = np.sum(pred_mask == gt_mask) / gt_mask.size
         return {
             "iou": mean_iou,
-            "f1": mean_f1,
+            "f1": macro_f1,
+            "precision": macro_precision,
+            "recall": macro_recall,
             "acc": overall_accuracy,
             "acc_per_class": accuracy_per_class,
-            "iou_per_class": iou_per_class,
-            "precision_per_class": precision_per_class,
-            "recall_per_class": recall_per_class,
-            "f1_per_class": f1_per_class,
+            "roc_auc_ovr": roc_auc_ovr,
         }
 
 
@@ -620,13 +649,16 @@ def main(cfg: DictConfig) -> None:
         print(json.dumps({"mean": mean, "std": std, "class_weights": class_weights}))
         exit(0)
 
-    if cfg.mode == "train":
+    elif cfg.mode == "train":
         check_required_flags(["root_dir", "train_filepath", "valid_filepath"], cfg)
-        neptune_logger = AIchorNeptuneLogger(
-            api_key=set_neptune_api_token(),
+        neptune_run = neptune.init_run(
+            api_token=set_neptune_api_token(),
             project=os.environ["NEPTUNE_PROJECT"],
-            log_model_checkpoints=False,
+            with_id=cfg.neptune_experiment_id
+            if hasattr(cfg, "neptune_experiment_id")
+            else None,
         )
+        neptune_logger = AIchorNeptuneLogger(run=neptune_run)
         neptune_logger.experiment["config"] = stringify_unsupported(
             OmegaConf.to_yaml(cfg)
         )
@@ -695,7 +727,7 @@ def main(cfg: DictConfig) -> None:
         )
         hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         checkpoint_callback = ModelCheckpoint(
-            monitor="val_mIoU",
+            monitor="val_IoU",
             dirpath=hydra_out_dir,
             filename="instageo_best_checkpoint",
             auto_insert_metric_name=False,
@@ -716,10 +748,17 @@ def main(cfg: DictConfig) -> None:
 
     elif cfg.mode == "eval":
         check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
-        neptune_logger = AIchorNeptuneLogger(
-            api_key=set_neptune_api_token(),
+        neptune_run = neptune.init_run(
+            api_token=set_neptune_api_token(),
             project=os.environ["NEPTUNE_PROJECT"],
-            log_model_checkpoints=False,
+            with_id=cfg.neptune_experiment_id
+            if hasattr(cfg, "neptune_experiment_id")
+            else None,
+        )
+        neptune_logger = AIchorNeptuneLogger(
+            run=neptune_run[
+                f"eval-{os.path.splitext(os.path.basename(test_filepath))[0]}"
+            ]
         )
         neptune_logger.experiment["config"] = stringify_unsupported(
             OmegaConf.to_yaml(cfg)
@@ -761,7 +800,7 @@ def main(cfg: DictConfig) -> None:
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
             model_name=cfg.model.model_name,
-            pretrained=cfg.model.pretrained,
+            load_pretrained_weights=cfg.model.load_pretrained_weights,
         )
         trainer = pl.Trainer(
             accelerator=get_device(),
@@ -782,7 +821,7 @@ def main(cfg: DictConfig) -> None:
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
             model_name=cfg.model.model_name,
-            pretrained=cfg.model.pretrained,
+            load_pretrained_weights=cfg.model.load_pretrained_weights,
         )
         model.eval()
         infer_filepath = os.path.join(root_dir, cfg.test_filepath)
@@ -886,7 +925,7 @@ def main(cfg: DictConfig) -> None:
             ignore_index=cfg.train.ignore_index,
             weight_decay=cfg.train.weight_decay,
             model_name=cfg.model.model_name,
-            pretrained=cfg.model.pretrained,
+            load_pretrained_weights=cfg.model.load_pretrained_weights,
         )
         chip_inference(test_loader, output_dir, model, device=get_device())
 
