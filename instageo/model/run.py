@@ -24,7 +24,7 @@ import logging
 import os
 from collections import Counter
 from functools import partial
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import hydra
 import neptune
@@ -163,6 +163,51 @@ def create_dataloader(
     )
 
 
+def get_augmentations(cfg: DictConfig) -> Optional[List[Dict[str, Any]]]:
+    """Get list of augmentations from config.
+
+    Args:
+        cfg (DictConfig): Configuration object containing augmentation settings.
+
+    Returns:
+        Optional[List[Dict[str, Any]]]: List of augmentation configurations to apply,
+        or None if augmentations are disabled.
+    """
+    if cfg.dataloader.augmentations is None:
+        return None
+
+    augmentations = []
+    for aug_name, aug_params in cfg.dataloader.augmentations.items():
+        if not aug_params["use"]:
+            continue
+        aug_config = {"name": aug_name, "parameters": {"p": aug_params["p"]}}
+        if aug_name == "rotate":
+            aug_config["parameters"]["degrees"] = aug_params["degrees"]
+        elif aug_name == "brightness":
+            aug_config["parameters"]["brightness_range"] = aug_params[
+                "brightness_range"
+            ]
+            aug_config["parameters"]["contrast_range"] = aug_params["contrast_range"]
+        elif aug_name == "blur":
+            aug_config["parameters"]["kernel_size"] = aug_params["kernel_size"]
+            aug_config["parameters"]["sigma_range"] = tuple(aug_params["sigma_range"])
+        elif aug_name == "noise":
+            aug_config["parameters"]["noise_std"] = aug_params["noise_std"]
+        elif (aug_name != "hflip") and (aug_name.strip() != "vflip"):
+            log.warning(f"Unknown augmentation: {aug_name} skipping...")
+            continue
+
+        augmentations.append(aug_config)
+
+    if len(augmentations) == 0:
+        log.warning(
+            "No valid augmentations specified. No augmentations will be applied."
+        )
+        return None
+
+    return augmentations
+
+
 class PrithviSegmentationModule(pl.LightningModule):
     """Prithvi Segmentation PyTorch Lightning Module."""
 
@@ -177,6 +222,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         class_weights: List[float] = [1, 2],
         ignore_index: int = -100,
         weight_decay: float = 1e-2,
+        scheduler: bool = True,
         model_name: str = "pritvhi-eo1",
     ) -> None:
         """Initialization.
@@ -194,6 +240,7 @@ class PrithviSegmentationModule(pl.LightningModule):
             class_weights (List[float]): Class weights for mitigating class imbalance.
             ignore_index (int): Class index to ignore during loss computation.
             weight_decay (float): Weight decay for L2 regularization.
+            scheduler (bool): Flag to use a learning rate scheduler.
             model_name (str): Model architecture chosen.
         """
         super().__init__()
@@ -213,6 +260,7 @@ class PrithviSegmentationModule(pl.LightningModule):
         self.learning_rate = learning_rate
         self.ignore_index = ignore_index
         self.weight_decay = weight_decay
+        self.scheduler = scheduler
 
         # Initialize lists to store predictions and labels for global metric computation
         self.train_preds: List[torch.Tensor] = []
@@ -381,10 +429,13 @@ class PrithviSegmentationModule(pl.LightningModule):
         optimizer = torch.optim.AdamW(
             self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
         )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer, T_0=10, T_mult=2, eta_min=0
-        )
-        return [optimizer], [scheduler]
+        if self.scheduler:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer, T_0=10, T_mult=2, eta_min=0
+            )
+            return [optimizer], [scheduler]
+        else:
+            return [optimizer], []
 
     def log_metrics(
         self,
@@ -612,6 +663,7 @@ def main(cfg: DictConfig) -> None:
     STD = cfg.dataloader.std
     IM_SIZE = cfg.dataloader.img_size
     TEMPORAL_SIZE = cfg.dataloader.temporal_dim
+    AUGMENTATIONS = get_augmentations(cfg)
 
     batch_size = cfg.train.batch_size
     root_dir = cfg.root_dir
@@ -619,6 +671,7 @@ def main(cfg: DictConfig) -> None:
     train_filepath = cfg.train_filepath
     test_filepath = cfg.test_filepath
     checkpoint_path = cfg.checkpoint_path
+    scheduler = cfg.train.scheduler
 
     if cfg.mode == "stats":
         train_dataset = InstaGeoDataset(
@@ -630,7 +683,7 @@ def main(cfg: DictConfig) -> None:
                 std=[1] * len(STD),
                 temporal_size=TEMPORAL_SIZE,
                 im_size=IM_SIZE,
-                augment=False,
+                augmentations=None,
             ),
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,
@@ -671,6 +724,7 @@ def main(cfg: DictConfig) -> None:
                 std=STD,
                 temporal_size=TEMPORAL_SIZE,
                 im_size=IM_SIZE,
+                augmentations=AUGMENTATIONS,
                 chip_no_data_value=cfg.dataloader.no_data_value,
                 label_no_data_value=cfg.train.ignore_index,
                 max_pixel_value=cfg.dataloader.max_pixel_value,
@@ -692,7 +746,7 @@ def main(cfg: DictConfig) -> None:
                 std=STD,
                 temporal_size=TEMPORAL_SIZE,
                 im_size=IM_SIZE,
-                augment=False,
+                augmentations=None,
             ),
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,
@@ -724,6 +778,7 @@ def main(cfg: DictConfig) -> None:
             weight_decay=cfg.train.weight_decay,
             model_name=cfg.model.model_name,
             load_pretrained_weights=cfg.model.load_pretrained_weights,
+            scheduler=scheduler,
         )
         hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         checkpoint_callback = ModelCheckpoint(
@@ -856,7 +911,7 @@ def main(cfg: DictConfig) -> None:
                 mean=cfg.dataloader.mean,
                 std=cfg.dataloader.std,
                 temporal_size=cfg.dataloader.temporal_dim,
-                augment=False,
+                augmentations=None,
             )
             prediction = sliding_window_inference(
                 hls_tile,
@@ -898,7 +953,7 @@ def main(cfg: DictConfig) -> None:
                 std=STD,
                 temporal_size=TEMPORAL_SIZE,
                 im_size=cfg.test.img_size,
-                augment=False,
+                augmentations=None,
             ),
             bands=BANDS,
             replace_label=cfg.dataloader.replace_label,

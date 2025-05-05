@@ -13,6 +13,7 @@ train:
   class_weights: [1, 3]
   ignore_index: -1
   weight_decay: 0.01
+  scheduler: False
 
 model:
   model_name: prithvi_eo_v1_100 #prithvi_eo_v1_100 or prithvi_eo_v2_300 or prithvi_eo_v2_300_tl or prithvi_eo_v2_600 or prithvi_eo_v2_600_tl
@@ -32,6 +33,31 @@ dataloader:
   constant_multiplier: 1.0
   max_pixel_value: 10000
   num_workers: 1
+  augmentations:
+    hflip:
+      use: True
+      p: 0.5
+    vflip:
+      use: True
+      p: 0.5
+    rotate:
+      use: False
+      p: 0.5
+      degrees: 10
+    brightness:
+      use: False
+      p: 0.5
+      brightness_range: [0.8, 1.2]
+      contrast_range: [0.8, 1.2]
+    blur:
+      use: False
+      p: 0.5
+      kernel_size: 3
+      sigma_range: [0.1, 2.0]
+    noise:
+      use: False
+      p: 0.5
+      noise_std: 0.05
 
 test:
   img_size: 512

@@ -22,7 +22,7 @@
 import os
 import random
 from functools import partial
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -55,111 +55,6 @@ def open_mf_tiff_dataset(band_files: dict[str, Any]) -> xr.Dataset:
     return bands_dataset
 
 
-def random_brightness_contrast(
-    ims: list[Image.Image],
-    brightness_factor_range: tuple[float, float] = (0.8, 1.2),
-    contrast_factor_range: tuple[float, float] = (0.8, 1.2),
-    max_pixel_value: float = 10000.0,
-) -> List[Image.Image]:
-    """Applies Random Brightness and Contrast.
-
-    Args:
-        ims (List[PIL.Image]): List of single-band PIL images with values in [0,max_pixel_value]
-        brightness_factor_range (tuple, optional): Brightness factor range. Defaults to (0.8, 1.2).
-        contrast_factor_range (tuple, optional): Contrast factor range. Defaults to (0.8, 1.2).
-        max_pixel_value (float): maximum pixel value in `ims`.
-
-    Returns:
-        List[PIL.Image]: List of images (same shape and range) with random brightness and contrast
-            applied.
-    """
-    new_ims = []
-    bright_factor = random.uniform(*brightness_factor_range)
-    contrast_factor = random.uniform(*contrast_factor_range)
-    for im in ims:
-        arr = torch.from_numpy(np.array(im, dtype=np.float32))
-        # Apply brightness shift
-        arr = arr * bright_factor
-        # Apply contrast shift around the mean
-        mean_val = arr.mean()
-        arr = (arr - mean_val) * contrast_factor + mean_val
-        arr.clamp_(0, max_pixel_value)
-        new_ims.append(Image.fromarray(arr.numpy()))
-    return new_ims
-
-
-def add_gaussian_noise(
-    ims: list[Image.Image], noise_std: float = 0.05, max_pixel_value: float = 10000.0
-) -> List[Image.Image]:
-    """Add random Gaussian noise to satellite images.
-
-    Args:
-        ims (List[PIL.Image]): List of single-band PIL images with values in [0,max_pixel_value].
-        noise_std (float): Standard deviation of the Gaussian noise in the [0,1] range.
-            e.g., 0.05 means noise with std dev = 5% of max (which is 1 in normalized space).
-        max_pixel_value (float): maximum pixel value in `ims`.
-
-    Returns:
-        List[PIL.Image]: List of noisy images (same shape and range).
-    """
-    noisy_ims = []
-    for im in ims:
-        arr = np.array(im, dtype=np.float32)
-        arr = np.clip(arr, 0, max_pixel_value) / max_pixel_value
-        arr_tensor = torch.from_numpy(arr)
-
-        # Add Gaussian noise
-        noise = torch.randn_like(arr_tensor) * noise_std
-        arr_noisy = arr_tensor + noise
-
-        arr_noisy = torch.clamp(arr_noisy, 0.0, 1.0)
-        arr_noisy = arr_noisy * max_pixel_value
-        arr_noisy_uint16 = arr_noisy.numpy().astype(np.uint16)
-        im_noisy = Image.fromarray(arr_noisy_uint16)
-
-        noisy_ims.append(im_noisy)
-    return noisy_ims
-
-
-def add_gaussian_blur(
-    ims: list[Image.Image],
-    kernel_size: int = 3,
-    sigma: tuple[float, float] = (0.1, 2.0),
-    max_pixel_value: float = 10000.0,
-) -> List[Image.Image]:
-    """Apply Gaussian blur to each satellite band image in [0, max_pixel_value].
-
-    Args:
-        ims (List[PIL.Image]): List of single-band PIL images (range [0,max_pixel_value]).
-        kernel_size (int): Gaussian kernel size for the blur.
-        sigma (tuple[float]): Standard deviation range for the Gaussian kernel.
-        max_pixel_value (float): maximum pixel value in `ims`.
-
-    Returns:
-        List[PIL.Image]: List of blurred images (same shape and range).
-    """
-    blurred_ims = []
-    for im in ims:
-        arr = np.array(im, dtype=np.float32)
-        # Normalize [0,max_pixel_value] to [0,1]
-        arr = np.clip(arr, 0, max_pixel_value) / max_pixel_value
-        arr_tensor = torch.from_numpy(arr).unsqueeze(0)
-
-        # Apply gaussian blur
-        arr_blurred = transforms.functional.gaussian_blur(
-            arr_tensor, kernel_size=kernel_size, sigma=sigma
-        )
-
-        # Un-Normalize
-        arr_blurred = torch.clamp(arr_blurred, 0.0, 1.0)
-        arr_blurred = arr_blurred.squeeze(0) * max_pixel_value
-
-        arr_blurred = arr_blurred.numpy().astype(np.uint16)
-        im_blurred = Image.fromarray(arr_blurred)
-        blurred_ims.append(im_blurred)
-    return blurred_ims
-
-
 def crop_image_and_label(
     ims: List[Image.Image], label: Image.Image, im_size: int
 ) -> Tuple[List[Image.Image], Image.Image]:
@@ -181,12 +76,374 @@ def crop_image_and_label(
     return ims, label
 
 
+class RandomHorizontalFlip:
+    """Random horizontal flip augmentation for images and labels."""
+
+    def __init__(self, p: float = 0.5):
+        """Initialize the horizontal flip augmentation.
+
+        Args:
+            p (float): Probability of applying the flip. Defaults to 0.5.
+        """
+        self.p = p
+
+    def __call__(
+        self,
+        ims: List[Image.Image],
+        label: Image.Image,
+    ) -> Tuple[List[Image.Image], Image.Image]:
+        """Apply horizontal flip to images and label with probability p.
+
+        Args:
+            ims (List[Image.Image]): List of images to flip.
+            label (Image.Image): Label to flip.
+
+
+        Returns:
+            Tuple[List[Image.Image], Image.Image]: Flipped images and label.
+        """
+        if random.random() < self.p:
+            ims = [transforms.functional.hflip(im) for im in ims]
+            label = transforms.functional.hflip(label)
+        return ims, label
+
+
+class RandomVerticalFlip:
+    """Random vertical flip augmentation for images and labels."""
+
+    def __init__(self, p: float = 0.5):
+        """Initialize the vertical flip augmentation.
+
+        Args:
+            p (float): Probability of applying the flip. Defaults to 0.5.
+        """
+        self.p = p
+
+    def __call__(
+        self,
+        ims: List[Image.Image],
+        label: Image.Image,
+    ) -> Tuple[List[Image.Image], Image.Image]:
+        """Apply vertical flip to images and label with probability p.
+
+        Args:
+            ims (List[Image.Image]): List of images to flip.
+            label (Image.Image): Label to flip.
+
+
+        Returns:
+            Tuple[List[Image.Image], Image.Image]: Flipped images and label.
+        """
+        if random.random() < self.p:
+            ims = [transforms.functional.vflip(im) for im in ims]
+            label = transforms.functional.vflip(label)
+        return ims, label
+
+
+class RandomRotation:
+    """Random rotation augmentation for images and labels."""
+
+    def __init__(
+        self,
+        degrees: float = 15,
+        p: float = 0.5,
+        chip_no_data_value: int = 0,
+        label_no_data_value: int = -1,
+    ):
+        """Initialize the rotation augmentation.
+
+        Args:
+            degrees (float): Maximum rotation angle in degrees.
+            p (float): Probability of applying the rotation.
+            chip_no_data_value (int): Value to use for padding in images.
+            label_no_data_value (int): Value to use for padding in label.
+        """
+        self.degrees = degrees
+        self.p = p
+        self.chip_no_data_value = chip_no_data_value
+        self.label_no_data_value = label_no_data_value
+
+    def __call__(
+        self,
+        ims: List[Image.Image],
+        label: Image.Image,
+    ) -> Tuple[List[Image.Image], Image.Image]:
+        """Apply random rotation to images and label with probability p.
+
+        Args:
+            ims (List[Image.Image]): List of images to rotate.
+            label (Image.Image): Label to rotate.
+
+        Returns:
+            Tuple[List[Image.Image], Image.Image]: Rotated images and label.
+        """
+        if random.random() < self.p:
+            angle = random.uniform(-self.degrees, self.degrees)
+            ims = [
+                transforms.functional.rotate(im, angle, fill=self.chip_no_data_value)
+                for im in ims
+            ]
+            label = transforms.functional.rotate(
+                label, angle, fill=self.label_no_data_value
+            )
+        return ims, label
+
+
+class RandomBrightnessContrast:
+    """Random brightness and contrast augmentation for images."""
+
+    def __init__(
+        self,
+        brightness_range: Tuple[float, float] = (0.8, 1.2),
+        contrast_range: Tuple[float, float] = (0.8, 1.2),
+        p: float = 0.5,
+        max_pixel_value: float = 10000.0,
+    ):
+        """Initialize the brightness and contrast augmentation.
+
+        Args:
+            brightness_range (Tuple[float, float]): Range for brightness adjustment.
+            contrast_range (Tuple[float, float]): Range for contrast adjustment.
+            p (float): Probability of applying the augmentation. Defaults to 0.5.
+            max_pixel_value (float): Maximum pixel value in the images.
+        """
+        self.brightness_range = brightness_range
+        self.contrast_range = contrast_range
+        self.p = p
+        self.max_pixel_value = max_pixel_value
+
+    def random_brightness_contrast(
+        self,
+        ims: list[Image.Image],
+    ) -> List[Image.Image]:
+        """Applies Random Brightness and Contrast.
+
+        Args:
+            ims (List[PIL.Image]): List of single-band PIL images with values in
+            [0,max_pixel_value]
+
+        Returns:
+            List[PIL.Image]: List of images (same shape and range) with random brightness
+            and contrast applied.
+        """
+        new_ims = []
+        bright_factor = random.uniform(*self.brightness_range)
+        contrast_factor = random.uniform(*self.contrast_range)
+        for im in ims:
+            arr = torch.from_numpy(np.array(im, dtype=np.float32))
+            # Apply brightness shift
+            arr = arr * bright_factor
+            # Apply contrast shift around the mean
+            mean_val = arr.mean()
+            arr = (arr - mean_val) * contrast_factor + mean_val
+            arr.clamp_(0, self.max_pixel_value)
+            new_ims.append(Image.fromarray(arr.numpy()))
+        return new_ims
+
+    def __call__(
+        self,
+        ims: List[Image.Image],
+        label: List[Image.Image],
+    ) -> Tuple[List[Image.Image], List[Image.Image]]:
+        """Apply random brightness and contrast to images with probability p.
+
+        Args:
+            ims (List[Image.Image]): List of images to augment.
+            label (List[Image.Image]): List of labels to augment.
+
+        Returns:
+            List[Image.Image]: Augmented images.
+        """
+        if random.random() < self.p:
+            ims = self.random_brightness_contrast(
+                ims,
+            )
+        return ims, label
+
+
+class RandomGaussianBlur:
+    """Random Gaussian blur augmentation for images."""
+
+    def __init__(
+        self,
+        kernel_size: int = 3,
+        sigma_range: Tuple[float, float] = (0.1, 2.0),
+        p: float = 0.5,
+        max_pixel_value: float = 10000.0,
+    ):
+        """Initialize the Gaussian blur augmentation.
+
+        Args:
+            kernel_size (int): Size of the Gaussian kernel.
+            sigma_range (Tuple[float, float]): Range for sigma parameter.
+            p (float): Probability of applying the blur. Defaults to 0.5.
+            max_pixel_value (float): Maximum pixel value in the images.
+        """
+        self.kernel_size = kernel_size
+        self.sigma_range = sigma_range
+        self.p = p
+        self.max_pixel_value = max_pixel_value
+
+    def add_gaussian_blur(
+        self,
+        ims: list[Image.Image],
+    ) -> List[Image.Image]:
+        """Apply Gaussian blur to each satellite band image in [0, max_pixel_value].
+
+        Args:
+            ims (List[PIL.Image]): List of single-band PIL images (range [0,max_pixel_value]).
+
+        Returns:
+            List[PIL.Image]: List of blurred images (same shape and range).
+        """
+        blurred_ims = []
+        for im in ims:
+            arr = np.array(im, dtype=np.float32)
+            # Normalize [0,max_pixel_value] to [0,1]
+            arr = np.clip(arr, 0, self.max_pixel_value) / self.max_pixel_value
+            arr_tensor = torch.from_numpy(arr).unsqueeze(0)
+
+            # Apply gaussian blur
+            arr_blurred = transforms.functional.gaussian_blur(
+                arr_tensor, kernel_size=self.kernel_size, sigma=self.sigma_range
+            )
+
+            # Un-Normalize
+            arr_blurred = torch.clamp(arr_blurred, 0.0, 1.0)
+            arr_blurred = arr_blurred.squeeze(0) * self.max_pixel_value
+
+            arr_blurred = arr_blurred.numpy().astype(np.uint16)
+            im_blurred = Image.fromarray(arr_blurred)
+            blurred_ims.append(im_blurred)
+        return blurred_ims
+
+    def __call__(
+        self,
+        ims: List[Image.Image],
+        label: List[Image.Image],
+    ) -> Tuple[List[Image.Image], List[Image.Image]]:
+        """Apply random Gaussian blur to images with probability p.
+
+        Args:
+            ims (List[Image.Image]): List of images to blur.
+            label (List[Image.Image]): List of labels to blur.
+
+        Returns:
+            List[Image.Image]: Blurred images.
+        """
+        if random.random() < self.p:
+            ims = self.add_gaussian_blur(
+                ims,
+            )
+        return ims, label
+
+
+class RandomGaussianNoise:
+    """Random Gaussian noise augmentation for images."""
+
+    def __init__(
+        self, noise_std: float = 0.05, p: float = 0.5, max_pixel_value: float = 10000.0
+    ):
+        """Initialize the Gaussian noise augmentation.
+
+        Args:
+            noise_std (float): Standard deviation of the noise.
+            p (float): Probability of applying the noise. Defaults to 0.5.
+            max_pixel_value (float): Maximum pixel value in the images.
+        """
+        self.noise_std = noise_std
+        self.p = p
+        self.max_pixel_value = max_pixel_value
+
+    def add_gaussian_noise(
+        self,
+        ims: list[Image.Image],
+    ) -> List[Image.Image]:
+        """Add random Gaussian noise to satellite images.
+
+        Args:
+            ims (List[PIL.Image]): List of single-band PIL images with values in
+            [0,max_pixel_value].
+
+        Returns:
+            List[PIL.Image]: List of noisy images (same shape and range).
+        """
+        noisy_ims = []
+        for im in ims:
+            arr = np.array(im, dtype=np.float32)
+            arr = np.clip(arr, 0, self.max_pixel_value) / self.max_pixel_value
+            arr_tensor = torch.from_numpy(arr)
+
+            # Add Gaussian noise
+            noise = torch.randn_like(arr_tensor) * self.noise_std
+            arr_noisy = arr_tensor + noise
+
+            arr_noisy = torch.clamp(arr_noisy, 0.0, 1.0)
+            arr_noisy = arr_noisy * self.max_pixel_value
+            arr_noisy_uint16 = arr_noisy.numpy().astype(np.uint16)
+            im_noisy = Image.fromarray(arr_noisy_uint16)
+
+            noisy_ims.append(im_noisy)
+        return noisy_ims
+
+    def __call__(
+        self,
+        ims: List[Image.Image],
+        label: List[Image.Image],
+    ) -> Tuple[List[Image.Image], List[Image.Image]]:
+        """Apply random Gaussian noise to images with probability p.
+
+        Args:
+            ims (List[Image.Image]): List of images to add noise to.
+            label (List[Image.Image]): List of labels to add noise to.
+
+        Returns:
+            List[Image.Image]: Noisy images.
+        """
+        if random.random() < self.p:
+            ims = self.add_gaussian_noise(
+                ims,
+            )
+        return ims, label
+
+
+class AugmentationCompose:
+    """Compose multiple augmentations for images and labels."""
+
+    def __init__(self, transforms: List[Callable]):
+        """Initialize the augmentation pipeline.
+
+        Args:
+            transforms (List[Callable]): List of augmentation functions.
+        """
+        self.transforms = transforms
+
+    def __call__(
+        self,
+        ims: List[Image.Image],
+        label: Image.Image,
+    ) -> Tuple[List[Image.Image], Image.Image]:
+        """Apply a series of augmentations to images and labels.
+
+        Args:
+            ims (List[Image.Image]): List of PIL Image objects representing the images.
+            label (Image.Image): A PIL Image object representing the label.
+
+        Returns:
+            Tuple[List[Image.Image], Image.Image]: A tuple containing the transformed list of
+        """
+        for t in self.transforms:
+            ims, label = t(ims, label)
+        return ims, label
+
+
 def random_augs(
     ims: List[Image.Image],
     label: Image.Image,
     label_no_data_value: int,
     chip_no_data_value: int,
     max_pixel_value: float = 10000.0,
+    augmentations: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[Image.Image], Image.Image]:
     """Apply Random Augmentations.
 
@@ -199,44 +456,44 @@ def random_augs(
         chip_no_data_value (int): Value of no_data pixels in chip.
         label_no_data_value (int): Value of no_data pixels in label.
         max_pixel_value (float): maximum pixel value in `ims`.
+        augmentations (List[Dict[str, Any]]): List of augmentation configurations to apply.
+            Each config should contain:
+            - name: The type of augmentation
+            - parameters: Dictionary of parameters for the augmentation
+            If None, no augmentations are applied.
 
     Returns:
         Tuple[List[Image.Image], Image.Image]: A tuple containing the transformed list of
         images and the label.
     """
-    # Random Horizontal Flip
-    if random.random() < 0.5:
-        ims = [transforms.functional.hflip(im) for im in ims]
-        label = transforms.functional.hflip(label)
+    if augmentations is None:
+        return ims, label
 
-    # Random Vertical Flip
-    if random.random() < 0.5:
-        ims = [transforms.functional.vflip(im) for im in ims]
-        label = transforms.functional.vflip(label)
+    aug_dict = {
+        "hflip": RandomHorizontalFlip,
+        "vflip": RandomVerticalFlip,
+        "rotate": RandomRotation,
+        "brightness": RandomBrightnessContrast,
+        "blur": RandomGaussianBlur,
+        "noise": RandomGaussianNoise,
+    }
 
-    # Random Rotation
-    if random.random() < 0.5:
-        angle = random.uniform(-15, 15)
-        ims = [
-            transforms.functional.rotate(im, angle, fill=chip_no_data_value)
-            for im in ims
-        ]
-        label = transforms.functional.rotate(label, angle, fill=label_no_data_value)
+    transforms = []
 
-    # Color Jitter
-    if random.random() < 0.5:
-        ims = random_brightness_contrast(ims, max_pixel_value=max_pixel_value)
+    for aug_config in augmentations:
+        name = aug_config["name"]
+        params = aug_config["parameters"]
+        if name == "rotate":
+            params["chip_no_data_value"] = chip_no_data_value
+            params["label_no_data_value"] = label_no_data_value
+        elif name in ("brightness", "blur", "noise"):
+            params["max_pixel_value"] = max_pixel_value
 
-    # Random Gaussian Blur
-    if random.random() < 0.5:
-        ims = add_gaussian_blur(
-            ims, kernel_size=3, sigma=(0.1, 2.0), max_pixel_value=max_pixel_value
-        )
+        augmentation = aug_dict[name](**params)
+        transforms.append(augmentation)
 
-    # Add Random Noise
-    if random.random() < 0.5:
-        ims = add_gaussian_noise(ims, noise_std=0.05, max_pixel_value=max_pixel_value)
-    return ims, label
+    pipeline = AugmentationCompose(transforms)
+    return pipeline(ims, label)
 
 
 def normalize_and_convert_to_tensor(
@@ -280,11 +537,11 @@ def process_and_augment(
     std: List[float],
     temporal_size: int = 1,
     im_size: int = 224,
-    augment: bool = True,
     crop: bool = True,
     label_no_data_value: int = -1,
     chip_no_data_value: int = 0,
     max_pixel_value: float = 10000.0,
+    augmentations: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Process and augment the given images and labels.
 
@@ -294,10 +551,17 @@ def process_and_augment(
         mean (List[float]): The mean of each channel in the image
         std (List[float]): The standard deviation of each channel in the image
         temporal_size: The number of temporal steps
-        augment: Flag to perform augmentations in training mode.
+        im_size (int): The crop size (height/width).
+        crop (bool): Whether to crop the images.
         chip_no_data_value (int): Value of no_data pixels in chip.
         label_no_data_value (int): Value of no_data pixels in label.
         max_pixel_value (float): maximum pixel value in `ims`.
+        augmentations (List[Dict[str, Any]]): List of augmentation configurations to apply.
+            Each config should contain:
+            - name: The type of augmentation
+            - p: Probability of applying the augmentation
+            - Additional parameters specific to each augmentation type
+            If None, no augmentations are applied.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A tuple of tensors representing the processed
@@ -312,15 +576,17 @@ def process_and_augment(
     if crop:
         # During evaluation we want to handle cropping manually
         ims, label = crop_image_and_label(ims, label, im_size)
-    if augment:
-        # During evaluation we don't want to apply augs
-        ims, label = random_augs(
-            ims,
-            label,
-            label_no_data_value=label_no_data_value,
-            chip_no_data_value=chip_no_data_value,
-            max_pixel_value=max_pixel_value,
-        )
+
+    # Apply augmentations if specified
+    ims, label = random_augs(
+        ims,
+        label,
+        label_no_data_value=label_no_data_value,
+        chip_no_data_value=chip_no_data_value,
+        max_pixel_value=max_pixel_value,
+        augmentations=augmentations,
+    )
+
     ims, label = normalize_and_convert_to_tensor(ims, label, mean, std, temporal_size)
     return ims, label
 
@@ -391,7 +657,6 @@ def process_test(
         std=std,
         im_size=img_size,
         temporal_size=temporal_size,
-        augment=False,
         crop=False,
     )
 
