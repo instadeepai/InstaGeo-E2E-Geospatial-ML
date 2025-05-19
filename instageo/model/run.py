@@ -36,14 +36,6 @@ import torch.nn as nn
 from neptune.utils import stringify_unsupported
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    jaccard_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -54,6 +46,7 @@ from instageo.model.dataloader import (
     process_test,
 )
 from instageo.model.infer_utils import chip_inference, sliding_window_inference
+from instageo.model.metrics import RunningAUC, RunningConfusionMatrix
 from instageo.model.model import PrithviSeg
 from instageo.model.neptune_logger import AIchorNeptuneLogger, set_neptune_api_token
 
@@ -260,15 +253,16 @@ class PrithviSegmentationModule(pl.LightningModule):
         self.learning_rate = learning_rate
         self.ignore_index = ignore_index
         self.weight_decay = weight_decay
+        self.num_classes = num_classes
         self.scheduler = scheduler
 
-        # Initialize lists to store predictions and labels for global metric computation
-        self.train_preds: List[torch.Tensor] = []
-        self.train_labels: List[torch.Tensor] = []
-        self.val_preds: List[torch.Tensor] = []
-        self.val_labels: List[torch.Tensor] = []
-        self.test_preds: List[torch.Tensor] = []
-        self.test_labels: List[torch.Tensor] = []
+        # Initialize streaming metrics
+        self.train_metrics = RunningConfusionMatrix(num_classes, ignore_index)
+        self.val_metrics = RunningConfusionMatrix(num_classes, ignore_index)
+        self.test_metrics = RunningConfusionMatrix(num_classes, ignore_index)
+        self.train_auc = RunningAUC(num_classes)
+        self.val_auc = RunningAUC(num_classes)
+        self.test_auc = RunningAUC(num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Define the forward pass of the model.
@@ -281,6 +275,65 @@ class PrithviSegmentationModule(pl.LightningModule):
         """
         return self.net(x)
 
+    def _shared_step(self, batch: Any, step_type: str) -> torch.Tensor:
+        """Shared logic for training, validation and test steps.
+
+        Args:
+            batch (Any): Input batch data.
+            step_type (str): Type of step ('train', 'val', or 'test').
+
+        Returns:
+            torch.Tensor: The loss value for the batch.
+        """
+        inputs, labels = batch
+        outputs = self.forward(inputs)
+        loss = self.criterion(outputs, labels.long())
+        loss = loss[labels != self.ignore_index].mean()
+
+        # Get predictions and probabilities
+        preds = torch.argmax(outputs, dim=1)
+        probs = torch.nn.functional.softmax(outputs.detach(), dim=1)
+
+        # Get valid indices
+        no_ignore = labels.ne(self.ignore_index)
+        valid_indices = no_ignore.reshape(-1).nonzero().squeeze()
+
+        if valid_indices.numel() > 0:
+            # Flatten and select valid pixels
+            preds = preds.reshape(-1)[valid_indices]
+            labels = labels.reshape(-1)[valid_indices]
+            probs = probs.permute(0, 2, 3, 1).reshape(-1, probs.size(1))[valid_indices]
+
+            # Ensure consistent dimensionality when valid_indices is a single element
+            if valid_indices.numel() == 1:
+                preds = preds.unsqueeze(0)
+                labels = labels.unsqueeze(0)
+                probs = probs.unsqueeze(0)
+
+            # Update metrics - ensure integer type
+            metrics = getattr(self, f"{step_type}_metrics")
+            auc_metrics = getattr(self, f"{step_type}_auc")
+
+            metrics.update(
+                labels.cpu().numpy().astype(np.int64),
+                preds.cpu().numpy().astype(np.int64),
+            )
+            auc_metrics.update(
+                labels.cpu().numpy().astype(np.int64), probs.cpu().numpy()
+            )
+
+        # Log the loss
+        self.log(
+            f"{step_type}_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+
+        return loss
+
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         """Perform a training step.
 
@@ -291,20 +344,9 @@ class PrithviSegmentationModule(pl.LightningModule):
         Returns:
             torch.Tensor: The loss value for the batch.
         """
-        inputs, labels = batch
-        outputs = self.forward(inputs)
-        loss = self.criterion(outputs, labels.long())
-        loss = loss[labels != self.ignore_index].mean()
+        loss = self._shared_step(batch, "train")
 
-        # Store predictions and labels for global metric computation
-        self.train_preds.append(outputs.detach())
-        self.train_labels.append(labels.detach())
-
-        # Log the loss
-        self.log(
-            "train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True
-        )
-
+        # Log learning rate
         opt = self.optimizers()
         current_lr = opt.param_groups[0]["lr"]
         self.log(
@@ -328,22 +370,8 @@ class PrithviSegmentationModule(pl.LightningModule):
         Returns:
             torch.Tensor: The loss value for the batch.
         """
-        inputs, labels = batch
         with torch.no_grad():
-            outputs = self.forward(inputs)
-            loss = self.criterion(outputs, labels.long())
-            loss = loss[labels != self.ignore_index].mean()
-
-        # Store predictions and labels for global metric computation
-        self.val_preds.append(outputs.detach())
-        self.val_labels.append(labels.detach())
-
-        # Log the loss
-        self.log(
-            "val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True
-        )
-
-        return loss
+            return self._shared_step(batch, "val")
 
     def test_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         """Perform a test step.
@@ -355,52 +383,47 @@ class PrithviSegmentationModule(pl.LightningModule):
         Returns:
             torch.Tensor: The loss value for the batch.
         """
-        inputs, labels = batch
         with torch.no_grad():
-            outputs = self.forward(inputs)
-            loss = self.criterion(outputs, labels.long())
-            loss = loss[labels != self.ignore_index].mean()
+            return self._shared_step(batch, "test")
 
-        # Store predictions and labels for global metric computation
-        self.test_preds.append(outputs.detach())
-        self.test_labels.append(labels.detach())
+    def _shared_epoch_end(self, step_type: str) -> None:
+        """Shared logic for training, validation and test epoch ends.
 
-        # Log the loss
-        self.log(
-            "test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True
-        )
+        Args:
+            step_type (str): Type of step ('train', 'val', or 'test').
+        """
+        metrics = getattr(self, f"{step_type}_metrics").compute()
+        auc_metrics = getattr(self, f"{step_type}_auc").score()
 
-        return loss
+        # Log overall metrics
+        self.log(f"{step_type}_Acc", metrics["accuracy"], logger=True)
+        self.log(f"{step_type}_IoU", metrics["jaccard"], logger=True)
+        self.log(f"{step_type}_F1", metrics["f1"], logger=True)
+        self.log(f"{step_type}_Precision", metrics["precision"], logger=True)
+        self.log(f"{step_type}_Recall", metrics["recall"], logger=True)
+        self.log(f"{step_type}_roc_auc", auc_metrics["roc_auc_macro"], logger=True)
+
+        # Log per-class metrics
+        for idx, value in enumerate(metrics["jaccard_per_class"]):  # type: ignore
+            self.log(f"{step_type}_IoU_{idx}", value, logger=True)
+        for idx, value in enumerate(metrics["f1_per_class"]):  # type: ignore
+            self.log(f"{step_type}_F1_{idx}", value, logger=True)
+
+        # Reset metrics for next epoch
+        getattr(self, f"{step_type}_metrics").reset()
+        getattr(self, f"{step_type}_auc").reset()
 
     def on_train_epoch_end(self) -> None:
         """Compute and log metrics at the end of training epoch."""
-        if self.train_preds and self.train_labels:
-            all_preds = torch.cat(self.train_preds)
-            all_labels = torch.cat(self.train_labels)
-            self.log_metrics(all_preds, all_labels, "train")
-            # Clear the lists
-            self.train_preds = []
-            self.train_labels = []
+        self._shared_epoch_end("train")
 
     def on_validation_epoch_end(self) -> None:
         """Compute and log metrics at the end of validation epoch."""
-        if self.val_preds and self.val_labels:
-            all_preds = torch.cat(self.val_preds)
-            all_labels = torch.cat(self.val_labels)
-            self.log_metrics(all_preds, all_labels, "val")
-            # Clear the lists
-            self.val_preds = []
-            self.val_labels = []
+        self._shared_epoch_end("val")
 
     def on_test_epoch_end(self) -> None:
         """Compute and log metrics at the end of test epoch."""
-        if self.test_preds and self.test_labels:
-            all_preds = torch.cat(self.test_preds)
-            all_labels = torch.cat(self.test_labels)
-            self.log_metrics(all_preds, all_labels, "test")
-            # Clear the lists
-            self.test_preds = []
-            self.test_labels = []
+        self._shared_epoch_end("test")
 
     def predict_step(self, batch: Any) -> torch.Tensor:
         """Perform a prediction step.
@@ -436,142 +459,6 @@ class PrithviSegmentationModule(pl.LightningModule):
             return [optimizer], [scheduler]
         else:
             return [optimizer], []
-
-    def log_metrics(
-        self,
-        predictions: torch.Tensor,
-        labels: torch.Tensor,
-        stage: str,
-    ) -> None:
-        """Log all metrics for any stage.
-
-        Args:
-            predictions(torch.Tensor): Prediction tensor from the model.
-            labels(torch.Tensor): Label mask.
-            stage (str): One of train, val and test stages.
-            loss (torch.Tensor): Loss value.
-
-        Returns:
-            None.
-        """
-        out = self.compute_metrics(predictions, labels, stage)
-        self.log(
-            f"{stage}_Acc",
-            out["acc"],
-            logger=True,
-        )
-        self.log(
-            f"{stage}_IoU",
-            out["iou"],
-            logger=True,
-        )
-        self.log(
-            f"{stage}_F1",
-            out["f1"],
-            logger=True,
-        )
-        self.log(
-            f"{stage}_Precision",
-            out["precision"],
-            logger=True,
-        )
-        self.log(
-            f"{stage}_Recall",
-            out["recall"],
-            logger=True,
-        )
-        self.log(
-            f"{stage}_roc_auc",
-            out["roc_auc_ovr"],
-            logger=True,
-        )
-        for idx, value in enumerate(out["acc_per_class"]):  # type: ignore
-            self.log(
-                f"{stage}_Acc_{idx}",
-                value,
-                logger=True,
-            )
-
-    def compute_metrics(
-        self, pred_mask: torch.Tensor, gt_mask: torch.Tensor, stage: str = "train"
-    ) -> dict[str, float | List[float]]:
-        """Calculate Metrics.
-
-        The computed metrics includes Intersection over Union (IoU), Accuracy, Precision, Recall,
-        F1 Score, and ROC AUC (only during test phase) using scikit-learn metrics.
-
-        Args:
-            pred_mask (np.array): Predicted segmentation mask.
-            gt_mask (np.array): Ground truth segmentation mask.
-            stage (str): Current stage (train/val/test). Defaults to "train".
-
-        Returns:
-            dict: A dictionary containing 'iou', 'f1', 'overall_accuracy', and
-                'accuracy_per_class', 'precision_per_class', 'recall_per_class', 'f1_per_class',
-                'roc_auc_per_class' (only during test), and multiclass metrics.
-        """
-        prediction_proba = torch.nn.functional.softmax(pred_mask.detach(), dim=1)
-        pred_mask = torch.argmax(pred_mask, dim=1)
-        no_ignore = gt_mask.ne(self.ignore_index)
-
-        # Get flattened indices of valid pixels
-        valid_indices = no_ignore.reshape(-1).nonzero().squeeze()
-
-        # Flatten prediction_proba and select valid pixels
-        prediction_proba = prediction_proba.permute(0, 2, 3, 1)  # (B, H, W, C)
-        prediction_proba = prediction_proba.reshape(
-            -1, prediction_proba.size(-1)
-        )  # (B*H*W, C)
-        prediction_proba = prediction_proba[valid_indices].cpu().numpy()
-        # Flatten and select valid pixels for pred_mask and gt_mask
-        pred_mask = pred_mask.reshape(-1)[valid_indices].cpu().numpy()
-        gt_mask = gt_mask.reshape(-1)[valid_indices].cpu().numpy()
-        classes = np.unique(np.concatenate((gt_mask, pred_mask)))
-
-        accuracy_per_class = []
-        for clas in classes:
-            # Convert to binary classification for each class
-            pred_cls = (pred_mask[gt_mask == clas] == clas).astype(int)
-            gt_cls = (gt_mask[gt_mask == clas] == clas).astype(int)
-            accuracy_per_class.append(accuracy_score(gt_cls, pred_cls))
-
-        # Calculate overall metrics
-        mean_iou = jaccard_score(gt_mask, pred_mask, average="macro", zero_division=0)
-        macro_f1 = f1_score(gt_mask, pred_mask, average="macro", zero_division=0)
-        macro_precision = precision_score(
-            gt_mask, pred_mask, average="macro", zero_division=0
-        )
-        macro_recall = recall_score(
-            gt_mask, pred_mask, average="macro", zero_division=0
-        )
-        overall_accuracy = accuracy_score(gt_mask, pred_mask)
-
-        # Only compute ROC AUC during test phase
-        roc_auc_ovr = 0.0
-        if stage == "test":
-            try:
-                if len(classes) > 2:
-                    # For multiclass, use one-vs-rest approach
-                    roc_auc_ovr = roc_auc_score(
-                        gt_mask, prediction_proba, multi_class="ovr", average="macro"
-                    )
-                else:
-                    # For binary case, use the probability for the positive class
-                    roc_auc_ovr = roc_auc_score(
-                        gt_mask, prediction_proba[:, 1]  # Use probability for class 1
-                    )
-            except ValueError:
-                roc_auc_ovr = 0.0
-
-        return {
-            "iou": mean_iou,
-            "f1": macro_f1,
-            "precision": macro_precision,
-            "recall": macro_recall,
-            "acc": overall_accuracy,
-            "acc_per_class": accuracy_per_class,
-            "roc_auc_ovr": roc_auc_ovr,
-        }
 
 
 def compute_class_weights(counts: dict[int, int]) -> list[float]:

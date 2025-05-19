@@ -5,6 +5,7 @@ import torch
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
 
+from instageo.model.metrics import RunningAUC, RunningConfusionMatrix
 from instageo.model.run import (
     PrithviSegmentationModule,
     check_required_flags,
@@ -115,9 +116,9 @@ def test_training_step(model, mock_dataloader):
     loss = model.training_step(batch, 0)
     assert isinstance(loss, torch.Tensor)
     assert loss.requires_grad
-    # Check that predictions and labels were stored
-    assert len(model.train_preds) == 1
-    assert len(model.train_labels) == 1
+    # Check that metrics were updated
+    assert model.train_metrics.total > 0
+    assert model.train_auc.n_pos.sum() > 0 or model.train_auc.n_neg.sum() > 0
 
 
 def test_validation_step(model, mock_dataloader):
@@ -127,9 +128,9 @@ def test_validation_step(model, mock_dataloader):
     loss = model.validation_step(batch, 0)
     assert isinstance(loss, torch.Tensor)
     assert not loss.requires_grad
-    # Check that predictions and labels were stored
-    assert len(model.val_preds) == 1
-    assert len(model.val_labels) == 1
+    # Check that metrics were updated
+    assert model.val_metrics.total > 0
+    assert model.val_auc.n_pos.sum() > 0 or model.val_auc.n_neg.sum() > 0
 
 
 def test_test_step(model, mock_dataloader):
@@ -139,9 +140,9 @@ def test_test_step(model, mock_dataloader):
     loss = model.test_step(batch, 0)
     assert isinstance(loss, torch.Tensor)
     assert not loss.requires_grad
-    # Check that predictions and labels were stored
-    assert len(model.test_preds) == 1
-    assert len(model.test_labels) == 1
+    # Check that metrics were updated
+    assert model.test_metrics.total > 0
+    assert model.test_auc.n_pos.sum() > 0 or model.test_auc.n_neg.sum() > 0
 
 
 def test_predict_step(model):
@@ -159,14 +160,32 @@ def test_compute_metrics(model):
     pred_mask = torch.randn(2, 2, 224, 224)  # 2 classes
     gt_mask = torch.randint(0, 2, (2, 224, 224))
 
-    metrics = model.compute_metrics(pred_mask, gt_mask)
-    assert "iou" in metrics
-    assert "f1" in metrics
+    # Get predictions and probabilities
+    preds = torch.argmax(pred_mask, dim=1)
+    probs = torch.nn.functional.softmax(pred_mask, dim=1)
+
+    # Flatten tensors
+    preds = preds.reshape(-1).cpu().numpy()
+    gt_mask = gt_mask.reshape(-1).cpu().numpy()
+    probs = probs.permute(0, 2, 3, 1).reshape(-1, probs.size(1)).cpu().numpy()
+
+    # Compute metrics using RunningConfusionMatrix
+    cm = RunningConfusionMatrix(num_classes=2)
+    cm.update(gt_mask, preds)
+    metrics = cm.compute()
+
+    # Compute AUC using RunningAUC
+    auc = RunningAUC(num_classes=2)
+    auc.update(gt_mask, probs)
+    auc_metrics = auc.score()
+
+    # Verify all expected metrics are present
+    assert "accuracy" in metrics
     assert "precision" in metrics
     assert "recall" in metrics
-    assert "acc" in metrics
-    assert "acc_per_class" in metrics
-    assert "roc_auc_ovr" in metrics
+    assert "f1" in metrics
+    assert "jaccard" in metrics
+    assert "roc_auc_macro" in auc_metrics
 
 
 def test_configure_optimizers(model):
@@ -183,39 +202,39 @@ def test_on_train_epoch_end(model, mock_dataloader):
     # First add some predictions and labels
     batch = next(iter(mock_dataloader))
     model.training_step(batch, 0)
-    # Verify that lists are not empty before epoch end
-    assert len(model.train_preds) > 0
-    assert len(model.train_labels) > 0
+    # Verify that metrics are not empty before epoch end
+    assert model.train_metrics.total > 0
+    assert model.train_auc.n_pos.sum() > 0 or model.train_auc.n_neg.sum() > 0
     # Call epoch end
     model.on_train_epoch_end()
-    # Verify that lists are cleared
-    assert len(model.train_preds) == 0
-    assert len(model.train_labels) == 0
+    # Verify that metrics are reset
+    assert model.train_metrics.total == 0
+    assert model.train_auc.n_pos.sum() == 0 and model.train_auc.n_neg.sum() == 0
 
 
 def test_on_validation_epoch_end(model, mock_dataloader):
     # First add some predictions and labels
     batch = next(iter(mock_dataloader))
     model.validation_step(batch, 0)
-    # Verify that lists are not empty before epoch end
-    assert len(model.val_preds) > 0
-    assert len(model.val_labels) > 0
+    # Verify that metrics are not empty before epoch end
+    assert model.val_metrics.total > 0
+    assert model.val_auc.n_pos.sum() > 0 or model.val_auc.n_neg.sum() > 0
     # Call epoch end
     model.on_validation_epoch_end()
-    # Verify that lists are cleared
-    assert len(model.val_preds) == 0
-    assert len(model.val_labels) == 0
+    # Verify that metrics are reset
+    assert model.val_metrics.total == 0
+    assert model.val_auc.n_pos.sum() == 0 and model.val_auc.n_neg.sum() == 0
 
 
 def test_on_test_epoch_end(model, mock_dataloader):
     # First add some predictions and labels
     batch = next(iter(mock_dataloader))
     model.test_step(batch, 0)
-    # Verify that lists are not empty before epoch end
-    assert len(model.test_preds) > 0
-    assert len(model.test_labels) > 0
+    # Verify that metrics are not empty before epoch end
+    assert model.test_metrics.total > 0
+    assert model.test_auc.n_pos.sum() > 0 or model.test_auc.n_neg.sum() > 0
     # Call epoch end
     model.on_test_epoch_end()
-    # Verify that lists are cleared
-    assert len(model.test_preds) == 0
-    assert len(model.test_labels) == 0
+    # Verify that metrics are reset
+    assert model.test_metrics.total == 0
+    assert model.test_auc.n_pos.sum() == 0 and model.test_auc.n_neg.sum() == 0
