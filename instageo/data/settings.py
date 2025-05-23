@@ -143,3 +143,11 @@ class HLSAPISettings(BaseSettings):
 
     URL: str = "https://cmr.earthdata.nasa.gov/stac/LPCLOUD"
     COLLECTIONS: List[str] = ["HLSL30_2.0", "HLSS30_2.0"]
+
+
+class DataPipelineSettings(BaseSettings):
+    """Settings for data pipeline configuration."""
+
+    BATCH_SIZE: int = 16  # Number of records to process at a time
+    METADATA_SEARCH_RATELIMIT: int = 10  # Number of metadata searches per minute
+    COG_DOWNLOAD_RATELIMIT: int = 30  # Number of COG downloads per minute

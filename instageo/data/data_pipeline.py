@@ -21,11 +21,13 @@
 
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
 from functools import partial
 from typing import Any, Callable, Dict, List, Tuple
 
 import dask
+import dask.distributed
 import geopandas as gpd
 import mgrs
 import numpy as np
@@ -35,7 +37,7 @@ from pyproj import Transformer
 from pystac_client import Client
 from tqdm import tqdm
 
-from instageo.data.settings import NoDataValues
+from instageo.data.settings import DataPipelineSettings, NoDataValues
 
 # Masks decoding positions
 MASK_DECODING_POS: dict[str, dict] = {
@@ -44,30 +46,42 @@ MASK_DECODING_POS: dict[str, dict] = {
 }
 
 # No data values
-NO_DATA_VALUES = NoDataValues().model_dump()
+NO_DATA_VALUES = NoDataValues()
+DATA_PIPELINE_SETTINGS = DataPipelineSettings()
 
 # Microsoft Planetary Computer STAC API
 MPC_STAC_API_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
 
 def mask_segmentation_map(
-    chip: xr.DataArray, seg_map: xr.DataArray, no_data_value: xr.DataArray
+    chip: xr.DataArray,
+    seg_map: xr.DataArray,
+    chip_no_data_value: xr.DataArray,
+    masking_strategy: str = "any",
 ) -> xr.DataArray:
     """Masks segmentation map.
 
-    Checks for no_data_value in the chip and masks the segmentation values
+    Checks for chip_no_data_value in the chip and masks the segmentation values
     that correspond to no data value in the chip (at least for one band).
 
     Args:
         seg_map (DataArray): Segmentation map to mask
         chip (DataArray): Chip that correspond to the segmentation map
-        no_data_value (int): Value to use for no data areas in the chips.
+        chip_no_data_value (int): Value to use for no data areas in the chips.
+        masking_strategy (str): Masking strategy to apply ("each" for timestep-wise masking,
+        and "any" to exclude pixels if the mask is present for at least one timestep. The
+        behavior is the same if the chip is extracted for one timestep.)
 
     Returns:
         The segmentation map after masking
     """
-    valid_mask = (chip != no_data_value).all(dim="band").astype(np.uint8)
-    seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
+    if masking_strategy == "each":
+        valid_mask = (chip != chip_no_data_value).any(dim="band").astype(np.uint8)
+    elif masking_strategy == "any":
+        valid_mask = (chip != chip_no_data_value).all(dim="band").astype(np.uint8)
+    else:
+        raise ValueError(f"Invalid masking strategy: {masking_strategy}")
+    seg_no_data_value = NO_DATA_VALUES.SEG_MAP
     seg_map = seg_map.where(valid_mask, seg_no_data_value)
     return seg_map
 
@@ -193,7 +207,7 @@ def create_and_save_chips_with_seg_maps(
             continue
         seg_map = create_segmentation_map(chip, df, window_size, task_type)
         seg_map = mask_segmentation_map(chip, seg_map, no_data_value)
-        seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
+        seg_no_data_value = NO_DATA_VALUES.SEG_MAP
         if seg_map.where(seg_map != seg_no_data_value).count().values == 0:
             continue
 
@@ -381,7 +395,7 @@ def create_segmentation_map(
     """
     seg_map = xr.full_like(
         chip.isel(band=0),
-        fill_value=NO_DATA_VALUES.get("SEG_MAP"),
+        fill_value=NO_DATA_VALUES.SEG_MAP,
         dtype=np.int16 if task_type == "seg" else np.float32,
     )
     df = df[
@@ -454,7 +468,7 @@ def adjust_dims(data: xr.DataArray) -> xr.DataArray:
     num_bands = data["band"].size
     data = data.stack(time_band=("time", "band"))
     new_bands_indices = [
-        f"{band}_{i//num_bands}"
+        f"{band}_{i // num_bands}"
         for i, (_, band) in enumerate(data.coords["time_band"].values)
     ]
     data = data.drop_vars(["time_band", "time", "band"])
@@ -526,18 +540,67 @@ class BaseRasterDataPipeline(ABC):
         self,
         row_dict: Dict[str, Any],
         flags_dict: Dict[str, Any],
-        data_bundle: Tuple[xr.Dataset, xr.Dataset, str],
+        tile_dict: dict[str, Any],
     ) -> Tuple[str, str] | None:
         """Processes a single row of data.
 
         Arguments:
             row_dict: Dictionary created from a row in the observation records dataframe.
             flags_dict: Dictionary mapping all arguments and values needed to process the row.
-            data_bundle: Output of `self.load_data`.
+            tile_dict: Dictionary containing granules STAC items.
 
         Returns: None if successful or a tuple of the chip and label filenames.
         """
         pass
+
+    def _process_batch(
+        self,
+        client: dask.distributed.Client,
+        dataset: Dict[str, Any],
+        batch_records: pd.DataFrame,
+        flags_dict: Dict[str, Any],
+    ) -> List[Tuple[str, str]]:
+        """Process a batch of records in parallel.
+
+        Args:
+            client: Dask client for parallel processing
+            dataset: Dataset dictionary
+            batch_records: Batch of records to process
+            flags_dict: Dictionary of flags for processing
+
+        Returns:
+            List of (chip_path, label_path) tuples
+        """
+        futures = []
+        for _, row in batch_records.iterrows():
+            row_dict = row.to_dict()
+            row_dict["geometry"] = row.geometry.__geo_interface__
+            label_filename = (
+                f"{os.path.splitext(row_dict['label_filename'])[0]}_"
+                f"{row_dict['mgrs_tile_id']}"
+            )
+            chip_filename = label_filename.replace("mask", "merged").replace(
+                "label", "chip"
+            )
+
+            chip_path = os.path.join(
+                self.output_directory, "chips", f"{chip_filename}.tif"
+            )
+            if os.path.exists(chip_path):
+                logging.info(f"Skipping {chip_path} because it's already created")
+                continue
+
+            futures.append(
+                client.submit(
+                    self.process_row,
+                    row_dict,
+                    flags_dict,
+                    dataset[row_dict["stac_items_str"]],
+                )
+            )
+
+        results = client.gather(futures)
+        return [result for result in results if result is not None]
 
     def run(self, dataset: Dict[str, Any], obsv_records: pd.DataFrame) -> None:
         """Main method to run the pipeline and create all chips and corresponding labels.
@@ -567,33 +630,208 @@ class BaseRasterDataPipeline(ABC):
                 flags_dict = {
                     "output_directory": self.output_directory,
                     "chip_size": self.chip_size,
-                    "raster_path": self.raster_path,
                     "mask_types": self.mask_types,
                     "masking_strategy": self.masking_strategy,
                 }
 
                 chip_paths = []
                 label_paths = []
+                batch_size = DATA_PIPELINE_SETTINGS.BATCH_SIZE
+                total_records = len(obsv_records)
+
+                for i in tqdm(
+                    range(0, total_records, batch_size),
+                    desc="Processing batches",
+                    total=total_records // batch_size,
+                ):
+                    batch_records = obsv_records.iloc[i : i + batch_size]
+                    try:
+                        results = self._process_batch(
+                            client, dataset, batch_records, flags_dict
+                        )
+                        for chip_path, label_path in results:
+                            chip_paths.append(chip_path)
+                            label_paths.append(label_path)
+                        time.sleep(5)  # Add delay between batches
+                    except Exception as e:
+                        logging.error(
+                            f"Error processing batch {i // batch_size}: {str(e)}"
+                        )
+                        time.sleep(2 * 60)  # Wait 2 minutes before retrying
+                        continue
+
+        logging.info("Saving dataframe of chips and segmentation maps.")
+        pd.DataFrame({"Input": chip_paths, "Label": label_paths}).to_csv(
+            os.path.join(self.output_directory, "hls_raster_dataset.csv")
+        )
+
+
+class BasePointsDataPipeline(ABC):
+    """Data Pipeline Abstract Base Class."""
+
+    def __init__(
+        self,
+        output_directory: str,
+        chip_size: int,
+        mask_types: List[str],
+        masking_strategy: str,
+        src_crs: int,
+        spatial_resolution: float,
+        qa_check: bool = True,
+        window_size: int = 0,
+    ) -> None:
+        """Init."""
+        self.output_directory = output_directory
+        self.chip_size = chip_size
+        self.mask_types = mask_types
+        self.masking_strategy = masking_strategy
+        self.src_crs = src_crs
+        self.spatial_resolution = spatial_resolution
+        self.qa_check = qa_check
+        self.window_size = window_size
+
+    @abstractmethod
+    def setup(self) -> None:
+        """Set up necessary configurations on Dask workers.
+
+        Configures relevant GDAL options for reading COGs.
+        """
+        pass
+
+    def _is_stac_item_processed(
+        self, stac_items_str: str, obsv_records: pd.DataFrame, existing_chips: set[str]
+    ) -> bool:
+        """Check if any chips and segmentation maps for a STAC item have been processed.
+
+        Args:
+            stac_items_str: The STAC items string identifier
+            obsv_records: DataFrame containing observation records
+            existing_chips: Set of already processed chip identifiers
+
+        Returns:
+            bool: True if any chips and segmentation maps exist, False otherwise
+        """
+        df = obsv_records[obsv_records["stac_items_str"] == stac_items_str]
+        if df.empty:
+            return False
+
+        # Get the first record to construct the chip identifier
+        first_record = df.iloc[0]
+        date_id = first_record["date"].strftime("%Y%m%d")
+        tile_name_splits = stac_items_str.split("_")[0].split(".")
+        tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
+        chip_base_id = f"{date_id}_{tile_id}"
+
+        return chip_base_id in existing_chips
+
+    @abstractmethod
+    def load_data(
+        self, tile_dict: Dict[str, Any]
+    ) -> Tuple[xr.Dataset, xr.Dataset, str]:
+        """Loads data for a specific tile.
+
+        Arguments:
+            A dictionary with a `granules` key. The value of the key should be a
+            list of STAC items.
+
+        Returns:
+            After loading the granules, it should return a tuple containing the following:
+                - Xarray dataset containing data from the granules
+                - Xarray dataset containing the mask information
+                - CRS string
+        """
+        pass
+
+    @abstractmethod
+    def process_tile(
+        self,
+        obsv_records: gpd.GeoDataFrame,
+        flags_dict: Dict[str, Any],
+        tile_dict: Dict[str, Any],
+        batch_size: int,
+    ) -> Tuple[list[str], list[str]]:
+        """Processes a single HLS granule.
+
+        Arguments:
+            obsv_records: Observation records dataframe.
+            flags_dict: Dictionary mapping all arguments and values needed to process the row.
+            tile_dict: Dictionary containing granules STAC items.
+            batch_size: Number of records to process at a time.
+        Returns: A list of the chip and label filenames.
+        """
+        pass
+
+    def run(self, dataset: Dict[str, Any], obsv_records: pd.DataFrame) -> None:
+        """Main method to run the pipeline and create all chips and corresponding labels.
+
+        Arguments:
+            dataset: A dataset mapping `key` to STAC Items.
+            obsv_records: A dataframe containing a column that match each row to STAC items in
+                `dataset` using `key`
+
+        Returns:
+            None.
+        """
+        # Create output directories
+        os.makedirs(os.path.join(self.output_directory, "chips"), exist_ok=True)
+        os.makedirs(os.path.join(self.output_directory, "seg_maps"), exist_ok=True)
+
+        # Collect existing chip identifiers
+        existing_chips = set()
+        for filename in os.listdir(os.path.join(self.output_directory, "chips")):
+            if filename.startswith("chip_") and filename.endswith(".tif"):
+                # Extract the base identifier (date_tile_id) from the filename
+                base_id = "_".join(
+                    filename.split("_")[1:-2]
+                )  # Remove 'chip_' prefix and x_y.tif suffix
+                existing_chips.add(base_id)
+
+        # Filter out already processed STAC items
+        dataset = {
+            stac_items_str: tile_dict
+            for stac_items_str, tile_dict in dataset.items()
+            if not self._is_stac_item_processed(
+                stac_items_str, obsv_records, existing_chips
+            )
+        }
+
+        if not dataset:
+            logging.info("All STAC items have already been processed. Nothing to do.")
+            return
+
+        with dask.distributed.Client() as client:
+            with dask.distributed.performance_report(
+                filename=os.path.join(self.output_directory, "dask-report.html")
+            ):
+                client.run(self.setup)
+                logging.info(
+                    f"View Dask Distributed Dashboard at {client.dashboard_link}."
+                )
+
+                # Prepare flags for serialization
+                flags_dict = {
+                    "output_directory": self.output_directory,
+                    "chip_size": self.chip_size,
+                    "mask_types": self.mask_types,
+                    "masking_strategy": self.masking_strategy,
+                }
+                chip_paths = []
+                label_paths = []
                 for stac_items_str, tile_dict in tqdm(
                     dataset.items(), desc="Processing HLS Dataset"
                 ):
                     df = obsv_records[obsv_records["stac_items_str"] == stac_items_str]
-                    data_bundle = self.load_data(tile_dict)
-                    futures = []
-                    for _, row in df.iterrows():
-                        row_dict = row.to_dict()
-                        row_dict["geometry"] = row.geometry.__geo_interface__
-                        futures.append(
-                            client.submit(
-                                self.process_row, row_dict, flags_dict, data_bundle
-                            )
-                        )
-
-                    results = client.gather(futures)
-                    for result in results:
-                        if result:
-                            chip_paths.append(result[0])
-                            label_paths.append(result[1])
+                    future = client.submit(
+                        self.process_tile,
+                        df,
+                        flags_dict,
+                        tile_dict,
+                        batch_size=DATA_PIPELINE_SETTINGS.BATCH_SIZE,
+                    )
+                    result = future.result()
+                    if result is not None:
+                        chip_paths.extend(result[0])
+                        label_paths.extend(result[1])
         logging.info("Saving dataframe of chips and segmentation maps.")
         pd.DataFrame({"Input": chip_paths, "Label": label_paths}).to_csv(
             os.path.join(self.output_directory, "hls_raster_dataset.csv")

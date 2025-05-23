@@ -382,7 +382,7 @@ def open_s1_cogs(
         chunksize=BLOCKSIZE,
         properties=False,
         rescale=False,
-        fill_value=NO_DATA_VALUES.get("S1"),
+        fill_value=NO_DATA_VALUES.S1,
     )
     bands = adjust_dims(stacked_items.sel(band=POLARIZATIONS)).astype("float32")
     return bands, None, bands.crs

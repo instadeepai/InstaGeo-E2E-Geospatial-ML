@@ -428,36 +428,6 @@ def test_create_hls_dataset(observation_data):
     )
 
 
-@pytest.mark.auth
-def test_download_hls_tile(setup_and_teardown_output_dir):
-    outdir = "/tmp/test_hls"
-    urls = [
-        "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif"  # noqa
-    ]
-    parallel_download(urls, outdir=outdir)
-    out_filename = "/tmp/test_hls/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif"  # noqa
-    assert os.path.exists(out_filename)
-    src = rasterio.open(out_filename)
-    assert isinstance(src.crs, CRS)
-
-
-@pytest.mark.auth
-def test_download_hls_tile_with_retry(setup_and_teardown_output_dir):
-    outdir = "/tmp/test_hls"
-    open(
-        os.path.join(outdir, "HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif"), "w"
-    ).close()
-    urls = {
-        "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B03.tif",  # noqa
-        "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif",  # noqa
-    }
-    parallel_download(urls, outdir=outdir)
-    out_filename = os.path.join(outdir, "HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif")
-    assert os.path.exists(out_filename)
-    src = rasterio.open(out_filename)
-    assert isinstance(src.crs, CRS)
-
-
 def test_load_cog():
     url = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/Q/WD/2020/7/S2A_36QWD_20200701_0_L2A/TCI.tif"
     data_array = load_cog(url)
@@ -489,103 +459,138 @@ def test_open_hls_cogs_real_data(real_bands_infos):
     assert bands.shape[0] == 3
 
 
+# Tests and mocks for parallel_download
 @pytest.fixture
-def mock_earthaccess_login():
-    with patch("instageo.data.hls_utils.earthaccess.login") as mock_login:
-        yield mock_login
-
-
-@pytest.fixture
-def mock_earthaccess_download():
-    with patch("instageo.data.hls_utils.earthaccess.download") as mock_download:
-        yield mock_download
+def mock_earthaccess():
+    with patch("instageo.data.hls_utils.earthaccess") as mock_ea:
+        mock_ea.login.return_value = None
+        mock_ea.download.return_value = None
+        yield mock_ea
 
 
 @pytest.fixture
-def mock_os_path_exists():
-    with patch("instageo.data.hls_utils.os.path.exists") as mock_exists:
-        yield mock_exists
+def mock_os():
+    with patch("instageo.data.hls_utils.os") as mock_os:
+        mock_os.path.exists.return_value = False
+        mock_os.path.getsize.return_value = 2000
+        mock_os.listdir.return_value = []
+        mock_os.remove.return_value = None
+        mock_os.cpu_count.return_value = 4
+        yield mock_os
 
 
 @pytest.fixture
-def mock_os_operations():
-    with patch("instageo.data.hls_utils.os.listdir") as mock_listdir, patch(
-        "instageo.data.hls_utils.os.remove"
-    ) as mock_remove, patch(
-        "instageo.data.hls_utils.os.path.getsize", return_value=2000
-    ):
-        yield mock_listdir, mock_remove
+def mock_logging():
+    with patch("instageo.data.hls_utils.logging") as mock_log:
+        mock_log.warning.return_value = None
+        yield mock_log
 
 
 @pytest.fixture
-def mock_logging_warning():
-    with patch("instageo.data.hls_utils.logging.warning") as mock_warn:
-        yield mock_warn
+def hls_dataset():
+    return {
+        "test_key": {
+            "granules": [
+                {
+                    "assets": {
+                        "blue": {
+                            "href": "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif"
+                        },
+                        "green": {
+                            "href": "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif"
+                        },
+                        "red": {
+                            "href": "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B03.tif"
+                        },
+                        "nir narrow": {
+                            "href": "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B04.tif"
+                        },
+                        "swir 1": {
+                            "href": "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B05.tif"
+                        },
+                        "swir 2": {
+                            "href": "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B06.tif"
+                        },
+                    }
+                }
+            ]
+        }
+    }
 
 
-def test_parallel_download_calls_login(
-    mock_earthaccess_login,
-    mock_earthaccess_download,
-    mock_os_path_exists,
-    mock_os_operations,
+def test_parallel_download(
+    hls_dataset, setup_and_teardown_output_dir, mock_earthaccess, mock_os
 ):
-    urls = {"https://example.com/tile1"}
-    outdir = "/mock/output/dir"
+    outdir = setup_and_teardown_output_dir
 
-    mock_os_path_exists.side_effect = lambda x: False  # Simulate files do not exist
+    parallel_download(hls_dataset, outdir, max_retries=1)
 
-    parallel_download(urls, outdir, max_retries=1)
+    mock_earthaccess.login.assert_called_once_with(persist=True)
 
-    mock_earthaccess_login.assert_called_once_with(
-        persist=True
-    )  # Check login is called
+    # Get the actual calls made to download
+    actual_calls = mock_earthaccess.download.call_args_list
 
+    # Verify we got the expected number of calls
+    assert len(actual_calls) == 2
 
-def test_parallel_download_success(
-    mock_earthaccess_login,
-    mock_earthaccess_download,
-    mock_os_path_exists,
-    mock_os_operations,
-):
-    urls = {"https://example.com/tile1", "https://example.com/tile2"}
-    outdir = "/mock/output/dir"
-
-    # Simulate that files do not exist initially
-    existing_files = set()
-
-    def mock_exists(path):
-        filename = os.path.basename(path)
-        return filename in existing_files
-
-    mock_os_path_exists.side_effect = mock_exists
-
-    def mock_download(url_list, local_path, threads):
-        for url in url_list:
-            existing_files.add(os.path.basename(url))  # Simulate file being downloaded
-
-    mock_earthaccess_download.side_effect = mock_download
-
-    parallel_download(urls, outdir, max_retries=1)
-
-    mock_earthaccess_download.assert_called_once_with(
-        list(urls), local_path=outdir, threads=os.cpu_count()
-    )
+    # For each call, verify the arguments
+    for call_args in actual_calls:
+        args, kwargs = call_args
+        urls = args[0]
+        assert len(urls) == 6
+        assert set(urls) == {
+            "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B01.tif",
+            "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif",
+            "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B03.tif",
+            "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B04.tif",
+            "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B05.tif",
+            "https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSL30.020/HLS.L30.T38PMB.2022139T071922.v2.0/HLS.L30.T38PMB.2022139T071922.v2.0.B06.tif",
+        }
+        assert kwargs["local_path"] == outdir
+        assert kwargs["threads"] == 4
 
 
 def test_parallel_download_with_existing_files(
-    mock_earthaccess_login,
-    mock_earthaccess_download,
-    mock_os_path_exists,
-    mock_os_operations,
+    hls_dataset, setup_and_teardown_output_dir, mock_earthaccess, mock_os
 ):
-    urls = {"https://example.com/tile1", "https://example.com/tile2"}
-    outdir = "/mock/output/dir"
+    outdir = setup_and_teardown_output_dir
 
-    mock_os_path_exists.side_effect = lambda x: True  # Simulate files already exist
+    # Simulate files already exist
+    mock_os.path.exists.return_value = True
 
-    parallel_download(urls, outdir, max_retries=1)
+    parallel_download(hls_dataset, outdir, max_retries=1)
 
-    mock_earthaccess_download.assert_not_called()  # No need to download
+    mock_earthaccess.download.assert_not_called()
+
+
+def test_parallel_download_retry_on_failure(
+    hls_dataset, setup_and_teardown_output_dir, mock_earthaccess, mock_os, mock_logging
+):
+    outdir = setup_and_teardown_output_dir
+
+    # Simulate download failure
+    mock_os.path.exists.return_value = False
+
+    parallel_download(hls_dataset, outdir, max_retries=2)
+
+    # Should have tried to download 3 times (initial + 2 retries)
+    assert mock_earthaccess.download.call_count == 3
+    mock_logging.warning.assert_called_once()
+
+
+def test_parallel_download_removes_small_files(
+    hls_dataset, setup_and_teardown_output_dir, mock_earthaccess, mock_os
+):
+    outdir = setup_and_teardown_output_dir
+
+    # Simulate small file exists
+    mock_os.listdir.return_value = ["small_file.tif"]
+    mock_os.path.getsize.return_value = 500  # File size < 1024 bytes
+
+    parallel_download(hls_dataset, outdir, max_retries=1)
+
+    # Should have tried to remove the small file
+    assert mock_os.remove.call_count == 2
 
 
 @pytest.fixture

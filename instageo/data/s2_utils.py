@@ -782,7 +782,7 @@ def search_and_open_s2_cogs(
         chunksize=BLOCKSIZE,
         properties=False,
         rescale=False,
-        fill_value=NO_DATA_VALUES.get("S2"),
+        fill_value=NO_DATA_VALUES.S2,
     )
 
     bands = adjust_dims(stacked_items.sel(band=bands_to_load))

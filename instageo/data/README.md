@@ -56,7 +56,48 @@ CLIENT_ID=cdse-public
 Replace `your_email@example.com` and `your_password`  with those of your account.
 The CLIENT_ID must remain cdse-public.
 
+# Configuration Settings
+InstaGeo uses Pydantic settings that can be overridden using environment variables. Here are the available settings and how to override them:
 
+## GDAL Options
+```bash
+export GDALOPTIONS_CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif,.jpg"
+export GDALOPTIONS_GDAL_CACHEMAX=2048  # 2GB instead of 1GB
+export GDALOPTIONS_GDAL_HTTP_MAX_RETRY="20"
+export GDALOPTIONS_GDAL_HTTP_RETRY_DELAY="1.0"
+```
+
+## No Data Values
+```bash
+export NODATAVALUES_HLS=255
+export NODATAVALUES_S2=255
+export NODATAVALUES_S1=0
+export NODATAVALUES_SEG_MAP=0
+```
+
+## HLS Block Sizes
+```bash
+export HLSBLOCKSIZES_X=512
+export HLSBLOCKSIZES_Y=512
+```
+
+## HLS API Settings
+```bash
+export HLSAPISETTINGS_URL="https://your-custom-url.com"
+export HLSAPISETTINGS_COLLECTIONS='["HLSL30_2.0"]'
+```
+
+## Data Pipeline Settings
+```bash
+export DATAPIPELINESETTINGS_BATCH_SIZE=32
+export DATAPIPELINESETTINGS_METADATA_SEARCH_RATELIMIT=20
+export DATAPIPELINESETTINGS_COG_DOWNLOAD_RATELIMIT=40
+```
+
+You can also create a `.env` file in your project root to define these variables. The settings will be loaded in this order of precedence:
+1. Environment variables
+2. `.env` file
+3. Default values in the code
 
 # Chip Creator
 The Chip Creator script is designed for scenarios where label data is provided in a CSV file format. It automates the extraction of relevant satellite tiles and the generation of image chips with corresponding segmentation maps. By using geolocated observation records that include longitude, latitude, date, and label, the script sources the appropriate satellite tiles and creates valid chips, each paired with an accurate segmentation map.

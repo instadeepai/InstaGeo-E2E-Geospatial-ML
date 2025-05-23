@@ -28,10 +28,13 @@ from typing import Any, List, Tuple
 
 import dask.distributed
 import earthaccess
+import geopandas as gpd
 import pandas as pd
 import rasterio
 from absl import app, flags, logging
 from dotenv import load_dotenv
+from pystac_client import Client
+from shapely.geometry import Point
 from tqdm import tqdm
 
 from instageo.data import hls_utils, s1_utils, s2_utils
@@ -43,6 +46,7 @@ from instageo.data.data_pipeline import (
     get_tiles,
 )
 from instageo.data.flags import FLAGS
+from instageo.data.hls_utils import HLSPointsPipeline, add_hls_stack_items
 from instageo.data.settings import GDALOptions, S2Bands
 
 load_dotenv(os.path.expanduser("~/.credentials"))
@@ -228,28 +232,42 @@ def main(argv: Any) -> None:
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))
             and os.path.exists(
-                os.path.join(FLAGS.output_directory, "hls_granules_to_download.csv")
+                os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")
             )
         ):
             logging.info("Creating HLS dataset JSON.")
             logging.info("Retrieving HLS tile ID for each observation.")
-            sub_data_with_tiles = hls_utils.add_hls_granules(
+            os.makedirs(os.path.join(FLAGS.output_directory), exist_ok=True)
+
+            # Convert to GeoPandas DataFrame
+            # Once all pipelines have been migrated, move this section outside this if-block
+            geometry = [Point(xy) for xy in zip(sub_data["x"], sub_data["y"])]
+            sub_data = gpd.GeoDataFrame(
+                sub_data, geometry=geometry, crs=f"EPSG:{FLAGS.src_crs}"
+            )
+            sub_data["geometry_4326"] = sub_data["geometry"].to_crs("EPSG:4326")
+
+            client = Client.open(hls_utils.API.URL)
+            sub_data_with_hls_items = add_hls_stack_items(
+                client,
                 sub_data,
                 num_steps=FLAGS.num_steps,
                 temporal_step=FLAGS.temporal_step,
                 temporal_tolerance=FLAGS.temporal_tolerance,
                 cloud_coverage=FLAGS.cloud_coverage,
+                daytime_only=FLAGS.daytime_only,
             )
-            logging.info("Retrieving HLS tiles that will be downloaded.")
-            hls_dataset, hls_granules_to_download = hls_utils.create_hls_dataset(
-                sub_data_with_tiles, outdir=FLAGS.output_directory
-            )
+            (
+                filtered_obsv_records,
+                hls_dataset,
+            ) = hls_utils.create_hls_records_with_items(sub_data_with_hls_items)
             with open(
                 os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w"
             ) as json_file:
                 json.dump(hls_dataset, json_file, indent=4)
-            pd.DataFrame({"tiles": list(hls_granules_to_download)}).to_csv(
-                os.path.join(FLAGS.output_directory, "hls_granules_to_download.csv")
+            filtered_obsv_records.to_file(
+                os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg"),
+                driver="GPKG",
             )
         else:
             logging.info("HLS dataset JSON already created")
@@ -257,68 +275,35 @@ def main(argv: Any) -> None:
                 os.path.join(FLAGS.output_directory, "hls_dataset.json")
             ) as json_file:
                 hls_dataset = json.load(json_file)
-            hls_granules_to_download = pd.read_csv(
-                os.path.join(FLAGS.output_directory, "hls_granules_to_download.csv")
-            )["tiles"].tolist()
-        os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
-        logging.info("Downloading HLS Tiles")
+            filtered_obsv_records = gpd.read_file(
+                os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")
+            )
+
         if FLAGS.processing_method in ["download", "download-only"]:
             logging.info("Downloading HLS Tiles")
+            os.makedirs(
+                os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True
+            )
             hls_utils.parallel_download(
-                hls_granules_to_download,
+                hls_dataset,
                 outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
             )
         if FLAGS.processing_method == "download-only":
             return
         logging.info("Creating Chips and Segmentation Maps")
-        all_chips = []
-        all_seg_maps = []
-        os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
-        os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-        with dask.distributed.Client() as client:
-            client.run(setup)
-            for key, hls_tile_dict in tqdm(
-                hls_dataset.items(), desc="Processing HLS Dataset"
-            ):
-                obsv_date_str, tile_id = key.split("_")
-                obsv_data = sub_data[
-                    (sub_data["date"] == pd.to_datetime(obsv_date_str))
-                    & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
-                ]
-                try:
-                    chips, seg_maps = create_and_save_chips_with_seg_maps(
-                        data_reader=(
-                            hls_utils.open_hls_cogs
-                            if FLAGS.processing_method == "cog"
-                            else hls_utils.open_mf_tiff_dataset
-                        ),
-                        mask_fn=apply_mask,
-                        processing_method=FLAGS.processing_method,
-                        tile_dict=hls_tile_dict,
-                        data_source=FLAGS.data_source,
-                        df=obsv_data,
-                        chip_size=FLAGS.chip_size,
-                        output_directory=FLAGS.output_directory,
-                        no_data_value=NO_DATA_VALUES.get("HLS"),
-                        src_crs=FLAGS.src_crs,
-                        mask_decoder=hls_utils.decode_fmask_value,
-                        mask_types=FLAGS.mask_types,
-                        masking_strategy=FLAGS.masking_strategy,
-                        window_size=FLAGS.window_size,
-                        task_type=FLAGS.task_type,
-                    )
-                    all_chips.extend(chips)
-                    all_seg_maps.extend(seg_maps)
-                except rasterio.errors.RasterioIOError as e:
-                    logging.error(
-                        f"Error {e} when reading dataset containing: {hls_tile_dict}"
-                    )
-                except IndexError as e:
-                    logging.error(f"Error {e} when processing {key}")
-        logging.info("Saving dataframe of chips and segmentation maps.")
-        pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
-            os.path.join(FLAGS.output_directory, "hls_chips_dataset.csv")
+
+        hls_points_pipeline = HLSPointsPipeline(
+            output_directory=FLAGS.output_directory,
+            chip_size=FLAGS.chip_size,
+            mask_types=FLAGS.mask_types,
+            masking_strategy=FLAGS.masking_strategy,
+            src_crs=FLAGS.src_crs,
+            spatial_resolution=FLAGS.spatial_resolution,
+            window_size=FLAGS.window_size,
         )
+
+        # Run HLS Points pipeline
+        hls_points_pipeline.run(hls_dataset, filtered_obsv_records)
 
     elif FLAGS.data_source == "S2":
         logging.info("Using Sentinel-2 pipeline")
@@ -409,7 +394,7 @@ def main(argv: Any) -> None:
                         df=obsv_data,
                         chip_size=FLAGS.chip_size,
                         output_directory=FLAGS.output_directory,
-                        no_data_value=NO_DATA_VALUES.get("S2"),
+                        no_data_value=NO_DATA_VALUES.S2,
                         src_crs=FLAGS.src_crs,
                         mask_decoder=s2_utils.create_mask_from_scl,
                         mask_types=FLAGS.mask_types,
@@ -493,7 +478,7 @@ def main(argv: Any) -> None:
                         df=obsv_data,
                         chip_size=FLAGS.chip_size,
                         output_directory=FLAGS.output_directory,
-                        no_data_value=NO_DATA_VALUES.get("S1"),
+                        no_data_value=NO_DATA_VALUES.S1,
                         src_crs=FLAGS.src_crs,
                         mask_decoder=s1_utils.decode_mask,
                         mask_types=[],

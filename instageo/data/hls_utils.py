@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from itertools import chain
 from typing import Any, List
 
+import backoff
 import dask
 import dask.delayed
 import earthaccess
@@ -35,6 +36,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
+import ratelimit
 import rioxarray as rxr
 import stackstac
 import xarray as xr
@@ -50,13 +52,17 @@ from shapely.ops import unary_union
 
 from instageo.data import geo_utils, hls_utils
 from instageo.data.data_pipeline import (
+    BasePointsDataPipeline,
     BaseRasterDataPipeline,
     adjust_dims,
     apply_mask,
+    create_segmentation_map,
+    get_chip_coords,
     get_tile_info,
     mask_segmentation_map,
 )
 from instageo.data.settings import (
+    DataPipelineSettings,
     GDALOptions,
     HLSAPISettings,
     HLSBandsSettings,
@@ -69,6 +75,7 @@ NO_DATA_VALUES = NoDataValues()
 BLOCKSIZE = HLSBlockSizes()
 BANDS = HLSBandsSettings()
 API = HLSAPISettings()
+DATA_PIPELINE_SETTINGS = DataPipelineSettings()
 
 client = Client.open(API.URL)
 
@@ -460,14 +467,16 @@ def create_hls_dataset(
     return hls_dataset, set(chain.from_iterable(data_links))
 
 
-def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None:
+def parallel_download(
+    dataset: dict[str, Any], outdir: str, max_retries: int = 3
+) -> None:
     """Parallel Download.
 
     Wraps `download_tile` with multiprocessing.Pool for downloading multiple tiles in
     parallel.
 
     Args:
-        urls: Tile urls to download.
+        dataset: A dataset mapping `key` to STAC Items.
         outdir: Directory to save downloaded tiles.
         max_retries: Number of times to retry downloading all tiles.
 
@@ -478,6 +487,13 @@ def parallel_download(urls: set[str], outdir: str, max_retries: int = 3) -> None
     earthaccess.login(persist=True)
     retries = 0
     complete = False
+
+    urls = set()
+    for _, dataset_entry in dataset.items():
+        stac_items = dataset_entry["granules"]
+        for item in stac_items:
+            urls.update([item["assets"][band]["href"] for band in BANDS.ASSET])
+
     while retries <= max_retries:
         temp_urls = [
             url
@@ -611,6 +627,14 @@ def get_raster_tile_info(
     return tile_info, tile_queries
 
 
+@ratelimit.limits(calls=DATA_PIPELINE_SETTINGS.METADATA_SEARCH_RATELIMIT, period=60)
+@backoff.on_exception(
+    backoff.expo,
+    (APIError, RuntimeError),
+    max_tries=5,
+    max_time=300,  # 5 minutes max
+    jitter=backoff.full_jitter,
+)
 def retrieve_hls_stac_metadata(
     client: Client,
     tile_info_df: pd.DataFrame,
@@ -654,9 +678,9 @@ def retrieve_hls_stac_metadata(
                 query={"eo:cloud_cover": {"lte": cloud_coverage}},
             )
             candidate_items = search.item_collection()
-        except APIError:
-            logging.info("Sleeping to retry after 30 minutes...")
-            time.sleep(30 * 60)
+        except APIError as e:
+            logging.warning(f"API Error for tile {tile_id}: {str(e)}")
+            time.sleep(10 * 60)  # Wait 10 minutes before retrying
             continue
 
         if daytime_only:
@@ -669,6 +693,7 @@ def retrieve_hls_stac_metadata(
         candidate_items = rename_hls_stac_items(candidate_items)
 
         items_dict[tile_id] = candidate_items
+        time.sleep(10)  # Add a small delay between requests
     return items_dict
 
 
@@ -842,7 +867,8 @@ def add_hls_stack_items(
         A dictionary mapping each MGRS tile ID to a DataFrame containing the observations
           that fall within that tile with their associated PySTAC items representing granules.
     """
-    data = data.rename(columns={"date": "input_features_date"})
+    if "input_features_date" not in data.columns:
+        data = data.rename(columns={"date": "input_features_date"})
     tiles_info, tile_queries = get_raster_tile_info(
         data,
         num_steps=num_steps,
@@ -929,6 +955,14 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
         env = rasterio.Env(**GDALOptions().model_dump())
         env.__enter__()
 
+    @ratelimit.limits(calls=DATA_PIPELINE_SETTINGS.COG_DOWNLOAD_RATELIMIT, period=60)
+    @backoff.on_exception(
+        backoff.expo,
+        (rasterio.errors.RasterioIOError, Exception),
+        max_tries=5,
+        max_time=300,  # 5 minutes max
+        jitter=backoff.full_jitter,
+    )
     def load_data(
         self, tile_dict: dict[str, Any]
     ) -> tuple[xr.DataArray, xr.DataArray, str]:
@@ -938,23 +972,21 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
             self.src_crs,
             self.spatial_resolution,
             load_masks=True,
-            fill_value=NO_DATA_VALUES.get("HLS"),
+            fill_value=NO_DATA_VALUES.HLS,
         )
         return dsb, dsm, crs
 
     def process_row(
-        self, row_dict: dict[str, Any], flags_dict: dict[str, Any], data_bundle: Any
+        self,
+        row_dict: dict[str, Any],
+        flags_dict: dict[str, Any],
+        tile_dict: dict[str, Any],
     ) -> None | tuple[str, str]:
         """See parent class. Process a single row."""
-        (
-            dsb,
-            dsm,
-            _,
-        ) = data_bundle
-        geometry = shape(row_dict["geometry"])
-
         label_filename = f"{os.path.splitext(row_dict['label_filename'])[0]}_{row_dict['mgrs_tile_id']}"  # noqa
-        chip_filename = label_filename.replace("mask", "merged")
+        chip_filename = label_filename.replace("mask", "merged").replace(
+            "label", "chip"
+        )
 
         chip_path = os.path.join(self.output_directory, "chips", f"{chip_filename}.tif")
         label_path = os.path.join(
@@ -964,6 +996,9 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
             logging.info(f"Skipping {chip_path} because it's already created")
             return chip_path, label_path
         try:
+            dsb, dsm, _ = self.load_data(tile_dict)
+            geometry = shape(row_dict["geometry"])
+
             # Process chip
             chip = geo_utils.slice_xr_dataset(dsb, geometry, chip_size=self.chip_size)
             seg_map = xr.open_dataarray(
@@ -997,18 +1032,21 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
                 chip = chip.clip(min=0, max=10000)
 
                 if self.qa_check:
-                    if chip.where(chip > 0).count().values == 0:
+                    if chip.where(chip != NO_DATA_VALUES.HLS).count().values == 0:
                         logging.warning(f"Skipping {chip_filename} due to cloud")
                         return None
                     seg_map = mask_segmentation_map(
-                        chip, seg_map, NoDataValues.get("SEG_MAP")
+                        chip, seg_map, NO_DATA_VALUES.HLS, self.masking_strategy
                     )
-                    if seg_map.where(seg_map > 0).count().values == 0:
+                    if (
+                        seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values
+                        == 0
+                    ):
                         logging.warning(f"Skipping {label_filename} due to empty label")
                         return None
                 seg_map = seg_map.where(
-                    ~np.isnan(seg_map), NO_DATA_VALUES.get("SEG_MAP")
-                ).astype(np.int8 if self.task_type == "seg" else np.float32)
+                    ~np.isnan(seg_map), NO_DATA_VALUES.SEG_MAP
+                ).astype(np.uint8 if self.task_type == "seg" else np.float32)
                 chip = chip.where(~np.isnan(chip), 0).astype(np.uint16)
 
                 seg_map.squeeze().rio.to_raster(label_path)
@@ -1020,6 +1058,186 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
         except Exception as e:
             logging.error(f"Error processing row {row_dict}: {str(e)}")
             return None
+
+
+class HLSPointsPipeline(BasePointsDataPipeline):
+    """HLS Raster Data Pipeline."""
+
+    def setup(self) -> None:
+        """Setup for environment to be used by Dask workers.
+
+        Configures relevant GDAL options for reading COGs
+        """
+        earthaccess.login(persist=True)
+        env = rasterio.Env(**GDALOptions().model_dump())
+        env.__enter__()
+
+    @ratelimit.limits(calls=DATA_PIPELINE_SETTINGS.COG_DOWNLOAD_RATELIMIT, period=60)
+    @backoff.on_exception(
+        backoff.expo,
+        (rasterio.errors.RasterioIOError, Exception),
+        max_tries=5,
+        max_time=300,  # 5 minutes max
+        jitter=backoff.full_jitter,
+    )
+    def load_data(
+        self, tile_dict: dict[str, Any]
+    ) -> tuple[xr.Dataset, xr.Dataset, str]:
+        """See parent class. Load Granules."""
+        dsb, dsm, crs = open_hls_stac_items(
+            tile_dict["granules"],
+            self.src_crs,
+            self.spatial_resolution,
+            load_masks=True,
+        )
+        return dsb, dsm, crs
+
+    def process_tile(
+        self,
+        obsv_records: gpd.GeoDataFrame,
+        flags_dict: dict[str, Any],
+        tile_dict: dict[str, Any],
+        batch_size: int,
+    ) -> tuple[list[str], list[str]]:
+        """Processes a single tile.
+
+        Arguments:
+            obsv_records: Observation records dataframe.
+            flags_dict: Dictionary mapping all arguments and values needed to process the row.
+            tile_dict: Input to `self.load_data`, which contains the granules to load.
+            batch_size: Number of records to process at a time.
+        Returns: tuple of the chip and label filenames lists.
+        """
+        tile_name_splits = tile_dict["granules"][0]["id"].split(".")
+        tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
+        stac_items_str = obsv_records.iloc[0]["stac_items_str"]
+        chip_paths = []
+        label_paths = []
+
+        try:
+            date_id = obsv_records.iloc[0]["date"].strftime("%Y%m%d")
+            dsb, dsm, crs = self.load_data(tile_dict)
+            n_chips_x = dsb.sizes["x"] // self.chip_size
+            n_chips_y = dsb.sizes["y"] // self.chip_size
+            chip_coords = get_chip_coords(obsv_records, dsb, self.chip_size)
+
+            # Process chips in smaller batches to avoid overwhelming the API
+            for i in range(0, len(chip_coords), batch_size):
+                batch_coords = chip_coords[i : i + batch_size]
+                chips, masks, seg_maps_temp_filenames, chips_temp_filenames = (
+                    [],
+                    [],
+                    [],
+                    [],
+                )
+
+                for x, y in batch_coords:
+                    # TODO: handle potential partially out of bound chips
+                    if (x >= n_chips_x) or (y >= n_chips_y):
+                        continue
+
+                    chip_id = f"{date_id}_{tile_id}_{x}_{y}"
+                    chip_name = f"chip_{chip_id}.tif"
+                    seg_map_name = f"seg_map_{chip_id}.tif"
+
+                    chip_filename = os.path.join(
+                        self.output_directory, "chips", chip_name
+                    )
+                    chips_temp_filenames.append(chip_filename)
+                    seg_map_filename = os.path.join(
+                        self.output_directory, "seg_maps", seg_map_name
+                    )
+                    seg_maps_temp_filenames.append(seg_map_filename)
+                    if os.path.exists(chip_filename) or os.path.exists(
+                        seg_map_filename
+                    ):
+                        logging.info(
+                            f"Skipping {chip_filename} because it's already created"
+                        )
+                        continue
+
+                    chip = dsb.isel(
+                        x=slice(x * self.chip_size, (x + 1) * self.chip_size),
+                        y=slice(y * self.chip_size, (y + 1) * self.chip_size),
+                    )
+                    chips.append(chip)
+
+                    if dsm is not None:
+                        chip_mask = dsm.isel(
+                            x=slice(x * self.chip_size, (x + 1) * self.chip_size),
+                            y=slice(y * self.chip_size, (y + 1) * self.chip_size),
+                        )
+                        masks.append(chip_mask)
+                    else:
+                        masks.append(None)
+
+                # Process the batch
+                try:
+                    # Compute chips and masks locally before processing
+                    chips = [chip.compute() for chip in chips]
+                    masks = (
+                        [mask.compute() for mask in masks] if dsm is not None else masks
+                    )
+
+                    for chip, mask, chip_filename, seg_map_filename in zip(
+                        chips, masks, chips_temp_filenames, seg_maps_temp_filenames
+                    ):
+                        if mask is not None:
+                            chip = apply_mask(
+                                chip=chip,
+                                mask=mask,
+                                no_data_value=NO_DATA_VALUES.HLS,
+                                mask_decoder=decode_fmask_value,
+                                data_source="HLS",
+                                mask_types=self.mask_types,
+                                masking_strategy=self.masking_strategy,
+                            )
+
+                        if chip.where(chip != NO_DATA_VALUES.HLS).count().values == 0:
+                            logging.warning(f"Skipping {chip_filename} due to cloud")
+                            continue
+
+                        seg_map = create_segmentation_map(
+                            chip, obsv_records, self.window_size
+                        )
+                        seg_map = mask_segmentation_map(
+                            chip,
+                            seg_map,
+                            NO_DATA_VALUES.HLS,
+                            self.masking_strategy,
+                        )
+
+                        if (
+                            seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP)
+                            .count()
+                            .values
+                            == 0
+                        ):
+                            logging.warning(
+                                f"Skipping {seg_map_filename} due to empty label"
+                            )
+                            continue
+
+                        label_paths.append(seg_map_filename)
+                        chip_paths.append(chip_filename)
+                        seg_map.rio.to_raster(seg_map_filename)
+                        chip.rio.to_raster(chip_filename)
+
+                except Exception as e:
+                    logging.error(f"Error processing batch: {str(e)}")
+                    continue
+
+                # Add a delay between batches to avoid rate limiting
+                time.sleep(5)
+
+        except rasterio.errors.RasterioIOError as e:
+            logging.error(
+                f"Error {e} when reading dataset containing: {stac_items_str}"
+            )
+        except Exception as e:
+            logging.error(f"Error {e} when processing {stac_items_str}")
+
+        return chip_paths, label_paths
 
 
 def open_hls_stac_items(
@@ -1046,8 +1264,12 @@ def open_hls_stac_items(
     """
     # Load the bands for all timesteps and stack them in a data array
     assets_to_load = BANDS.ASSET + ["Fmask"] if load_masks else BANDS.ASSET
+
+    # Convert items to plain dicts before stacking to avoid STAC catalog resolution
+    plain_items = [item.to_dict() for item in ItemCollection(tile_dict)]
+
     stacked_items = stackstac.stack(
-        ItemCollection(tile_dict),
+        plain_items,
         assets=assets_to_load,
         chunksize=(BLOCKSIZE.X, BLOCKSIZE.Y),
         properties=False,

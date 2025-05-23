@@ -29,7 +29,7 @@ def test_create_chips(setup_and_teardown_output_dir):
     fmask_path = "tests/data/fmask.tif"
     chip_size = 64
     output_directory = "/tmp/output"
-    no_data_value = NO_DATA_VALUES.get("HLS")
+    no_data_value = NO_DATA_VALUES.HLS
     df = pd.read_csv("tests/data/sample_4326.csv")
     df["date"] = pd.to_datetime("2020-01-01")
     os.makedirs(os.path.join(output_directory, "chips"), exist_ok=True)
@@ -72,7 +72,7 @@ def test_create_chips(setup_and_teardown_output_dir):
         assert seg_map.band_data.shape == (1, 64, 64)
         assert np.unique(seg_map.band_data).size > 1
         chip_invalid_mask = (chip == no_data_value).any(dim="band").to_array().values
-        seg_no_data_value = NO_DATA_VALUES.get("SEG_MAP")
+        seg_no_data_value = NO_DATA_VALUES.SEG_MAP
         seg_invalid_mask = (seg_map == seg_no_data_value).to_array().values[0]
         assert np.all(seg_invalid_mask[chip_invalid_mask])
 
@@ -80,12 +80,12 @@ def test_create_chips(setup_and_teardown_output_dir):
 def test_segmentation_map_masking():
     chip_path = "tests/data/chip_178_022.tif"
     seg_map_path = "tests/data/chip_178_022.mask.tif"
-    chipno_data_value = -9999
+    chip_no_data_value = -9999
     chip = rioxarray.open_rasterio(chip_path)
     seg_map = rioxarray.open_rasterio(seg_map_path)
     seg_map = seg_map.assign_coords(x=chip.x.values, y=chip.y.values)
-    seg_map = mask_segmentation_map(chip, seg_map, chipno_data_value)
-    assert seg_map.where(seg_map != NO_DATA_VALUES.get("SEG_MAP")).count().values == 0
+    seg_map = mask_segmentation_map(chip, seg_map, chip_no_data_value)
+    assert seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values == 0
 
 
 def test_segmentation_map_masking_pass():
@@ -103,7 +103,18 @@ def test_segmentation_map_masking_pass():
     )
     seg_no_data_value = -1
     chip_no_data_value = -9
-    seg_map = mask_segmentation_map(chip, seg_map, no_data_value=chip_no_data_value)
+
+    # test each masking strategy
+    seg_map = mask_segmentation_map(
+        chip, seg_map, chip_no_data_value=chip_no_data_value, masking_strategy="each"
+    )
+    assert seg_map.where(seg_map != seg_no_data_value).count().values > 0
+    np.testing.assert_array_equal(np.array([[1, -1, 1, 2]]), seg_map.values)
+
+    # test any masking strategy
+    seg_map = mask_segmentation_map(
+        chip, seg_map, chip_no_data_value=chip_no_data_value, masking_strategy="any"
+    )
     assert seg_map.where(seg_map != seg_no_data_value).count().values > 0
     np.testing.assert_array_equal(np.array([[1, -1, -1, 2]]), seg_map.values)
 
@@ -123,7 +134,9 @@ def test_segmentation_map_masking_fail():
     )
     seg_no_data_value = -1
     chip_no_data_value = -9
-    seg_map = mask_segmentation_map(chip, seg_map, no_data_value=chip_no_data_value)
+    seg_map = mask_segmentation_map(
+        chip, seg_map, chip_no_data_value=chip_no_data_value
+    )
     assert seg_map.where(seg_map != seg_no_data_value).count().values == 0
     np.testing.assert_array_equal(np.array([[-1, -1, -1, -1]]), seg_map.values)
 
