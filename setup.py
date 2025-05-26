@@ -20,6 +20,10 @@ data_dependencies = [
     "stackstac==0.5.1",
     "planetary_computer==1.0.0",
     "pyarrow==18.1.0",
+    "haversine==2.8.1",
+    "cartopy==0.24.1",
+    "seaborn==0.13.2",
+    "scikit-learn==1.6.0",
 ]
 model_dependencies = [
     # Add dependencies specific to the model component
