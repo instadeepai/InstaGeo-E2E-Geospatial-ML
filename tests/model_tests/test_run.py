@@ -5,9 +5,9 @@ import torch
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
 
+from instageo.model.factory import create_model
 from instageo.model.metrics import RunningAUC, RunningConfusionMatrix
 from instageo.model.run import (
-    PrithviSegmentationModule,
     check_required_flags,
     compute_class_weights,
     compute_stats,
@@ -18,7 +18,8 @@ from instageo.model.run import (
 class MockPrithviSeg(torch.nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
-        self.conv = torch.nn.Conv2d(6, 2, kernel_size=3, padding=1)
+        self.num_classes = kwargs.get("num_classes", 2)
+        self.conv = torch.nn.Conv2d(6, self.num_classes, kernel_size=3, padding=1)
 
     def forward(self, x):
         # Convert 5D input (B, C, T, H, W) to 4D (B, C, H, W) for the mock conv
@@ -27,15 +28,21 @@ class MockPrithviSeg(torch.nn.Module):
 
 
 class MockDataset(Dataset):
-    def __init__(self, size=10, num_classes=2, temporal_step=1):
+    def __init__(self, size=10, num_classes=2, temporal_step=1, is_reg_task=False):
         self.size = size
         self.num_classes = num_classes
         self.temporal_step = temporal_step
+        self.is_reg_task = is_reg_task
         # Add temporal dimension to data and use 6 channels for spectral bands
         self.data = torch.randn(
             size, 6, temporal_step, 224, 224
         )  # Random images with temporal dimension and 6 spectral bands
-        self.labels = torch.randint(0, num_classes, (size, 224, 224))  # Random labels
+        if is_reg_task:
+            self.labels = torch.rand(size, 224, 224)  # Random regression values
+        else:
+            self.labels = torch.randint(
+                0, num_classes, (size, 224, 224)
+            )  # Random labels
 
     def __len__(self):
         return self.size
@@ -45,18 +52,61 @@ class MockDataset(Dataset):
 
 
 @pytest.fixture
-def model():
-    with patch("instageo.model.run.PrithviSeg", MockPrithviSeg):
-        model = PrithviSegmentationModule(
-            image_size=224,
-            learning_rate=1e-4,
-            freeze_backbone=True,
-            num_classes=2,
-            temporal_step=1,
-            class_weights=[1, 2],
-            ignore_index=-100,
-            weight_decay=1e-2,
-        )
+def mock_config():
+    return DictConfig(
+        {
+            "is_reg_task": False,
+            "dataloader": {
+                "img_size": 224,
+                "temporal_dim": 1,
+            },
+            "train": {
+                "learning_rate": 1e-4,
+                "class_weights": [1, 2],
+                "ignore_index": -100,
+                "weight_decay": 1e-2,
+                "scheduler": True,
+            },
+            "model": {
+                "freeze_backbone": True,
+                "num_classes": 2,
+                "model_name": "pritvhi-eo1",
+                "load_pretrained_weights": True,
+                "weight_clip_range": None,
+            },
+        }
+    )
+
+
+@pytest.fixture
+def mock_reg_config(mock_config):
+    mock_config.is_reg_task = True
+    mock_config.model.update(
+        {
+            "num_classes": 1,
+            "use_log_scale": False,
+            "plot_reg_results": False,
+            "include_ee_metric": False,
+        }
+    )
+    return mock_config
+
+
+@pytest.fixture
+def model(mock_config):
+    with patch("instageo.model.base.PrithviSeg", MockPrithviSeg):
+        model = create_model(mock_config)
+        # Patch the optimizers method
+        mock_optimizer = MagicMock()
+        mock_optimizer.param_groups = [{"lr": 1e-4}]
+        model.optimizers = MagicMock(return_value=mock_optimizer)
+        return model
+
+
+@pytest.fixture
+def reg_model(mock_reg_config):
+    with patch("instageo.model.base.PrithviSeg", MockPrithviSeg):
+        model = create_model(mock_reg_config)
         # Patch the optimizers method
         mock_optimizer = MagicMock()
         mock_optimizer.param_groups = [{"lr": 1e-4}]
@@ -67,6 +117,12 @@ def model():
 @pytest.fixture
 def mock_dataloader():
     dataset = MockDataset(temporal_step=1)
+    return DataLoader(dataset, batch_size=2)
+
+
+@pytest.fixture
+def mock_reg_dataloader():
+    dataset = MockDataset(temporal_step=1, is_reg_task=True)
     return DataLoader(dataset, batch_size=2)
 
 
@@ -101,6 +157,8 @@ def test_get_device():
 
 
 def test_model_forward(model):
+    """Test forward pass of segmentation model outputs correct
+    shape with class probabilities ."""
     # Add temporal dimension to input and use 6 channels for spectral bands
     x = torch.randn(
         2, 6, 1, 224, 224
@@ -109,7 +167,18 @@ def test_model_forward(model):
     assert output.shape == (2, 2, 224, 224)  # batch_size, num_classes, height, width
 
 
+def test_reg_model_forward(reg_model):
+    """Test forward pass of regression model outputs correct shape."""
+    # Add temporal dimension to input and use 6 channels for spectral bands
+    x = torch.randn(
+        2, 6, 1, 224, 224
+    )  # batch_size, spectral_bands, temporal, height, width
+    output = reg_model(x)
+    assert output.shape == (2, 1, 224, 224)  # batch_size, 1, height, width
+
+
 def test_training_step(model, mock_dataloader):
+    """Test that `training_step` updates confusion matrix and AUC metrics with gradients for segmentation model."""
     # Get a batch
     batch = next(iter(mock_dataloader))
     # Call training step directly
@@ -121,7 +190,20 @@ def test_training_step(model, mock_dataloader):
     assert model.train_auc.n_pos.sum() > 0 or model.train_auc.n_neg.sum() > 0
 
 
+def test_reg_training_step(reg_model, mock_reg_dataloader):
+    """Test that `training_step` updates metrics and returns loss with gradients for regression model."""
+    # Get a batch
+    batch = next(iter(mock_reg_dataloader))
+    # Call training step directly
+    loss = reg_model.training_step(batch, 0)
+    assert isinstance(loss, torch.Tensor)
+    assert loss.requires_grad
+    # Check that metrics were updated
+    assert reg_model.train_metrics.n > 0
+
+
 def test_validation_step(model, mock_dataloader):
+    """Test that `validation_step` updates confusion matrix and AUC metrics without gradients for segmentation model."""
     # Get a batch
     batch = next(iter(mock_dataloader))
     # Call validation step directly
@@ -133,7 +215,20 @@ def test_validation_step(model, mock_dataloader):
     assert model.val_auc.n_pos.sum() > 0 or model.val_auc.n_neg.sum() > 0
 
 
+def test_reg_validation_step(reg_model, mock_reg_dataloader):
+    """Test that `validation_step` updates metrics and returns loss without gradients for regression model."""
+    # Get a batch
+    batch = next(iter(mock_reg_dataloader))
+    # Call validation step directly
+    loss = reg_model.validation_step(batch, 0)
+    assert isinstance(loss, torch.Tensor)
+    assert not loss.requires_grad
+    # Check that metrics were updated
+    assert reg_model.val_metrics.n > 0
+
+
 def test_test_step(model, mock_dataloader):
+    """Test that `test_step` updates confusion matrix and AUC metrics without gradients for segmentation model."""
     # Get a batch
     batch = next(iter(mock_dataloader))
     # Call test step directly
@@ -145,7 +240,20 @@ def test_test_step(model, mock_dataloader):
     assert model.test_auc.n_pos.sum() > 0 or model.test_auc.n_neg.sum() > 0
 
 
+def test_reg_test_step(reg_model, mock_reg_dataloader):
+    """Test that `test_step` updates metrics and returns loss without gradients for regression model."""
+    # Get a batch
+    batch = next(iter(mock_reg_dataloader))
+    # Call test step directly
+    loss = reg_model.test_step(batch, 0)
+    assert isinstance(loss, torch.Tensor)
+    assert not loss.requires_grad
+    # Check that metrics were updated
+    assert reg_model.test_metrics.n > 0
+
+
 def test_predict_step(model):
+    """Test that `predict_step` returns class probabilities with correct shape for segmentation model."""
     # Add temporal dimension to input and use 6 channels for spectral bands
     x = torch.randn(
         2, 6, 1, 224, 224
@@ -155,37 +263,14 @@ def test_predict_step(model):
     assert torch.all(probabilities >= 0) and torch.all(probabilities <= 1)
 
 
-def test_compute_metrics(model):
-    # Create mock predictions and ground truth
-    pred_mask = torch.randn(2, 2, 224, 224)  # 2 classes
-    gt_mask = torch.randint(0, 2, (2, 224, 224))
-
-    # Get predictions and probabilities
-    preds = torch.argmax(pred_mask, dim=1)
-    probs = torch.nn.functional.softmax(pred_mask, dim=1)
-
-    # Flatten tensors
-    preds = preds.reshape(-1).cpu().numpy()
-    gt_mask = gt_mask.reshape(-1).cpu().numpy()
-    probs = probs.permute(0, 2, 3, 1).reshape(-1, probs.size(1)).cpu().numpy()
-
-    # Compute metrics using RunningConfusionMatrix
-    cm = RunningConfusionMatrix(num_classes=2)
-    cm.update(gt_mask, preds)
-    metrics = cm.compute()
-
-    # Compute AUC using RunningAUC
-    auc = RunningAUC(num_classes=2)
-    auc.update(gt_mask, probs)
-    auc_metrics = auc.score()
-
-    # Verify all expected metrics are present
-    assert "accuracy" in metrics
-    assert "precision" in metrics
-    assert "recall" in metrics
-    assert "f1" in metrics
-    assert "jaccard" in metrics
-    assert "roc_auc_macro" in auc_metrics
+def test_reg_predict_step(reg_model):
+    """Test that `predict_step` returns predictions with correct shape for regression model."""
+    # Add temporal dimension to input and use 6 channels for spectral bands
+    x = torch.randn(
+        2, 6, 1, 224, 224
+    )  # batch_size, spectral_bands, temporal, height, width
+    predictions = reg_model.predict_step(x)
+    assert predictions.shape == (2, 224, 224)
 
 
 def test_configure_optimizers(model):
@@ -199,6 +284,7 @@ def test_configure_optimizers(model):
 
 
 def test_on_train_epoch_end(model, mock_dataloader):
+    """Test that `on_train_epoch_end` resets confusion matrix and AUC metrics after processing for segmentation model."""
     # First add some predictions and labels
     batch = next(iter(mock_dataloader))
     model.training_step(batch, 0)
@@ -212,7 +298,21 @@ def test_on_train_epoch_end(model, mock_dataloader):
     assert model.train_auc.n_pos.sum() == 0 and model.train_auc.n_neg.sum() == 0
 
 
+def test_reg_on_train_epoch_end(reg_model, mock_reg_dataloader):
+    """Test that `on_train_epoch_end` resets metrics after processing for regression model."""
+    # First add some predictions and labels
+    batch = next(iter(mock_reg_dataloader))
+    reg_model.training_step(batch, 0)
+    # Verify that metrics are not empty before epoch end
+    assert reg_model.train_metrics.n > 0
+    # Call epoch end
+    reg_model.on_train_epoch_end()
+    # Verify that metrics are reset
+    assert reg_model.train_metrics.n == 0
+
+
 def test_on_validation_epoch_end(model, mock_dataloader):
+    """Test that `on_validation_epoch_end` resets confusion matrix and AUC metrics after processing for segmentation model."""
     # First add some predictions and labels
     batch = next(iter(mock_dataloader))
     model.validation_step(batch, 0)
@@ -226,7 +326,21 @@ def test_on_validation_epoch_end(model, mock_dataloader):
     assert model.val_auc.n_pos.sum() == 0 and model.val_auc.n_neg.sum() == 0
 
 
+def test_reg_on_validation_epoch_end(reg_model, mock_reg_dataloader):
+    """Test that `on_validation_epoch_end` resets metrics after processing for regression model."""
+    # First add some predictions and labels
+    batch = next(iter(mock_reg_dataloader))
+    reg_model.validation_step(batch, 0)
+    # Verify that metrics are not empty before epoch end
+    assert reg_model.val_metrics.n > 0
+    # Call epoch end
+    reg_model.on_validation_epoch_end()
+    # Verify that metrics are reset
+    assert reg_model.val_metrics.n == 0
+
+
 def test_on_test_epoch_end(model, mock_dataloader):
+    """Test that `on_test_epoch_end` resets confusion matrix and AUC metrics after processing for segmentation model."""
     # First add some predictions and labels
     batch = next(iter(mock_dataloader))
     model.test_step(batch, 0)
@@ -238,3 +352,16 @@ def test_on_test_epoch_end(model, mock_dataloader):
     # Verify that metrics are reset
     assert model.test_metrics.total == 0
     assert model.test_auc.n_pos.sum() == 0 and model.test_auc.n_neg.sum() == 0
+
+
+def test_reg_on_test_epoch_end(reg_model, mock_reg_dataloader):
+    """Test that `on_test_epoch_end` resets metrics after processing for regression model."""
+    # First add some predictions and labels
+    batch = next(iter(mock_reg_dataloader))
+    reg_model.test_step(batch, 0)
+    # Verify that metrics are not empty before epoch end
+    assert reg_model.test_metrics.n > 0
+    # Call epoch end
+    reg_model.on_test_epoch_end()
+    # Verify that metrics are reset
+    assert reg_model.test_metrics.n == 0

@@ -32,7 +32,6 @@ import numpy as np
 import pytorch_lightning as pl
 import rasterio
 import torch
-import torch.nn as nn
 from neptune.utils import stringify_unsupported
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -45,9 +44,8 @@ from instageo.model.dataloader import (
     process_data,
     process_test,
 )
+from instageo.model.factory import create_model
 from instageo.model.infer_utils import chip_inference, sliding_window_inference
-from instageo.model.metrics import RunningAUC, RunningConfusionMatrix
-from instageo.model.model import PrithviSeg
 from instageo.model.neptune_logger import AIchorNeptuneLogger, set_neptune_api_token
 
 pl.seed_everything(seed=1042, workers=True)
@@ -201,266 +199,6 @@ def get_augmentations(cfg: DictConfig) -> Optional[List[Dict[str, Any]]]:
     return augmentations
 
 
-class PrithviSegmentationModule(pl.LightningModule):
-    """Prithvi Segmentation PyTorch Lightning Module."""
-
-    def __init__(
-        self,
-        image_size: int = 224,
-        learning_rate: float = 1e-4,
-        freeze_backbone: bool = True,
-        load_pretrained_weights: bool = True,
-        num_classes: int = 2,
-        temporal_step: int = 1,
-        class_weights: List[float] = [1, 2],
-        ignore_index: int = -100,
-        weight_decay: float = 1e-2,
-        scheduler: bool = True,
-        model_name: str = "pritvhi-eo1",
-    ) -> None:
-        """Initialization.
-
-        Initialize the PrithviSegmentationModule, a PyTorch Lightning module for image
-        segmentation.
-
-        Args:
-            image_size (int): Size of input image.
-            num_classes (int): Number of classes for segmentation.
-            temporal_step (int): Number of temporal steps for multi-temporal input.
-            learning_rate (float): Learning rate for the optimizer.
-            freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
-            load_pretrained_weights (bool): Flag to load pretrained weights.
-            class_weights (List[float]): Class weights for mitigating class imbalance.
-            ignore_index (int): Class index to ignore during loss computation.
-            weight_decay (float): Weight decay for L2 regularization.
-            scheduler (bool): Flag to use a learning rate scheduler.
-            model_name (str): Model architecture chosen.
-        """
-        super().__init__()
-
-        self.net = PrithviSeg(
-            image_size=image_size,
-            num_classes=num_classes,
-            temporal_step=temporal_step,
-            freeze_backbone=freeze_backbone,
-            variant=model_name,
-            load_pretrained_weights=load_pretrained_weights,
-        )
-        weight_tensor = torch.tensor(class_weights).float() if class_weights else None
-        self.criterion = nn.CrossEntropyLoss(
-            ignore_index=ignore_index, weight=weight_tensor, reduction="none"
-        )
-        self.learning_rate = learning_rate
-        self.ignore_index = ignore_index
-        self.weight_decay = weight_decay
-        self.num_classes = num_classes
-        self.scheduler = scheduler
-
-        # Initialize streaming metrics
-        self.train_metrics = RunningConfusionMatrix(num_classes, ignore_index)
-        self.val_metrics = RunningConfusionMatrix(num_classes, ignore_index)
-        self.test_metrics = RunningConfusionMatrix(num_classes, ignore_index)
-        self.train_auc = RunningAUC(num_classes)
-        self.val_auc = RunningAUC(num_classes)
-        self.test_auc = RunningAUC(num_classes)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Define the forward pass of the model.
-
-        Args:
-            x (torch.Tensor): Input tensor for the model.
-
-        Returns:
-            torch.Tensor: Output tensor from the model.
-        """
-        return self.net(x)
-
-    def _shared_step(self, batch: Any, step_type: str) -> torch.Tensor:
-        """Shared logic for training, validation and test steps.
-
-        Args:
-            batch (Any): Input batch data.
-            step_type (str): Type of step ('train', 'val', or 'test').
-
-        Returns:
-            torch.Tensor: The loss value for the batch.
-        """
-        inputs, labels = batch
-        outputs = self.forward(inputs)
-        loss = self.criterion(outputs, labels.long())
-        loss = loss[labels != self.ignore_index].mean()
-
-        # Get predictions and probabilities
-        preds = torch.argmax(outputs, dim=1)
-        probs = torch.nn.functional.softmax(outputs.detach(), dim=1)
-
-        # Get valid indices
-        no_ignore = labels.ne(self.ignore_index)
-        valid_indices = no_ignore.reshape(-1).nonzero().squeeze()
-
-        if valid_indices.numel() > 0:
-            # Flatten and select valid pixels
-            preds = preds.reshape(-1)[valid_indices]
-            labels = labels.reshape(-1)[valid_indices]
-            probs = probs.permute(0, 2, 3, 1).reshape(-1, probs.size(1))[valid_indices]
-
-            # Ensure consistent dimensionality when valid_indices is a single element
-            if valid_indices.numel() == 1:
-                preds = preds.unsqueeze(0)
-                labels = labels.unsqueeze(0)
-                probs = probs.unsqueeze(0)
-
-            # Update metrics - ensure integer type
-            metrics = getattr(self, f"{step_type}_metrics")
-            auc_metrics = getattr(self, f"{step_type}_auc")
-
-            metrics.update(
-                labels.cpu().numpy().astype(np.int64),
-                preds.cpu().numpy().astype(np.int64),
-            )
-            auc_metrics.update(
-                labels.cpu().numpy().astype(np.int64), probs.cpu().numpy()
-            )
-
-        # Log the loss
-        self.log(
-            f"{step_type}_loss",
-            loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-        )
-
-        return loss
-
-    def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        """Perform a training step.
-
-        Args:
-            batch (Any): Input batch data.
-            batch_idx (int): Index of the batch.
-
-        Returns:
-            torch.Tensor: The loss value for the batch.
-        """
-        loss = self._shared_step(batch, "train")
-
-        # Log learning rate
-        opt = self.optimizers()
-        current_lr = opt.param_groups[0]["lr"]
-        self.log(
-            "learning_rate",
-            current_lr,
-            on_step=True,
-            on_epoch=False,
-            prog_bar=True,
-            logger=True,
-        )
-
-        return loss
-
-    def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        """Perform a validation step.
-
-        Args:
-            batch (Any): Input batch data.
-            batch_idx (int): Index of the batch.
-
-        Returns:
-            torch.Tensor: The loss value for the batch.
-        """
-        with torch.no_grad():
-            return self._shared_step(batch, "val")
-
-    def test_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        """Perform a test step.
-
-        Args:
-            batch (Any): Input batch data.
-            batch_idx (int): Index of the batch.
-
-        Returns:
-            torch.Tensor: The loss value for the batch.
-        """
-        with torch.no_grad():
-            return self._shared_step(batch, "test")
-
-    def _shared_epoch_end(self, step_type: str) -> None:
-        """Shared logic for training, validation and test epoch ends.
-
-        Args:
-            step_type (str): Type of step ('train', 'val', or 'test').
-        """
-        metrics = getattr(self, f"{step_type}_metrics").compute()
-        auc_metrics = getattr(self, f"{step_type}_auc").score()
-
-        # Log overall metrics
-        self.log(f"{step_type}_Acc", metrics["accuracy"], logger=True)
-        self.log(f"{step_type}_IoU", metrics["jaccard"], logger=True)
-        self.log(f"{step_type}_F1", metrics["f1"], logger=True)
-        self.log(f"{step_type}_Precision", metrics["precision"], logger=True)
-        self.log(f"{step_type}_Recall", metrics["recall"], logger=True)
-        self.log(f"{step_type}_roc_auc", auc_metrics["roc_auc_macro"], logger=True)
-
-        # Log per-class metrics
-        for idx, value in enumerate(metrics["jaccard_per_class"]):  # type: ignore
-            self.log(f"{step_type}_IoU_{idx}", value, logger=True)
-        for idx, value in enumerate(metrics["f1_per_class"]):  # type: ignore
-            self.log(f"{step_type}_F1_{idx}", value, logger=True)
-
-        # Reset metrics for next epoch
-        getattr(self, f"{step_type}_metrics").reset()
-        getattr(self, f"{step_type}_auc").reset()
-
-    def on_train_epoch_end(self) -> None:
-        """Compute and log metrics at the end of training epoch."""
-        self._shared_epoch_end("train")
-
-    def on_validation_epoch_end(self) -> None:
-        """Compute and log metrics at the end of validation epoch."""
-        self._shared_epoch_end("val")
-
-    def on_test_epoch_end(self) -> None:
-        """Compute and log metrics at the end of test epoch."""
-        self._shared_epoch_end("test")
-
-    def predict_step(self, batch: Any) -> torch.Tensor:
-        """Perform a prediction step.
-
-        Args:
-            batch (Any): Input batch data.
-
-        Returns:
-            torch.Tensor: The loss value for the batch.
-        """
-        prediction = self.forward(batch)
-        probabilities = torch.nn.functional.softmax(prediction, dim=1)[:, 1, :, :]
-        return probabilities
-
-    def configure_optimizers(
-        self,
-    ) -> Tuple[
-        List[torch.optim.Optimizer], List[torch.optim.lr_scheduler._LRScheduler]
-    ]:
-        """Configure the model's optimizers and learning rate schedulers.
-
-        Returns:
-            Tuple[List[torch.optim.Optimizer], List[torch.optim.lr_scheduler]]:
-            A tuple containing the list of optimizers and the list of LR schedulers.
-        """
-        optimizer = torch.optim.AdamW(
-            self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
-        )
-        if self.scheduler:
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                optimizer, T_0=10, T_mult=2, eta_min=0
-            )
-            return [optimizer], [scheduler]
-        else:
-            return [optimizer], []
-
-
 def compute_class_weights(counts: dict[int, int]) -> list[float]:
     """Compute Class Weights.
 
@@ -485,7 +223,7 @@ def compute_class_weights(counts: dict[int, int]) -> list[float]:
 
 
 def compute_stats(
-    data_loader: DataLoader,
+    data_loader: DataLoader, is_reg_task: bool = False
 ) -> Tuple[List[float], List[float], List[float]]:
     """Compute the statistics of train dataset.
 
@@ -493,6 +231,7 @@ def compute_stats(
 
     Args:
         data_loader (DataLoader): PyTorch DataLoader.
+        is_reg_task (bool): Flag to indicate if the task is a regression task.
 
     Returns:
         mean (list): List of means for each channel.
@@ -510,23 +249,26 @@ def compute_stats(
 
         nb_samples += batch_samples
 
-        # Sum over batch, height and width
+        # Sum over batch, timestep, height and width
         mean += data.mean(2).sum(0)
 
         var += data.var(2, unbiased=False).sum(0)
-        class_counts.update(
-            {k: v for k, v in zip(*np.unique(label.numpy(), return_counts=True))}
-        )
+        if not is_reg_task:
+            class_counts.update(
+                {k: v for k, v in zip(*np.unique(label.numpy(), return_counts=True))}
+            )
     mean /= nb_samples
     var /= nb_samples
     std = torch.sqrt(var)
-    try:
-        class_counts.pop(-1)  # remove ignore_index
-    except KeyError:
-        logging.info("No label pixel with value -1")
-    logging.info(f"Class Counts: {class_counts}")
-    class_weights = compute_class_weights(class_counts)
-    logging.info(f"Normalized Counts: {class_weights}")
+    class_weights = None
+    if not is_reg_task:
+        try:
+            class_counts.pop(-1)  # remove ignore_index
+        except KeyError:
+            logging.info("No label pixel with value -1")
+        logging.info(f"Class Counts: {class_counts}")
+        class_weights = compute_class_weights(class_counts)
+        logging.info(f"Normalized Counts: {class_weights}")
     return mean.tolist(), std.tolist(), class_weights  # type:ignore
 
 
@@ -558,7 +300,6 @@ def main(cfg: DictConfig) -> None:
     train_filepath = cfg.train_filepath
     test_filepath = cfg.test_filepath
     checkpoint_path = cfg.checkpoint_path
-    scheduler = cfg.train.scheduler
 
     if cfg.mode == "stats":
         train_dataset = InstaGeoDataset(
@@ -585,7 +326,9 @@ def main(cfg: DictConfig) -> None:
             shuffle=True,
             num_workers=cfg.dataloader.num_workers,
         )
-        mean, std, class_weights = compute_stats(train_loader)
+        mean, std, class_weights = compute_stats(
+            train_loader, is_reg_task=cfg.is_reg_task
+        )
         print(json.dumps({"mean": mean, "std": std, "class_weights": class_weights}))
         exit(0)
 
@@ -594,9 +337,11 @@ def main(cfg: DictConfig) -> None:
         neptune_run = neptune.init_run(
             api_token=set_neptune_api_token(),
             project=os.environ["NEPTUNE_PROJECT"],
-            with_id=cfg.neptune_experiment_id
-            if hasattr(cfg, "neptune_experiment_id")
-            else None,
+            with_id=(
+                cfg.neptune_experiment_id
+                if hasattr(cfg, "neptune_experiment_id")
+                else None
+            ),
         )
         neptune_logger = AIchorNeptuneLogger(run=neptune_run)
         neptune_logger.experiment["config"] = stringify_unsupported(
@@ -654,26 +399,14 @@ def main(cfg: DictConfig) -> None:
             shuffle=False,
             num_workers=cfg.dataloader.num_workers,
         )
-        model = PrithviSegmentationModule(
-            image_size=IM_SIZE,
-            learning_rate=cfg.train.learning_rate,
-            freeze_backbone=cfg.model.freeze_backbone,
-            num_classes=cfg.model.num_classes,
-            temporal_step=cfg.dataloader.temporal_dim,
-            class_weights=cfg.train.class_weights,
-            ignore_index=cfg.train.ignore_index,
-            weight_decay=cfg.train.weight_decay,
-            model_name=cfg.model.model_name,
-            load_pretrained_weights=cfg.model.load_pretrained_weights,
-            scheduler=scheduler,
-        )
+        model = create_model(cfg)
         hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         checkpoint_callback = ModelCheckpoint(
-            monitor="val_IoU",
+            monitor="val_RMSE" if cfg.is_reg_task else "val_IoU",
             dirpath=hydra_out_dir,
             filename="instageo_best_checkpoint",
             auto_insert_metric_name=False,
-            mode="max",
+            mode="min" if cfg.is_reg_task else "max",
             save_top_k=1,
         )
 
@@ -693,9 +426,11 @@ def main(cfg: DictConfig) -> None:
         neptune_run = neptune.init_run(
             api_token=set_neptune_api_token(),
             project=os.environ["NEPTUNE_PROJECT"],
-            with_id=cfg.neptune_experiment_id
-            if hasattr(cfg, "neptune_experiment_id")
-            else None,
+            with_id=(
+                cfg.neptune_experiment_id
+                if hasattr(cfg, "neptune_experiment_id")
+                else None
+            ),
         )
         neptune_logger = AIchorNeptuneLogger(
             run=neptune_run[
@@ -731,19 +466,8 @@ def main(cfg: DictConfig) -> None:
             collate_fn=eval_collate_fn,
             num_workers=cfg.dataloader.num_workers,
         )
-        model = PrithviSegmentationModule.load_from_checkpoint(
-            checkpoint_path,
-            image_size=IM_SIZE,
-            learning_rate=cfg.train.learning_rate,
-            freeze_backbone=cfg.model.freeze_backbone,
-            num_classes=cfg.model.num_classes,
-            temporal_step=cfg.dataloader.temporal_dim,
-            class_weights=cfg.train.class_weights,
-            ignore_index=cfg.train.ignore_index,
-            weight_decay=cfg.train.weight_decay,
-            model_name=cfg.model.model_name,
-            load_pretrained_weights=cfg.model.load_pretrained_weights,
-        )
+        model = create_model(cfg)
+        model.load_state_dict(torch.load(checkpoint_path)["state_dict"])
         trainer = pl.Trainer(
             accelerator=get_device(),
             logger=neptune_logger,
@@ -752,19 +476,8 @@ def main(cfg: DictConfig) -> None:
         log.info(f"Evaluation results:\n{result}")
 
     elif cfg.mode == "sliding_inference":
-        model = PrithviSegmentationModule.load_from_checkpoint(
-            cfg.checkpoint_path,
-            image_size=IM_SIZE,
-            learning_rate=cfg.train.learning_rate,
-            freeze_backbone=cfg.model.freeze_backbone,
-            num_classes=cfg.model.num_classes,
-            temporal_step=cfg.dataloader.temporal_dim,
-            class_weights=cfg.train.class_weights,
-            ignore_index=cfg.train.ignore_index,
-            weight_decay=cfg.train.weight_decay,
-            model_name=cfg.model.model_name,
-            load_pretrained_weights=cfg.model.load_pretrained_weights,
-        )
+        model = create_model(cfg)
+        model.load_state_dict(torch.load(checkpoint_path)["state_dict"])
         model.eval()
         infer_filepath = os.path.join(root_dir, cfg.test_filepath)
         assert (
@@ -856,19 +569,8 @@ def main(cfg: DictConfig) -> None:
             collate_fn=infer_collate_fn,
             num_workers=cfg.dataloader.num_workers,
         )
-        model = PrithviSegmentationModule.load_from_checkpoint(
-            checkpoint_path,
-            image_size=IM_SIZE,
-            learning_rate=cfg.train.learning_rate,
-            freeze_backbone=cfg.model.freeze_backbone,
-            num_classes=cfg.model.num_classes,
-            temporal_step=cfg.dataloader.temporal_dim,
-            class_weights=cfg.train.class_weights,
-            ignore_index=cfg.train.ignore_index,
-            weight_decay=cfg.train.weight_decay,
-            model_name=cfg.model.model_name,
-            load_pretrained_weights=cfg.model.load_pretrained_weights,
-        )
+        model = create_model(cfg)
+        model.load_state_dict(torch.load(checkpoint_path)["state_dict"])
         chip_inference(test_loader, output_dir, model, device=get_device())
 
 

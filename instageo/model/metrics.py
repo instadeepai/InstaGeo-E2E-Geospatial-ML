@@ -10,6 +10,9 @@ RunningAUC
     Histogram‑based streaming ROC‑AUC that supports one‑vs‑rest macro AUC and
     per‑class AUCs.
 
+RunningRegressionMetrics
+    Maintain streaming statistics for regression metrics.
+
 Both classes expose two public methods:
     • update(y_true, y_pred, y_score=None) – Add a (mini‑)batch.
     • compute() – Return a dict of metrics.
@@ -18,7 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["RunningConfusionMatrix", "RunningAUC"]
+__all__ = ["RunningConfusionMatrix", "RunningAUC", "RunningRegressionMetrics"]
 
 
 # -----------------------------------------------------------------------------
@@ -266,3 +269,142 @@ class RunningAUC:
         self.neg_hist = np.zeros((self.num_classes, self.n_bins), dtype=np.int64)
         self.n_pos = np.zeros(self.num_classes, dtype=np.int64)
         self.n_neg = np.zeros(self.num_classes, dtype=np.int64)
+
+
+# -----------------------------------------------------------------------------
+# Streaming Regression Metrics
+# -----------------------------------------------------------------------------
+
+
+class RunningRegressionMetrics:
+    """Maintain streaming statistics for regression metrics.
+
+    This class tracks metrics like RMSE, MAE, R2 score, Pearson correlation,
+    and expected error metrics in an online fashion.
+
+    Parameters
+    ----------
+    ee_bias : float, default 0.05
+        Bias term for expected error calculation.
+    ee_coef : float, default 0.15
+        Coefficient for expected error calculation.
+    """
+
+    def __init__(
+        self, ee_bias: float = 0.05, ee_coef: float = 0.15, include_ee: bool = False
+    ) -> None:
+        """Initialize the regression metrics tracker.
+
+        Args:
+            ee_bias: Bias term for expected error calculation.
+            ee_coef: Coefficient for expected error calculation.
+            include_ee: Whether to include expected error metrics.
+        """
+        self.ee_bias = ee_bias
+        self.ee_coef = ee_coef
+        self.include_ee = include_ee
+        self.reset()
+
+    def reset(self) -> None:
+        """Reset all running statistics."""
+        self.n = 0
+        self.sum_x = 0.0
+        self.sum_y = 0.0
+        self.sum_xy = 0.0
+        self.sum_x2 = 0.0
+        self.sum_y2 = 0.0
+        self.sum_abs_error = 0.0
+        self.sum_squared_error = 0.0
+        self.within_ee_count = 0
+
+    def update(self, y_true: np.ndarray, y_pred: np.ndarray) -> None:
+        """Update the running statistics with new predictions.
+
+        Args:
+            y_true: Ground truth values.
+            y_pred: Predicted values.
+        """
+        y_true = np.asarray(y_true).ravel()
+        y_pred = np.asarray(y_pred).ravel()
+        if y_true.shape != y_pred.shape:
+            raise ValueError("y_true and y_pred shapes differ.")
+
+        # Update basic statistics
+        self.n += y_true.size
+        self.sum_x += y_true.sum()
+        self.sum_y += y_pred.sum()
+        self.sum_xy += (y_true * y_pred).sum()
+        self.sum_x2 += (y_true * y_true).sum()
+        self.sum_y2 += (y_pred * y_pred).sum()
+
+        # Update error metrics
+        abs_error = np.abs(y_pred - y_true)
+        self.sum_abs_error += abs_error.sum()
+        self.sum_squared_error += (abs_error * abs_error).sum()
+
+        # Update expected error metrics
+        if self.include_ee:
+            expected_error = self.ee_bias + self.ee_coef * y_true
+            self.within_ee_count += np.sum(abs_error <= expected_error)
+
+    def mae(self) -> float:
+        """Compute Mean Absolute Error."""
+        if self.n == 0:
+            return float("nan")
+        return self.sum_abs_error / self.n
+
+    def rmse(self) -> float:
+        """Compute Root Mean Squared Error."""
+        if self.n == 0:
+            return float("nan")
+        return np.sqrt(self.sum_squared_error / self.n)
+
+    def r2_score(self) -> float:
+        """Compute R2 score."""
+        if self.n < 2:
+            return float("nan")
+
+        x_mean = self.sum_x / self.n
+
+        # Calculate total sum of squares and residual sum of squares
+        ss_tot = self.sum_x2 - self.n * x_mean * x_mean
+        ss_res = self.sum_squared_error
+
+        if ss_tot == 0:
+            return float("nan")
+        return 1 - (ss_res / ss_tot)
+
+    def pearson_corrcoef(self) -> float:
+        """Compute Pearson correlation coefficient."""
+        if self.n < 2:
+            return float("nan")
+
+        x_mean = self.sum_x / self.n
+        y_mean = self.sum_y / self.n
+
+        # Calculate covariance and standard deviations
+        cov_xy = self.sum_xy - self.n * x_mean * y_mean
+        std_x = np.sqrt(self.sum_x2 - self.n * x_mean * x_mean)
+        std_y = np.sqrt(self.sum_y2 - self.n * y_mean * y_mean)
+
+        if std_x == 0 or std_y == 0:
+            return float("nan")
+        return cov_xy / (std_x * std_y)
+
+    def ee_percentage(self) -> float:
+        """Compute percentage of predictions within expected error."""
+        if self.n == 0:
+            return float("nan")
+        return (self.within_ee_count / self.n) * 100
+
+    def compute(self) -> dict[str, float | None]:
+        """Return a dict with all regression metrics."""
+        return {
+            "mae": self.mae(),
+            "rmse": self.rmse(),
+            "r2_score": self.r2_score(),
+            "pearson_corrcoef": self.pearson_corrcoef(),
+            "ee_percentage": self.ee_percentage() if self.include_ee else None,
+            "ee_bias": self.ee_bias,
+            "ee_coef": self.ee_coef,
+        }

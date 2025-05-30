@@ -5,6 +5,8 @@ train_filepath: null
 test_filepath: null
 checkpoint_path: null
 mode: train # train or eval
+is_reg_task: False
+
 
 train:
   learning_rate: 0.0001
@@ -35,6 +37,10 @@ model:
   freeze_backbone: False
   load_pretrained_weights: True
   num_classes: 13
+  use_log_scale: False
+  plot_reg_results: False
+  include_ee_metric: False
+  weight_clip_range: null
 
 dataloader:
   # 3*(Blue, Green, Red, Narrow NIR, SWIR 1, SWIR 2)
