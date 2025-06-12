@@ -650,7 +650,11 @@ def sample_data():
 def test_get_raster_tile_info(sample_data):
     """Test function output for expected behavior."""
     tile_info, tile_queries = get_raster_tile_info(
-        sample_data, num_steps=2, temporal_step=5, temporal_tolerance=2
+        sample_data,
+        num_steps=2,
+        temporal_step=5,
+        temporal_tolerance=2,
+        temporal_tolerance_minutes=0,
     )
 
     assert isinstance(tile_info, pd.DataFrame)
@@ -670,15 +674,15 @@ def test_get_raster_tile_info(sample_data):
         assert tile_info[date_col].apply(lambda x: isinstance(x, str)).all()
     assert len(tile_queries) == len(sample_data)
     expected_tile_queries = [
-        ("tile_1", ["2024-01-15", "2024-01-10"]),
-        ("tile_2", ["2024-02-20", "2024-02-15"]),
+        ("tile_1", ["2024-01-15T00:00:00", "2024-01-10T00:00:00"]),
+        ("tile_2", ["2024-02-20T00:00:00", "2024-02-15T00:00:00"]),
     ]
     assert tile_queries == expected_tile_queries
     expected_tile_info = pd.DataFrame(
         {
             "tile_id": ["tile_1", "tile_2"],
-            "min_date": ["2024-01-08", "2024-02-13"],
-            "max_date": ["2024-01-17", "2024-02-22"],
+            "min_date": ["2024-01-08T00:00:00", "2024-02-13T00:00:00"],
+            "max_date": ["2024-01-17T23:59:59", "2024-02-22T23:59:59"],
             "lon_min": [0.0, 2.0],
             "lon_max": [1.0, 3.0],
             "lat_min": [0.0, 2.0],

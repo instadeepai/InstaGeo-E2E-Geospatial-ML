@@ -266,6 +266,7 @@ def get_tile_info(
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 5,
+    temporal_tolerance_minutes: int = 0,
 ) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
     """Get Tile Info.
 
@@ -279,10 +280,13 @@ def get_tile_info(
         temporal_step (int): Size of each temporal step.
         temporal_tolerance (int): Number of days used as offset for the
         start and end dates to search for each tile.
+        temporal_tolerance_minutes (int): Number of minutes to add to the temporal
+            tolerance.
 
     Returns:
         A `tile_info` dataframe and a list of `tile_queries`
     """
+    push_max_date_to_end_of_day = "time" not in data.columns
     data = data[["mgrs_tile_id", "input_features_date", "x", "y"]].reset_index(
         drop=True
     )
@@ -292,7 +296,7 @@ def get_tile_info(
         history = []
         for i in range(num_steps):
             curr_date = date - pd.Timedelta(days=temporal_step * i)
-            history.append(curr_date.strftime("%Y-%m-%d"))
+            history.append(curr_date.strftime("%Y-%m-%dT%H:%M:%S"))
             tile_info.append([tile_id, curr_date, lon, lat])
         tile_queries.append((tile_id, history))
     tile_info = (
@@ -307,10 +311,15 @@ def get_tile_info(
             lat_max=("lat", "max"),
         )
     ).reset_index()
-    tile_info["min_date"] -= pd.Timedelta(days=temporal_tolerance)
-    tile_info["max_date"] += pd.Timedelta(days=temporal_tolerance)
-    tile_info["min_date"] = tile_info["min_date"].dt.strftime("%Y-%m-%d")
-    tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%d")
+
+    total_temporal_tol = temporal_tolerance + (temporal_tolerance_minutes / (24 * 60))
+    tile_info["min_date"] -= pd.Timedelta(days=total_temporal_tol)
+    tile_info["max_date"] += pd.Timedelta(days=total_temporal_tol)
+    tile_info["min_date"] = tile_info["min_date"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+    if push_max_date_to_end_of_day:
+        tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%dT23:59:59")
+    else:
+        tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%dT%H:%M:%S")
     return tile_info, tile_queries
 
 

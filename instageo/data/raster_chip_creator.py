@@ -30,7 +30,7 @@ from pystac_client import Client
 
 from instageo.data import hls_utils
 from instageo.data.flags import FLAGS  # Import flags from central location
-from instageo.data.hls_utils import HLSRasterPipeline, add_hls_stack_items
+from instageo.data.hls_utils import HLSRasterPipeline, add_hls_stac_items
 from instageo.data.settings import (
     HLSAPISettings,
     HLSBandsSettings,
@@ -82,7 +82,7 @@ def main(argv: Any) -> None:
             obsv_records["date"] = pd.to_datetime(obsv_records["date"])
 
             client = Client.open(HLS_API.URL)
-            obsv_records_with_hls_items = add_hls_stack_items(
+            obsv_records_with_hls_items = add_hls_stac_items(
                 client,
                 obsv_records,
                 num_steps=FLAGS.num_steps,

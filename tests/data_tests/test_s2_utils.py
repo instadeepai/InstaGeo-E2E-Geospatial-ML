@@ -710,11 +710,14 @@ def test_add_s2_granules_valid():
     mock_tiles_info = pd.DataFrame(
         {
             "tile_id": ["33UUU", "33UUP"],
-            "start_date": ["2023-01-10", "2023-01-15"],
-            "end_date": ["2023-01-20", "2023-01-25"],
+            "start_date": ["2023-01-10T00:00:00", "2023-01-15T00:00:00"],
+            "end_date": ["2023-01-20T23:59:59", "2023-01-25T23:59:59"],
         }
     )
-    mock_tile_queries = [("33UUU", ["2023-01-15"]), ("33UUP", ["2023-01-20"])]
+    mock_tile_queries = [
+        ("33UUU", ["2023-01-15T00:00:00"]),
+        ("33UUP", ["2023-01-20T00:00:00"]),
+    ]
     mock_tile_database = {
         "33UUU": pd.DataFrame(
             [
@@ -742,8 +745,8 @@ def test_add_s2_granules_valid():
     mock_query_result = pd.DataFrame(
         {
             "tile_queries": [
-                "33UUU_2023-01-15_2023-01-05_2022-12-26",
-                "33UUP_2023-01-20_2023-01-10_2022-12-31",
+                "33UUU_2023-01-15T00:00:00_2023-01-05T00:00:00_2022-12-26T00:00:00",
+                "33UUP_2023-01-20T00:00:00_2023-01-10T00:00:00_2022-12-31T00:00:00",
             ],
             "s2_tiles": [["S2A_MSIL2A_20230114"], ["S2B_MSIL2A_20230119"]],
             "urls": [["https://example.com/tile1"], ["https://example.com/tile2"]],
@@ -775,8 +778,8 @@ def test_add_s2_granules_valid():
             "x": [19.0, 17.0],
             "y": [19.0, 17.0],
             "tile_queries": [
-                "33UUU_2023-01-15_2023-01-05_2022-12-26",
-                "33UUP_2023-01-20_2023-01-10_2022-12-31",
+                "33UUU_2023-01-15T00:00:00_2023-01-05T00:00:00_2022-12-26T00:00:00",
+                "33UUP_2023-01-20T00:00:00_2023-01-10T00:00:00_2022-12-31T00:00:00",
             ],
             "s2_tiles": [["S2A_MSIL2A_20230114"], ["S2B_MSIL2A_20230119"]],
             "urls": [["https://example.com/tile1"], ["https://example.com/tile2"]],

@@ -46,7 +46,7 @@ from instageo.data.data_pipeline import (
     get_tiles,
 )
 from instageo.data.flags import FLAGS
-from instageo.data.hls_utils import HLSPointsPipeline, add_hls_stack_items
+from instageo.data.hls_utils import HLSPointsPipeline, add_hls_stac_items
 from instageo.data.settings import GDALOptions, S2Bands
 
 load_dotenv(os.path.expanduser("~/.credentials"))
@@ -214,11 +214,19 @@ def main(argv: Any) -> None:
             raise ValueError(f"Provide valid path and filters: {e}")
     else:
         data = pd.read_csv(FLAGS.dataframe_path)
-    data["date"] = (
-        pd.to_datetime(data["date"]) - pd.offsets.MonthBegin(1)
-        if FLAGS.shift_to_month_start
-        else pd.to_datetime(data["date"])
-    )
+
+    # Convert date column to datetime
+    data["date"] = pd.to_datetime(data["date"])
+
+    # If time column exists, combine it with date
+    # Time format expected is HH:MM:SS
+    if "time" in data.columns:
+        data["date"] = data["date"] + pd.to_timedelta(data["time"])
+
+    # Shift to month start if requested
+    if FLAGS.shift_to_month_start:
+        data["date"] = data["date"] - pd.offsets.MonthBegin(1)
+
     data["input_features_date"] = (
         data["date"] - pd.DateOffset(days=FLAGS.temporal_step)
         if FLAGS.is_time_series_task
@@ -248,12 +256,13 @@ def main(argv: Any) -> None:
             sub_data["geometry_4326"] = sub_data["geometry"].to_crs("EPSG:4326")
 
             client = Client.open(hls_utils.API.URL)
-            sub_data_with_hls_items = add_hls_stack_items(
+            sub_data_with_hls_items = add_hls_stac_items(
                 client,
                 sub_data,
                 num_steps=FLAGS.num_steps,
                 temporal_step=FLAGS.temporal_step,
                 temporal_tolerance=FLAGS.temporal_tolerance,
+                temporal_tolerance_minutes=FLAGS.temporal_tolerance_minutes,
                 cloud_coverage=FLAGS.cloud_coverage,
                 daytime_only=FLAGS.daytime_only,
             )

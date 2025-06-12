@@ -101,6 +101,7 @@ def find_closest_tile(
     tile_queries: dict[str, tuple[str, list[str]]],
     tile_database: dict[str, tuple[list[str], list[list[str]]]],
     temporal_tolerance: int = 5,
+    temporal_tolerance_minutes: int = 0,
 ) -> pd.DataFrame:
     """Find Closes HLS Tile.
 
@@ -118,8 +119,10 @@ def find_closest_tile(
             retrieved as value.
         tile_database (dict[str, list[str]]): A database mapping HLS tile_id to a list of
             available tiles within a pre-defined period of time
-        temporal_tolerance: Number of days that can be tolerated for matching a closest
+        temporal_tolerance (int): Number of days that can be tolerated for matching a closest
             tile in tile_databse.
+        temporal_tolerance_minutes (int): Number of minutes to add to the temporal tolerance.
+
 
     Returns:
         DataFrame containing the tile queries to the tile found.
@@ -138,6 +141,11 @@ def find_closest_tile(
             )
         )
     del tile_database
+
+    # Convert temporal tolerance to total minutes
+    total_tolerance_minutes = (
+        temporal_tolerance * 24 * 60
+    ) + temporal_tolerance_minutes
 
     query_results: Any = {}
     for query_str, (tile_id, dates) in tile_queries.items():
@@ -160,7 +168,7 @@ def find_closest_tile(
                     entry, data_links, before_date = parsed_tiles_entries[tile_id][
                         index - 1
                     ]
-                    diff = abs((before_date - query_date).days)
+                    diff = abs((before_date - query_date).total_seconds() / 60)
                     if diff < min_diff:
                         closest_entry = entry
                         closest_entry_data_links = data_links
@@ -168,15 +176,19 @@ def find_closest_tile(
 
                 if index < len(parsed_tiles_entries[tile_id]):
                     entry, data_links, after_date = parsed_tiles_entries[tile_id][index]
-                    diff = abs((after_date - query_date).days)
+                    diff = abs((after_date - query_date).total_seconds() / 60)
                     if diff < min_diff:
                         closest_entry = entry
                         closest_entry_data_links = data_links
                         min_diff = diff
 
-                result.append(closest_entry if min_diff <= temporal_tolerance else None)
+                result.append(
+                    closest_entry if min_diff <= total_tolerance_minutes else None
+                )
                 result_data_links.append(
-                    closest_entry_data_links if min_diff <= temporal_tolerance else None
+                    closest_entry_data_links
+                    if min_diff <= total_tolerance_minutes
+                    else None
                 )
 
         query_results[query_str] = result, result_data_links
@@ -233,7 +245,7 @@ def retrieve_hls_metadata(
                 bounding_box=(
                     geo_utils.make_valid_bbox(lon_min, lat_min, lon_max, lat_max)
                 ),
-                temporal=(f"{start_date}T00:00:00", f"{end_date}T23:59:59"),
+                temporal=(f"{start_date}", f"{end_date}"),
                 cloud_cover=(0, max(0.001, cloud_coverage)),
             )
         except RuntimeError:
@@ -351,6 +363,7 @@ def add_hls_granules(
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 5,
+    temporal_tolerance_minutes: int = 0,
     cloud_coverage: int = 10,
 ) -> pd.DataFrame:
     """Add HLS Granules.
@@ -365,6 +378,8 @@ def add_hls_granules(
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
         temporal_tolerance (int): Tolerance (in days) for finding closest HLS tile.
+        temporal_tolerance_minutes (int): Number of minutes to add to the temporal
+            tolerance.
         cloud_coverage (int): Maximum percentage of cloud cover allowed for a HLS tile.
 
     Returns:
@@ -376,6 +391,7 @@ def add_hls_granules(
         num_steps=num_steps,
         temporal_step=temporal_step,
         temporal_tolerance=temporal_tolerance,
+        temporal_tolerance_minutes=temporal_tolerance_minutes,
     )
     tile_queries_str = [
         f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
@@ -387,6 +403,7 @@ def add_hls_granules(
         tile_queries=tile_queries_dict,
         tile_database=tile_database,
         temporal_tolerance=temporal_tolerance,
+        temporal_tolerance_minutes=temporal_tolerance_minutes,
     )
     data = pd.merge(data, query_result, how="left", on="tile_queries")
     return data
@@ -410,6 +427,9 @@ def create_hls_dataset(
         A tuple containing HLS dataset and a list of tiles that needs to be downloaded.
     """
     data_with_tiles = data_with_tiles.drop_duplicates(subset=["hls_tiles"])
+    date_format = (
+        "%Y-%m-%dT%H:%M:%S" if "time" in data_with_tiles.columns else "%Y-%m-%d"
+    )
     data_with_tiles = data_with_tiles[
         data_with_tiles["hls_tiles"].apply(
             lambda granule_lst: all("HLS" in str(item) for item in granule_lst)
@@ -458,7 +478,7 @@ def create_hls_dataset(
             obsv_data_links.append(filtered_downloads_links)
         if tile:
             data_links.extend(obsv_data_links)
-            hls_dataset[f'{obsv_date.strftime("%Y-%m-%d")}_{tile.split(".")[2]}'] = {
+            hls_dataset[f'{obsv_date.strftime(date_format)}_{tile.split(".")[2]}'] = {
                 "tiles": bands_paths,
                 "fmasks": masks_paths,
                 "data_links": obsv_data_links,
@@ -569,6 +589,7 @@ def get_raster_tile_info(
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 5,
+    temporal_tolerance_minutes: int = 0,
 ) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
     """Get Raster Tile Info.
 
@@ -582,10 +603,13 @@ def get_raster_tile_info(
         temporal_step (int): Size of each temporal step.
         temporal_tolerance (int): Number of days used as offset for the
         start and end dates to search for each tile.
+        temporal_tolerance_minutes (int): Number of minutes to add to the temporal
+            tolerance.
 
     Returns:
         A `tile_info` dataframe and a list of `tile_queries`
     """
+    push_max_date_to_end_of_day = "time" not in data.columns
     data = data[["mgrs_tile_id", "input_features_date", "geometry_4326"]].reset_index(
         drop=True
     )
@@ -595,7 +619,7 @@ def get_raster_tile_info(
         history = []
         for i in range(num_steps):
             curr_date = pd.to_datetime(date) - pd.Timedelta(days=temporal_step * i)
-            history.append(curr_date.strftime("%Y-%m-%d"))
+            history.append(curr_date.strftime("%Y-%m-%dT%H:%M:%S"))
             tile_info.append([tile_id, curr_date, polygon])
         tile_queries.append((tile_id, history))
     tile_info = (
@@ -617,10 +641,16 @@ def get_raster_tile_info(
     tile_info[["lon_min", "lat_min", "lon_max", "lat_max"]] = tile_info[
         "geometry"
     ].apply(lambda geom: pd.Series(geom.bounds))
-    tile_info["min_date"] -= pd.Timedelta(days=temporal_tolerance)
-    tile_info["max_date"] += pd.Timedelta(days=temporal_tolerance)
-    tile_info["min_date"] = tile_info["min_date"].dt.strftime("%Y-%m-%d")
-    tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%d")
+
+    # Convert temporal tolerance to total days including minutes
+    total_temporal_tol = temporal_tolerance + (temporal_tolerance_minutes / (24 * 60))
+    tile_info["min_date"] -= pd.Timedelta(days=total_temporal_tol)
+    tile_info["max_date"] += pd.Timedelta(days=total_temporal_tol)
+    tile_info["min_date"] = tile_info["min_date"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+    if push_max_date_to_end_of_day:
+        tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%dT23:59:59")
+    else:
+        tile_info["max_date"] = tile_info["max_date"].dt.strftime("%Y-%m-%dT%H:%M:%S")
     tile_info = tile_info[
         ["tile_id", "min_date", "max_date", "lon_min", "lon_max", "lat_min", "lat_max"]
     ]
@@ -744,7 +774,7 @@ def dispatch_hls_candidate_items(
 
 
 def find_closest_hls_items(
-    obsv: pd.Series, temporal_tolerance: int = 3
+    obsv: pd.Series, temporal_tolerance: int = 3, temporal_tolerance_minutes: int = 0
 ) -> List[Item | None]:
     """Finds closest PySTAC items in time with least cloud coverage.
 
@@ -756,6 +786,8 @@ def find_closest_hls_items(
          and the HLS candidate items from which to pick.
         temporal_tolerance (int): Number of days that can be tolerated for matching
             granules from the candidate items.
+        temporal_tolerance_minutes (int): Additional tolerance in minutes for finding
+            closest HLS items.
 
     Returns:
         List[Item | None]: A list containing items if found within the temporal
@@ -774,7 +806,8 @@ def find_closest_hls_items(
         candidate_items = [
             item
             for item in items
-            if abs((item.datetime - query_date).days) <= temporal_tolerance
+            if abs((item.datetime - query_date).total_seconds() / 60)
+            <= (temporal_tolerance * 24 * 60 + temporal_tolerance_minutes)
         ]
 
         if not candidate_items:
@@ -793,6 +826,7 @@ def find_best_hls_items(
     data: pd.DataFrame,
     tiles_database: dict[str, List[Item]],
     temporal_tolerance: int = 12,
+    temporal_tolerance_minutes: int = 0,
 ) -> dict[str, pd.DataFrame]:
     """Finds best HLS PySTAC items for all observations when possible.
 
@@ -808,6 +842,8 @@ def find_best_hls_items(
         tiles_database(dict[str, List[Item]]): A dictionary mapping a tile ID to a list
           of available HLS PySTAC items.
         temporal_tolerance (int): Tolerance (in days) for finding closest HLS items.
+        temporal_tolerance_minutes (int): Additional tolerance in minutes for finding
+            closest HLS items.
 
     Returns:
         A dictionary mapping each MGRS tile ID to a DataFrame containing the observations
@@ -829,7 +865,10 @@ def find_best_hls_items(
             continue
         # We can then retrieve the item with the least cloud coverage within the temporal tolerance.
         tile_obsvs_with_hls_items["hls_items"] = tile_obsvs_with_hls_items.apply(
-            lambda obsv: find_closest_hls_items(obsv, temporal_tolerance), axis=1
+            lambda obsv: find_closest_hls_items(
+                obsv, temporal_tolerance, temporal_tolerance_minutes
+            ),
+            axis=1,
         )
 
         best_hls_items[tile_id] = tile_obsvs_with_hls_items.drop(
@@ -838,12 +877,13 @@ def find_best_hls_items(
     return best_hls_items
 
 
-def add_hls_stack_items(
+def add_hls_stac_items(
     client: Client,
     data: pd.DataFrame,
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 12,
+    temporal_tolerance_minutes: int = 0,
     cloud_coverage: int = 10,
     daytime_only: bool = False,
 ) -> dict[str, pd.DataFrame]:
@@ -860,6 +900,8 @@ def add_hls_stack_items(
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
         temporal_tolerance (int): Tolerance (in days) for finding closest HLS items.
+        temporal_tolerance_minutes (int): Additional tolerance in minutes for finding
+            closest HLS items.
         cloud_coverage (int): Maximum percentage of cloud coverage to be tolerated for a granule.
         daytime_only (bool): Flag to determine whether to filter out night time granules.
 
@@ -874,12 +916,15 @@ def add_hls_stack_items(
         num_steps=num_steps,
         temporal_step=temporal_step,
         temporal_tolerance=temporal_tolerance,
+        temporal_tolerance_minutes=temporal_tolerance_minutes,
     )
     data["tile_queries"] = tile_queries
     tiles_database = retrieve_hls_stac_metadata(
         client, tiles_info, cloud_coverage=cloud_coverage, daytime_only=daytime_only
     )
-    best_items = find_best_hls_items(data, tiles_database, temporal_tolerance)
+    best_items = find_best_hls_items(
+        data, tiles_database, temporal_tolerance, temporal_tolerance_minutes
+    )
     return best_items
 
 

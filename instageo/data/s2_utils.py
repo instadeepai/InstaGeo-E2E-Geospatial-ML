@@ -458,8 +458,8 @@ def retrieve_s2_metadata(
             "https://catalogue.dataspace.copernicus.eu/"
             f"resto/api/collections/Sentinel2/search.json"
             f"?productType=S2MSI2A&cloudCover=[0,{cloud_coverage}]"
-            f"&startDate={start_date}T00:00:00Z"
-            f"&completionDate={end_date}T23:59:59Z"
+            f"&startDate={start_date}Z"
+            f"&completionDate={end_date}Z"
             f"&maxRecords=500"
             f"&box={lon_min},{lat_min},{lon_max},{lat_max}"
         )

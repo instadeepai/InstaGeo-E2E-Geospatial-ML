@@ -89,7 +89,7 @@ def test_hls_raster_pipeline_init():
 
 
 @patch("instageo.data.raster_chip_creator.Client.open")
-@patch("instageo.data.hls_utils.add_hls_stack_items")
+@patch("instageo.data.hls_utils.add_hls_stac_items")
 @patch("instageo.data.hls_utils.create_hls_records_with_items")
 @patch("instageo.data.raster_chip_creator.HLSRasterPipeline")
 def test_main_hls_pipeline(
@@ -142,7 +142,7 @@ def test_main_hls_pipeline(
 
 
 @patch("instageo.data.raster_chip_creator.Client.open")
-@patch("instageo.data.hls_utils.add_hls_stack_items")
+@patch("instageo.data.hls_utils.add_hls_stac_items")
 @patch("instageo.data.hls_utils.create_hls_records_with_items")
 @patch("instageo.data.raster_chip_creator.HLSRasterPipeline")
 def test_main_hls_pipeline_existing_dataset(

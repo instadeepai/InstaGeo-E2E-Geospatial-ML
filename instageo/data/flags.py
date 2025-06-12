@@ -37,6 +37,9 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
 )
+flags.DEFINE_integer(
+    "temporal_tolerance_minutes", 0, """Additional tolerance in minutes"""
+)
 flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2", "S1"], "Data source to use.")
 flags.DEFINE_integer(
     "cloud_coverage",

@@ -17,7 +17,7 @@ jobs:
 
       - name: Install python dependencies 🔧
         run: |
-          pip install --upgrade pip
+          pip install pip==25.0.1
           pip install -r requirements.txt \
           -r instageo/model/requirements.txt \
           -r instageo/data/requirements.txt \
