@@ -3,8 +3,14 @@
 from omegaconf import DictConfig
 
 from instageo.model.base import PrithviBaseModule
-from instageo.model.regression import PrithviRegressionModule
-from instageo.model.segmentation import PrithviSegmentationModule
+from instageo.model.regression import (
+    PrithviDistillationRegressionModule,
+    PrithviRegressionModule,
+)
+from instageo.model.segmentation import (
+    PrithviDistillationSegmentationModule,
+    PrithviSegmentationModule,
+)
 
 
 def create_model(cfg: DictConfig) -> PrithviBaseModule:
@@ -28,20 +34,48 @@ def create_model(cfg: DictConfig) -> PrithviBaseModule:
         "load_pretrained_weights": cfg.model.load_pretrained_weights,
         "scheduler": cfg.train.scheduler,
         "weight_clip_range": cfg.model.weight_clip_range,
+        "depth": cfg.model.depth,
     }
 
     if cfg.is_reg_task:
         # Regression-specific parameters
-        return PrithviRegressionModule(
-            **common_params,
-            use_log_scale=cfg.model.use_log_scale,
-            plot_reg_results=cfg.model.plot_reg_results,
-            include_ee=cfg.model.include_ee_metric,
-        )
+
+        if cfg.train.distillation:
+            model = PrithviDistillationRegressionModule(
+                teacher_ckpt_path=cfg.train.teacher_ckpt_path,
+                **common_params,
+                use_log_scale=cfg.model.use_log_scale,
+                plot_reg_results=cfg.model.plot_reg_results,
+                include_ee=cfg.model.include_ee_metric,
+            )
+        else:
+            model = PrithviRegressionModule(
+                **common_params,
+                use_log_scale=cfg.model.use_log_scale,
+                plot_reg_results=cfg.model.plot_reg_results,
+            )
+
     else:
         # Segmentation-specific parameters
-        return PrithviSegmentationModule(
+        if cfg.train.distillation:
+            model = PrithviDistillationSegmentationModule(
+                teacher_ckpt_path=cfg.train.teacher_ckpt_path,
+                **common_params,
+                num_classes=cfg.model.num_classes,
+                class_weights=cfg.train.class_weights,
+            )
+        else:
+            model = PrithviSegmentationModule(
+                **common_params,
+                num_classes=cfg.model.num_classes,
+                class_weights=cfg.train.class_weights,
+            )
+    if cfg.mode == "eval":
+        return model.__class__.load_from_checkpoint(
+            cfg.checkpoint_path,
+            teacher_ckpt_path=cfg.train.teacher_ckpt_path,
             **common_params,
             num_classes=cfg.model.num_classes,
             class_weights=cfg.train.class_weights,
         )
+    return model

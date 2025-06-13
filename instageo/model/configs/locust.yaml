@@ -7,7 +7,6 @@ checkpoint_path: null
 mode: train # train or eval
 is_reg_task: False
 
-
 train:
   learning_rate: 0.0001
   num_epochs: 20
@@ -16,6 +15,8 @@ train:
   ignore_index: -1
   weight_decay: 0.1
   scheduler: False
+  distillation: False
+  teacher_ckpt_path: null
 
 model:
   model_name: prithvi_eo_v1_100 #prithvi_eo_v1_100 or prithvi_eo_v2_300 or prithvi_eo_v2_300_tl or prithvi_eo_v2_600 or prithvi_eo_v2_600_tl
@@ -26,7 +27,7 @@ model:
   plot_reg_results: False
   include_ee_metric: False
   weight_clip_range: null
-
+  depth: -1
 dataloader:
   # 3*(Blue, Green, Red, Narrow NIR, SWIR 1, SWIR 2)
   bands: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]

@@ -272,6 +272,108 @@ def compute_stats(
     return mean.tolist(), std.tolist(), class_weights  # type:ignore
 
 
+def create_instageo_dataset(
+    filename: str,
+    root_dir: str,
+    preprocess_func: Callable,
+    cfg: DictConfig,
+    include_filenames: bool = False,
+) -> InstaGeoDataset:
+    """Create an InstaGeoDataset with common parameters.
+
+    Args:
+        filename (str): Path to the dataset file
+        root_dir (str): Root directory for data
+        preprocess_func (Callable): Function to preprocess data
+        cfg (DictConfig): Configuration object
+        include_filenames (bool): Whether to include filenames in dataset
+
+    Returns:
+        InstaGeoDataset: Created dataset
+    """
+    return InstaGeoDataset(
+        filename=filename,
+        input_root=root_dir,
+        preprocess_func=preprocess_func,
+        bands=cfg.dataloader.bands,
+        replace_label=cfg.dataloader.replace_label,
+        reduce_to_zero=cfg.dataloader.reduce_to_zero,
+        chip_no_data_value=cfg.dataloader.no_data_value,
+        label_no_data_value=cfg.train.ignore_index,
+        constant_multiplier=cfg.dataloader.constant_multiplier,
+        include_filenames=include_filenames,
+    )
+
+
+def init_neptune_logger(
+    cfg: DictConfig, test_filepath: str | None = None
+) -> AIchorNeptuneLogger:
+    """Initialize Neptune logger with common parameters.
+
+    Args:
+        cfg (DictConfig): Configuration object
+        test_filepath (str | None): Optional test filepath for evaluation runs
+
+    Returns:
+        AIchorNeptuneLogger: Initialized logger
+    """
+    neptune_run = neptune.init_run(
+        api_token=set_neptune_api_token(),
+        project=os.environ["NEPTUNE_PROJECT"],
+        with_id=cfg.neptune_experiment_id
+        if hasattr(cfg, "neptune_experiment_id")
+        else None,
+    )
+
+    if test_filepath:
+        neptune_logger = AIchorNeptuneLogger(
+            run=neptune_run[
+                f"eval-{os.path.splitext(os.path.basename(test_filepath))[0]}"
+            ]
+        )
+    else:
+        neptune_logger = AIchorNeptuneLogger(run=neptune_run)
+
+    neptune_logger.experiment["config"] = stringify_unsupported(OmegaConf.to_yaml(cfg))
+    return neptune_logger
+
+
+def create_trainer(
+    cfg: DictConfig,
+    logger: AIchorNeptuneLogger,
+    monitor: str = "val_IoU",
+    mode: str = "max",
+) -> pl.Trainer:
+    """Create a PyTorch Lightning trainer with common parameters.
+
+    Args:
+        cfg (DictConfig): Configuration object
+        logger (AIchorNeptuneLogger): Neptune logger
+        monitor (str): Metric to monitor for checkpointing
+        mode (str): Mode for checkpointing (min/max)
+
+    Returns:
+        pl.Trainer: Created trainer
+    """
+    hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    checkpoint_callback = ModelCheckpoint(
+        monitor=monitor,
+        dirpath=hydra_out_dir,
+        filename="instageo_best_checkpoint",
+        auto_insert_metric_name=False,
+        mode=mode,
+        save_top_k=1,
+    )
+
+    return pl.Trainer(
+        accelerator=get_device(),
+        max_epochs=cfg.train.num_epochs if hasattr(cfg, "train") else None,
+        callbacks=[checkpoint_callback],
+        logger=logger,
+        deterministic=True,
+    )
+
+
 @hydra.main(config_path="configs", version_base=None, config_name="config")
 def main(cfg: DictConfig) -> None:
     """Runner Entry Point.
@@ -287,25 +389,23 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Script: {__file__}")
     log.info(f"Imported hydra config:\n{OmegaConf.to_yaml(cfg)}")
 
-    BANDS = cfg.dataloader.bands
+    # Common configuration parameters
     MEAN = cfg.dataloader.mean
     STD = cfg.dataloader.std
     IM_SIZE = cfg.dataloader.img_size
     TEMPORAL_SIZE = cfg.dataloader.temporal_dim
     AUGMENTATIONS = get_augmentations(cfg)
-
     batch_size = cfg.train.batch_size
     root_dir = cfg.root_dir
     valid_filepath = cfg.valid_filepath
     train_filepath = cfg.train_filepath
     test_filepath = cfg.test_filepath
-    checkpoint_path = cfg.checkpoint_path
 
     if cfg.mode == "stats":
-        train_dataset = InstaGeoDataset(
-            filename=train_filepath,
-            input_root=root_dir,
-            preprocess_func=partial(
+        train_dataset = create_instageo_dataset(
+            train_filepath,
+            root_dir,
+            partial(
                 process_and_augment,
                 mean=[0] * len(MEAN),
                 std=[1] * len(STD),
@@ -313,12 +413,7 @@ def main(cfg: DictConfig) -> None:
                 im_size=IM_SIZE,
                 augmentations=None,
             ),
-            bands=BANDS,
-            replace_label=cfg.dataloader.replace_label,
-            reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            chip_no_data_value=cfg.dataloader.no_data_value,
-            label_no_data_value=cfg.train.ignore_index,
-            constant_multiplier=cfg.dataloader.constant_multiplier,
+            cfg,
         )
         train_loader = create_dataloader(
             train_dataset,
@@ -331,26 +426,16 @@ def main(cfg: DictConfig) -> None:
         )
         print(json.dumps({"mean": mean, "std": std, "class_weights": class_weights}))
         exit(0)
+    model = create_model(cfg)
 
-    elif cfg.mode == "train":
+    if cfg.mode == "train":
         check_required_flags(["root_dir", "train_filepath", "valid_filepath"], cfg)
-        neptune_run = neptune.init_run(
-            api_token=set_neptune_api_token(),
-            project=os.environ["NEPTUNE_PROJECT"],
-            with_id=(
-                cfg.neptune_experiment_id
-                if hasattr(cfg, "neptune_experiment_id")
-                else None
-            ),
-        )
-        neptune_logger = AIchorNeptuneLogger(run=neptune_run)
-        neptune_logger.experiment["config"] = stringify_unsupported(
-            OmegaConf.to_yaml(cfg)
-        )
-        train_dataset = InstaGeoDataset(
-            filename=train_filepath,
-            input_root=root_dir,
-            preprocess_func=partial(
+        neptune_logger = init_neptune_logger(cfg)
+        # Create train dataset
+        train_dataset = create_instageo_dataset(
+            train_filepath,
+            root_dir,
+            partial(
                 process_and_augment,
                 mean=MEAN,
                 std=STD,
@@ -361,32 +446,24 @@ def main(cfg: DictConfig) -> None:
                 label_no_data_value=cfg.train.ignore_index,
                 max_pixel_value=cfg.dataloader.max_pixel_value,
             ),
-            bands=BANDS,
-            replace_label=cfg.dataloader.replace_label,
-            reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            chip_no_data_value=cfg.dataloader.no_data_value,
-            label_no_data_value=cfg.train.ignore_index,
-            constant_multiplier=cfg.dataloader.constant_multiplier,
+            cfg,
         )
 
-        valid_dataset = InstaGeoDataset(
-            filename=valid_filepath,
-            input_root=root_dir,
-            preprocess_func=partial(
+        # Create validation dataset
+        valid_dataset = create_instageo_dataset(
+            valid_filepath,
+            root_dir,
+            partial(
                 process_and_augment,
                 mean=MEAN,
                 std=STD,
                 temporal_size=TEMPORAL_SIZE,
                 im_size=IM_SIZE,
-                augmentations=None,
             ),
-            bands=BANDS,
-            replace_label=cfg.dataloader.replace_label,
-            reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            chip_no_data_value=cfg.dataloader.no_data_value,
-            label_no_data_value=cfg.train.ignore_index,
-            constant_multiplier=cfg.dataloader.constant_multiplier,
+            cfg,
         )
+
+        # Create dataloaders
         train_loader = create_dataloader(
             train_dataset,
             batch_size=batch_size,
@@ -399,51 +476,21 @@ def main(cfg: DictConfig) -> None:
             shuffle=False,
             num_workers=cfg.dataloader.num_workers,
         )
-        model = create_model(cfg)
-        hydra_out_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-        checkpoint_callback = ModelCheckpoint(
-            monitor="val_RMSE" if cfg.is_reg_task else "val_IoU",
-            dirpath=hydra_out_dir,
-            filename="instageo_best_checkpoint",
-            auto_insert_metric_name=False,
-            mode="min" if cfg.is_reg_task else "max",
-            save_top_k=1,
-        )
 
-        trainer = pl.Trainer(
-            accelerator=get_device(),
-            max_epochs=cfg.train.num_epochs,
-            callbacks=[checkpoint_callback],
-            logger=neptune_logger,
-            deterministic=True,
-        )
+        monitor = "val_RMSE" if cfg.is_reg_task else "val_IoU"
+        mode = "min" if cfg.is_reg_task else "max"
 
-        # run training and validation
+        trainer = create_trainer(cfg, neptune_logger, monitor, mode)
         trainer.fit(model, train_loader, valid_loader)
 
     elif cfg.mode == "eval":
-        check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
-        neptune_run = neptune.init_run(
-            api_token=set_neptune_api_token(),
-            project=os.environ["NEPTUNE_PROJECT"],
-            with_id=(
-                cfg.neptune_experiment_id
-                if hasattr(cfg, "neptune_experiment_id")
-                else None
-            ),
-        )
-        neptune_logger = AIchorNeptuneLogger(
-            run=neptune_run[
-                f"eval-{os.path.splitext(os.path.basename(test_filepath))[0]}"
-            ]
-        )
-        neptune_logger.experiment["config"] = stringify_unsupported(
-            OmegaConf.to_yaml(cfg)
-        )
-        test_dataset = InstaGeoDataset(
-            filename=test_filepath,
-            input_root=root_dir,
-            preprocess_func=partial(
+        check_required_flags(["root_dir", "test_filepath"], cfg)
+        neptune_logger = init_neptune_logger(cfg, test_filepath)
+
+        test_dataset = create_instageo_dataset(
+            test_filepath,
+            root_dir,
+            partial(
                 process_test,
                 mean=MEAN,
                 std=STD,
@@ -452,126 +499,120 @@ def main(cfg: DictConfig) -> None:
                 crop_size=cfg.test.crop_size,
                 stride=cfg.test.stride,
             ),
-            bands=BANDS,
-            replace_label=cfg.dataloader.replace_label,
-            reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            chip_no_data_value=cfg.dataloader.no_data_value,
-            label_no_data_value=cfg.train.ignore_index,
-            constant_multiplier=cfg.dataloader.constant_multiplier,
+            cfg,
             include_filenames=True,
         )
+
         test_loader = create_dataloader(
             test_dataset,
             batch_size=batch_size,
             collate_fn=eval_collate_fn,
             num_workers=cfg.dataloader.num_workers,
         )
-        model = create_model(cfg)
-        model.load_state_dict(torch.load(checkpoint_path)["state_dict"])
-        trainer = pl.Trainer(
-            accelerator=get_device(),
-            logger=neptune_logger,
-        )
+
+        trainer = create_trainer(cfg, neptune_logger)
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
 
-    elif cfg.mode == "sliding_inference":
-        model = create_model(cfg)
-        model.load_state_dict(torch.load(checkpoint_path)["state_dict"])
-        model.eval()
-        infer_filepath = os.path.join(root_dir, cfg.test_filepath)
-        assert (
-            os.path.splitext(infer_filepath)[-1] == ".json"
-        ), f"Test file path expects a json file but got {infer_filepath}"
-        output_dir = os.path.join(root_dir, "predictions")
-        os.makedirs(output_dir, exist_ok=True)
-        with open(os.path.join(infer_filepath)) as json_file:
-            hls_dataset = json.load(json_file)
-        for key, hls_tile_path in tqdm(
-            hls_dataset.items(), desc="Processing HLS Dataset"
-        ):
-            try:
-                hls_tile, _ = process_data(
-                    hls_tile_path,
-                    None,
-                    bands=cfg.dataloader.bands,
-                    no_data_value=cfg.dataloader.no_data_value,
-                    constant_multiplier=cfg.dataloader.constant_multiplier,
-                    mask_cloud=cfg.test.mask_cloud,
-                    replace_label=cfg.dataloader.replace_label,
-                    reduce_to_zero=cfg.dataloader.reduce_to_zero,
-                )
-            except rasterio.RasterioIOError:
-                continue
-            nan_mask = hls_tile == cfg.dataloader.no_data_value
-            nan_mask = np.any(nan_mask, axis=0).astype(int)
-            hls_tile, _ = process_and_augment(
-                hls_tile,
-                None,
-                mean=cfg.dataloader.mean,
-                std=cfg.dataloader.std,
-                temporal_size=cfg.dataloader.temporal_dim,
-                augmentations=None,
-            )
-            prediction = sliding_window_inference(
-                hls_tile,
-                model,
-                window_size=(cfg.test.img_size, cfg.test.img_size),
-                stride=cfg.test.stride,
-                batch_size=cfg.train.batch_size,
-                device=get_device(),
-            )
-            prediction = np.where(nan_mask == 1, np.nan, prediction)
-            prediction_filename = os.path.join(output_dir, f"{key}_prediction.tif")
-            with rasterio.open(hls_tile_path["tiles"]["B02_0"]) as src:
-                crs = src.crs
-                transform = src.transform
-            with rasterio.open(
-                prediction_filename,
-                "w",
-                driver="GTiff",
-                height=prediction.shape[0],
-                width=prediction.shape[1],
-                count=1,
-                dtype=str(prediction.dtype),
-                crs=crs,
-                transform=transform,
-            ) as dst:
-                dst.write(prediction, 1)
+    elif cfg.mode in ["sliding_inference", "chip_inference"]:
+        if cfg.mode == "chip_inference":
+            check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
 
-    # TODO: Add support for chips that are greater than image size used for training
-    elif cfg.mode == "chip_inference":
-        check_required_flags(["root_dir", "test_filepath", "checkpoint_path"], cfg)
+        model.eval()
+
         output_dir = os.path.join(root_dir, "predictions")
         os.makedirs(output_dir, exist_ok=True)
-        test_dataset = InstaGeoDataset(
-            filename=test_filepath,
-            input_root=root_dir,
-            preprocess_func=partial(
-                process_and_augment,
-                mean=MEAN,
-                std=STD,
-                temporal_size=TEMPORAL_SIZE,
-                im_size=cfg.test.img_size,
-                augmentations=None,
-            ),
-            bands=BANDS,
-            replace_label=cfg.dataloader.replace_label,
-            reduce_to_zero=cfg.dataloader.reduce_to_zero,
-            chip_no_data_value=cfg.dataloader.no_data_value,
-            label_no_data_value=cfg.train.ignore_index,
-            constant_multiplier=cfg.dataloader.constant_multiplier,
-            include_filenames=True,
-        )
-        test_loader = create_dataloader(
-            test_dataset,
-            batch_size=batch_size,
-            collate_fn=infer_collate_fn,
-            num_workers=cfg.dataloader.num_workers,
-        )
-        model = create_model(cfg)
-        model.load_state_dict(torch.load(checkpoint_path)["state_dict"])
-        chip_inference(test_loader, output_dir, model, device=get_device())
+
+        if cfg.mode == "sliding_inference":
+            infer_filepath = os.path.join(root_dir, cfg.test_filepath)
+            assert (
+                os.path.splitext(infer_filepath)[-1] == ".json"
+            ), f"Test file path expects a json file but got {infer_filepath}"
+
+            with open(os.path.join(infer_filepath)) as json_file:
+                hls_dataset = json.load(json_file)
+
+            for key, hls_tile_path in tqdm(
+                hls_dataset.items(), desc="Processing HLS Dataset"
+            ):
+                try:
+                    hls_tile, _ = process_data(
+                        hls_tile_path,
+                        None,
+                        bands=cfg.dataloader.bands,
+                        no_data_value=cfg.dataloader.no_data_value,
+                        constant_multiplier=cfg.dataloader.constant_multiplier,
+                        mask_cloud=cfg.test.mask_cloud,
+                        replace_label=cfg.dataloader.replace_label,
+                        reduce_to_zero=cfg.dataloader.reduce_to_zero,
+                    )
+                except rasterio.RasterioIOError:
+                    continue
+
+                nan_mask = hls_tile == cfg.dataloader.no_data_value
+                nan_mask = np.any(nan_mask, axis=0).astype(int)
+
+                hls_tile, _ = process_and_augment(
+                    hls_tile,
+                    None,
+                    mean=cfg.dataloader.mean,
+                    std=cfg.dataloader.std,
+                    temporal_size=cfg.dataloader.temporal_dim,
+                    augmentations=None,
+                )
+
+                prediction = sliding_window_inference(
+                    hls_tile,
+                    model,
+                    window_size=(cfg.test.img_size, cfg.test.img_size),
+                    stride=cfg.test.stride,
+                    batch_size=cfg.train.batch_size,
+                    device=get_device(),
+                )
+
+                prediction = np.where(nan_mask == 1, np.nan, prediction)
+                prediction_filename = os.path.join(output_dir, f"{key}_prediction.tif")
+
+                with rasterio.open(hls_tile_path["tiles"]["B02_0"]) as src:
+                    crs = src.crs
+                    transform = src.transform
+
+                with rasterio.open(
+                    prediction_filename,
+                    "w",
+                    driver="GTiff",
+                    height=prediction.shape[0],
+                    width=prediction.shape[1],
+                    count=1,
+                    dtype=str(prediction.dtype),
+                    crs=crs,
+                    transform=transform,
+                ) as dst:
+                    dst.write(prediction, 1)
+        elif cfg.mode == "chip_inference":
+            test_dataset = create_instageo_dataset(
+                test_filepath,
+                root_dir,
+                partial(
+                    process_and_augment,
+                    mean=MEAN,
+                    std=STD,
+                    temporal_size=TEMPORAL_SIZE,
+                    im_size=cfg.test.img_size,
+                    augmentations=None,
+                ),
+                cfg,
+                include_filenames=True,
+            )
+
+            test_loader = create_dataloader(
+                test_dataset,
+                batch_size=batch_size,
+                collate_fn=infer_collate_fn,
+                num_workers=cfg.dataloader.num_workers,
+            )
+
+            chip_inference(test_loader, output_dir, model, device=get_device())
 
 
 if __name__ == "__main__":

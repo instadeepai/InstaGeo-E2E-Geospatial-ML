@@ -16,6 +16,9 @@ train:
   ignore_index: -100
   weight_decay: 0.01
   scheduler: False
+  distillation: False
+  teacher_ckpt_path: null
+
 
 model:
   model_name: prithvi_eo_v1_100 #prithvi_eo_v1_100 or prithvi_eo_v2_300 or prithvi_eo_v2_300_tl or prithvi_eo_v2_600 or prithvi_eo_v2_600_tl
@@ -26,6 +29,7 @@ model:
   plot_reg_results: False
   include_ee_metric: False
   weight_clip_range: null
+  depth: -1
 
 dataloader:
   bands: [1, 2, 3, 8, 11, 12] # Blue, Green, Red, Narrow NIR, SWIR 1, SWIR 2

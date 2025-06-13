@@ -6,7 +6,6 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
 
 from instageo.model.factory import create_model
-from instageo.model.metrics import RunningAUC, RunningConfusionMatrix
 from instageo.model.run import (
     check_required_flags,
     compute_class_weights,
@@ -55,7 +54,9 @@ class MockDataset(Dataset):
 def mock_config():
     return DictConfig(
         {
+            "teacher_ckpt_path": None,
             "is_reg_task": False,
+            "mode": "train",
             "dataloader": {
                 "img_size": 224,
                 "temporal_dim": 1,
@@ -66,13 +67,18 @@ def mock_config():
                 "ignore_index": -100,
                 "weight_decay": 1e-2,
                 "scheduler": True,
+                "distillation": False,
             },
             "model": {
                 "freeze_backbone": True,
                 "num_classes": 2,
-                "model_name": "pritvhi-eo1",
+                "model_name": "prithvi_eo_v1_100",
                 "load_pretrained_weights": True,
                 "weight_clip_range": None,
+                "depth": -1,
+                "use_log_scale": False,
+                "plot_reg_results": False,
+                "include_ee_metric": False,
             },
         }
     )

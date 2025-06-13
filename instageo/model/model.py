@@ -21,7 +21,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, List, Optional
 
 import numpy as np
 import torch
@@ -184,6 +184,8 @@ def create_prithvi(
     pretrained: bool = False,
     num_frames: int = 1,
     img_size: int = 224,
+    depth: int = -1,
+    **kwargs: Optional[dict],
 ) -> PrithviViT:
     """Builds the PrithviViT model.
 
@@ -203,14 +205,17 @@ def create_prithvi(
     """
     # Load default config
     model_args = prithvi_cfgs[variant].to_dict()
+    if depth != -1:
+        model_args["depth"] = depth
 
+    model_args.update(kwargs)
     pretrained_bands = pretrained_bands or model_args.get("bands", PRETRAINED_BANDS)
 
-    kwargs = {}
-    kwargs["in_chans"] = len(model_bands)
-    kwargs["num_frames"] = num_frames
-    kwargs["img_size"] = img_size
-    model_args.update(kwargs)
+    model_kwargs = {}
+    model_kwargs["in_chans"] = len(model_bands)
+    model_kwargs["num_frames"] = num_frames
+    model_kwargs["img_size"] = img_size
+    model_args.update(model_kwargs)
     model = PrithviViT(**model_args)
 
     if pretrained:
@@ -292,6 +297,9 @@ class PrithviSeg(nn.Module):
         freeze_backbone: bool = True,
         model_bands: list[int] = list(range(6)),
         variant: str = "prithvi_eo_v1_100",
+        embed_dims: list[int] | None = None,
+        depth: int = -1,
+        **kwargs: Any,
     ) -> None:
         """Initialize the PrithviSeg model.
 
@@ -307,6 +315,11 @@ class PrithviSeg(nn.Module):
             freeze_backbone (bool): Flag to freeze ViT transformer backbone weights.
             model_bands (list): Bands used in the dataset.
             variant (str): The model architecture to use.
+            embed_dims (list[int]): List of embedding dimensions for the segmentation head.
+            depth (int): The depth of the model.
+            load_pretrained_weights (bool): Whether to load pretrained weights.
+            **kwargs: Additional keyword arguments.
+
         """
         super().__init__()
         model_bands_ = PRETRAINED_BANDS * (len(model_bands) // len(PRETRAINED_BANDS))
@@ -317,12 +330,13 @@ class PrithviSeg(nn.Module):
             pretrained_bands=PRETRAINED_BANDS,
             num_frames=temporal_step,
             img_size=image_size,
+            depth=depth,
+            **kwargs,
         )
         if freeze_backbone:
             for param in model.parameters():
                 param.requires_grad = False
         self.prithvi_encoder = model
-
         model_args = prithvi_cfgs[variant].to_dict()
         self.model_args = model_args
         model_args["num_frames"] = temporal_step
@@ -360,11 +374,11 @@ class PrithviSeg(nn.Module):
                 nn.ReLU(),
             )
 
-        embed_dims = [
-            (model_args["embed_dim"] * model_args["num_frames"]) // (2**i)
-            for i in range(5)
-        ]
-
+        if embed_dims is None:
+            embed_dims = [
+                (model_args["embed_dim"] * model_args["num_frames"]) // (2**i)
+                for i in range(5)
+            ]
         kernel_sizes = seg_head_kernel_sizes[variant]
 
         self.segmentation_head = nn.Sequential(
@@ -378,7 +392,9 @@ class PrithviSeg(nn.Module):
             ),
         )
 
-    def forward(self, img: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, img: torch.Tensor, return_features: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Define the forward pass of the model.
 
         Args:
@@ -400,4 +416,7 @@ class PrithviSeg(nn.Module):
         )
         out = self.segmentation_head(reshaped_features)
 
-        return out
+        if return_features:
+            return out, reshaped_features
+        else:
+            return out
