@@ -320,20 +320,16 @@ def init_neptune_logger(
     neptune_run = neptune.init_run(
         api_token=set_neptune_api_token(),
         project=os.environ["NEPTUNE_PROJECT"],
-        with_id=cfg.neptune_experiment_id
-        if hasattr(cfg, "neptune_experiment_id")
-        else None,
+        with_id=(
+            cfg.neptune_experiment_id if hasattr(cfg, "neptune_experiment_id") else None
+        ),
     )
 
     if test_filepath:
-        neptune_logger = AIchorNeptuneLogger(
-            run=neptune_run[
-                f"eval-{os.path.splitext(os.path.basename(test_filepath))[0]}"
-            ]
-        )
-    else:
-        neptune_logger = AIchorNeptuneLogger(run=neptune_run)
-
+        neptune_run = neptune_run[
+            f"eval-{os.path.splitext(os.path.basename(test_filepath))[0]}"
+        ]
+    neptune_logger = AIchorNeptuneLogger(run=neptune_run, log_model_checkpoints=False)
     neptune_logger.experiment["config"] = stringify_unsupported(OmegaConf.to_yaml(cfg))
     return neptune_logger
 
