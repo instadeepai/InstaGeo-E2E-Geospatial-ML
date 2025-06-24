@@ -422,7 +422,7 @@ def log_model_complexity(
         device (int): GPU device index. Default is 0.
     """
     input_shape = (
-        len(cfg.dataloader.bands),
+        len(cfg.dataloader.bands) // cfg.dataloader.temporal_dim,
         cfg.dataloader.temporal_dim,
         cfg.dataloader.img_size,
         cfg.dataloader.img_size,
