@@ -60,7 +60,7 @@ COPY . /app
 RUN /app/venv/bin/pip install .[all]
 
 RUN /app/venv/bin/pip uninstall -y neptune-client \
-    && /app/venv/bin/pip install neptune
+    && /app/venv/bin/pip install neptune carbontracker==1.2.5
 
 # Update PATH so the container defaults to using the venv’s python/pip
 ENV PATH="/app/venv/bin:$PATH"

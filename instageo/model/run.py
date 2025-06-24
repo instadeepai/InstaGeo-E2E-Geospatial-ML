@@ -22,6 +22,7 @@
 import json
 import logging
 import os
+import time
 from collections import Counter
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -47,6 +48,7 @@ from instageo.model.dataloader import (
 from instageo.model.factory import create_model
 from instageo.model.infer_utils import chip_inference, sliding_window_inference
 from instageo.model.neptune_logger import AIchorNeptuneLogger, set_neptune_api_token
+from instageo.model.utils import CarbonTrackerCallback, log_model_complexity
 
 pl.seed_everything(seed=1042, workers=True)
 torch.backends.cudnn.deterministic = True
@@ -361,10 +363,16 @@ def create_trainer(
         save_top_k=1,
     )
 
+    carbon_cb = CarbonTrackerCallback(
+        total_epochs=cfg.train.num_epochs if hasattr(cfg, "train") else None,
+        neptune_run=logger,
+        log_dir=hydra_out_dir,
+    )
+
     return pl.Trainer(
         accelerator=get_device(),
         max_epochs=cfg.train.num_epochs if hasattr(cfg, "train") else None,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, carbon_cb],
         logger=logger,
         deterministic=True,
     )
@@ -384,6 +392,8 @@ def main(cfg: DictConfig) -> None:
     """
     log.info(f"Script: {__file__}")
     log.info(f"Imported hydra config:\n{OmegaConf.to_yaml(cfg)}")
+
+    start_time = time.time()
 
     # Common configuration parameters
     MEAN = cfg.dataloader.mean
@@ -476,8 +486,17 @@ def main(cfg: DictConfig) -> None:
         monitor = "val_RMSE" if cfg.is_reg_task else "val_IoU"
         mode = "min" if cfg.is_reg_task else "max"
 
+        log_model_complexity(model, cfg, neptune_logger)
+
         trainer = create_trainer(cfg, neptune_logger, monitor, mode)
         trainer.fit(model, train_loader, valid_loader)
+
+        elapsed_time = time.time() - start_time
+        print(f"Elapsed time: {elapsed_time:.2f} seconds")
+        neptune_logger.experiment["model/Training duration"] = elapsed_time
+        neptune_logger.experiment["model/One training epoch duration"] = (
+            elapsed_time / cfg.train.num_epochs
+        )
 
     elif cfg.mode == "eval":
         check_required_flags(["root_dir", "test_filepath"], cfg)
@@ -506,9 +525,15 @@ def main(cfg: DictConfig) -> None:
             num_workers=cfg.dataloader.num_workers,
         )
 
+        log_model_complexity(model, cfg, neptune_logger)
+
         trainer = create_trainer(cfg, neptune_logger)
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
+
+        elapsed_time = time.time() - start_time
+        print(f"Elapsed time: {elapsed_time:.2f} seconds")
+        neptune_logger.experiment["model/Eval duration"] = elapsed_time
 
     elif cfg.mode in ["sliding_inference", "chip_inference"]:
         if cfg.mode == "chip_inference":

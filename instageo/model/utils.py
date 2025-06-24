@@ -21,9 +21,16 @@
 
 import logging
 from enum import Enum
-from typing import KeysView, Tuple
+from typing import Any, Dict, KeysView, Optional, Tuple
 
 import torch
+import torch.nn as nn
+from carbontracker import parser
+from carbontracker.tracker import CarbonTracker
+from neptune import Run
+from ptflops import get_model_complexity_info
+from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning.callbacks import Callback
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -320,3 +327,135 @@ def checkpoint_filter_fn_vit(
     )
 
     return state_dict
+
+
+class CarbonTrackerCallback(Callback):
+    """Callback for tracking carbon emissions.
+
+    PyTorch Lightning callback for tracking carbon emissions using CarbonTracker during
+    training and test phases. Logs results to Neptune if a run is provided.
+
+    Parameters:
+        total_epochs (int): Total number of training epochs.
+        neptune_run (optional): Neptune run object for logging results.
+        log_dir (str): Directory to store CarbonTracker logs.
+    """
+
+    def __init__(
+        self,
+        total_epochs: int,
+        neptune_run: Optional[Run] = None,
+        log_dir: str = "carbon_logs",
+    ):
+        """Initialize the CarbonTrackerCallback."""
+        self.total_epochs = total_epochs
+        self.neptune_run = neptune_run
+        self.log_dir = log_dir
+        self.tracker = CarbonTracker(
+            epochs=total_epochs,
+            monitor_epochs=1,
+            components="gpu",
+            log_dir=log_dir,
+            ignore_errors=True,
+        )
+        self.eval_tracker = CarbonTracker(
+            epochs=1,
+            monitor_epochs=1,
+            components="gpu",
+            log_dir=log_dir,
+            ignore_errors=True,
+        )
+
+    def on_train_epoch_start(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        """Start carbon tracking for a training epoch."""
+        self.tracker.epoch_start()
+
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """End carbon tracking for a training epoch."""
+        self.tracker.epoch_end()
+
+    def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Stop training tracker.
+
+        Stop training tracker and log carbon consumption metrics to Neptune if provided.
+        """
+        self.tracker.stop()
+
+        logs = parser.parse_all_logs(log_dir=self.log_dir)
+        first_log = logs[0]
+        if self.neptune_run is not None:
+            log_carbon_info(self.neptune_run, first_log)
+
+    def on_test_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Start carbon tracking for a test epoch."""
+        self.eval_tracker.epoch_start()
+
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """End carbon tracking for a test epoch."""
+        self.eval_tracker.epoch_end()
+
+    def on_test_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Stop test tracker.
+
+        Stop test tracker and log carbon metrics to Neptune under `carbon/test/*`.
+        Assumes the last parsed log is for test.
+        """
+        self.eval_tracker.stop()
+
+        logs = parser.parse_all_logs(log_dir=self.log_dir)
+        test_log = logs[-1]
+        if self.neptune_run is not None:
+            log_carbon_info(self.neptune_run, test_log)
+
+
+def log_model_complexity(
+    model: nn.Module, cfg: Any, neptune_logger: Optional[Run], device: int = 0
+) -> None:
+    """Logs model computational complexity (MACs, GFLOPs, Params) to Neptune.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model.
+        cfg (object): Configuration object with dataloader attributes.
+        neptune_logger: Neptune logger object.
+        device (int): GPU device index. Default is 0.
+    """
+    input_shape = (
+        len(cfg.dataloader.bands),
+        cfg.dataloader.temporal_dim,
+        cfg.dataloader.img_size,
+        cfg.dataloader.img_size,
+    )
+
+    with torch.cuda.device(device):
+        macs, params = get_model_complexity_info(
+            model,
+            input_shape,
+            as_strings=True,
+            print_per_layer_stat=True,
+            verbose=True,
+        )
+
+    if neptune_logger is not None:
+        neptune_logger.experiment["model/Computational complexity"] = macs
+        neptune_logger.experiment["model/GFLOPs"] = float(macs.split()[0]) * 2
+        neptune_logger.experiment["model/params"] = params
+
+
+def log_carbon_info(neptune_run: Optional[Run], first_log: Dict[str, Any]) -> None:
+    """Logs carbon tracking information to Neptune.
+
+    Args:
+        neptune_run: Neptune run object (e.g., self.neptune_run).
+        first_log (dict): Dictionary containing carbon log data.
+    """
+    if neptune_run is not None:
+        run = neptune_run.experiment
+
+        run["carbon/output_filename"] = first_log["output_filename"]
+        run["carbon/standard_filename"] = first_log["standard_filename"]
+        run["carbon/early_stop"] = first_log["early_stop"]
+        run["carbon/actual"] = first_log["actual"]
+        run["carbon/pred"] = first_log["pred"]
+        run["carbon/components"] = first_log["components"]["gpu"]["devices"]
