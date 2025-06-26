@@ -322,6 +322,7 @@ class PrithviSeg(nn.Module):
 
         """
         super().__init__()
+
         model_bands_ = PRETRAINED_BANDS * (len(model_bands) // len(PRETRAINED_BANDS))
         model = create_prithvi(
             variant=variant,

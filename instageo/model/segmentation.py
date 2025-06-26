@@ -298,12 +298,14 @@ class PrithviDistillationSegmentationModule(
             scheduler=scheduler,
             num_classes=num_classes,
             class_weights=class_weights,
+            load_pretrained_weights=False,
         )
 
-        # old checkpoint
+        # load teacher checkpoint
         state_dict = torch.load(teacher_ckpt_path, map_location=torch.device("cpu"))
 
-        # modify to new checkpoint format
+        # modify to new checkpoint format to make sure all teacher weights follow
+        # the same naming convention
         state_dict["state_dict"] = OrderedDict(
             (k.replace("prithvi_100M_backbone", "prithvi_encoder"), v)
             for k, v in state_dict["state_dict"].items()
@@ -376,7 +378,7 @@ class PrithviDistillationSegmentationModule(
         with torch.no_grad():
             teacher_logits = self.teacher.net(inputs)
 
-        student_logits = self.student(inputs)
+        student_logits = self.net(inputs)
         loss, loss_metrics = self._compute_loss(student_logits, teacher_logits, labels)
 
         # Get predictions and probabilities

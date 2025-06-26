@@ -274,6 +274,7 @@ class PrithviDistillationBaseModule(PrithviBaseModule):
         )
         self.ignore_index = ignore_index
         self.distillation_loss = distillation_loss
+        self.strict_loading = False
 
         # Initialize teacher model
         self.teacher = self._init_teacher(
@@ -288,36 +289,26 @@ class PrithviDistillationBaseModule(PrithviBaseModule):
             num_classes=num_classes,
             class_weights=class_weights,
         )
-        # for the teacher model, load only the encoder weights
         self.teacher.eval()
         self.teacher.freeze()
-        self.student = self.net
-        # Initialize student model with the same weights as teacher
-        # input_dim = (
-        #     self.teacher.net.model_args["embed_dim"]
-        #     * self.teacher.net.model_args["num_frames"]
-        # )
-        # student_embed_dims = [input_dim, 512, 256, 128, 64]
         self.num_parameters = sum(p.numel() for p in self.parameters())
 
         # Load teacher's weights into student
         teacher_state_dict = self.teacher.net.prithvi_encoder.state_dict()
-        student_state_dict = self.student.prithvi_encoder.state_dict()
+        student_state_dict = self.net.prithvi_encoder.state_dict()
         if load_pretrained_weights:
             # Filter out incompatible keys
-            filtered_teacher_state_dict = {
+            shared_state_dict = {
                 k: v
                 for k, v in teacher_state_dict.items()
                 if k in student_state_dict and v.shape == student_state_dict[k].shape
             }
 
             # Load compatible weights
-            self.student.prithvi_encoder.load_state_dict(
-                filtered_teacher_state_dict, strict=False
-            )
+            self.net.prithvi_encoder.load_state_dict(shared_state_dict, strict=False)
 
         # Initialize segmentation head with random weights
-        for m in self.student.segmentation_head.modules():
+        for m in self.net.segmentation_head.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                 if m.bias is not None:
@@ -325,17 +316,6 @@ class PrithviDistillationBaseModule(PrithviBaseModule):
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Define the forward pass of the student model.
-
-        Args:
-            x (torch.Tensor): Input tensor for the model.
-
-        Returns:
-            torch.Tensor: Output tensor from the student model.
-        """
-        return self.student(x)
 
     @property
     def num_classes(self) -> int:
@@ -377,3 +357,14 @@ class PrithviDistillationBaseModule(PrithviBaseModule):
             Any: Initialized teacher model.
         """
         raise NotImplementedError("Subclasses must implement _init_teacher")
+
+    def state_dict(self) -> dict:
+        """Customize the state dict of the model.
+
+        Remove the teacher weights from the state dict.
+
+        Returns:
+            dict: State dict of the model without the teacher weights.
+        """
+        # Don't save the teacher
+        return {k: v for k, v in super().state_dict().items() if "teacher" not in k}

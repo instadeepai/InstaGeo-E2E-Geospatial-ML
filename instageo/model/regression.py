@@ -439,8 +439,7 @@ class PrithviDistillationRegressionModule(
         Returns:
             PrithviRegressionModule: Initialized teacher model.
         """
-        model = PrithviRegressionModule.load_from_checkpoint(
-            teacher_ckpt_path,
+        model = PrithviRegressionModule(
             image_size=image_size,
             learning_rate=learning_rate,
             temporal_step=temporal_step,
@@ -448,14 +447,14 @@ class PrithviDistillationRegressionModule(
             weight_decay=weight_decay,
             model_name=model_name,
             scheduler=scheduler,
-            num_classes=1,
-            class_weights=class_weights,
+            load_pretrained_weights=False,
         )
 
-        # old checkpoint
+        # load teacher checkpoint
         state_dict = torch.load(teacher_ckpt_path, map_location=torch.device("cpu"))
 
-        # modify to new checkpoint format
+        # modify to new checkpoint format to make sure all teacher weights follow
+        # the same naming convention
         state_dict["state_dict"] = OrderedDict(
             (k.replace("prithvi_100M_backbone", "prithvi_encoder"), v)
             for k, v in state_dict["state_dict"].items()
@@ -522,7 +521,7 @@ class PrithviDistillationRegressionModule(
             teacher_outputs = self.teacher.net(inputs)
         if self.use_log_scale:
             labels = self.log_scaler.transform(labels)
-        student_outputs = self.student(inputs)
+        student_outputs = self.net(inputs)
         mask = labels.ne(self.ignore_index)
         student_outputs = student_outputs.squeeze(1)[mask]
         teacher_outputs = teacher_outputs.squeeze(1)[mask]

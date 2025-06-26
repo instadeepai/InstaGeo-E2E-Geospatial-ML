@@ -501,7 +501,6 @@ def main(cfg: DictConfig) -> None:
     elif cfg.mode == "eval":
         check_required_flags(["root_dir", "test_filepath"], cfg)
         neptune_logger = init_neptune_logger(cfg, test_filepath)
-
         test_dataset = create_instageo_dataset(
             test_filepath,
             root_dir,
