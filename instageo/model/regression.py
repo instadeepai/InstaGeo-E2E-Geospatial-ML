@@ -285,8 +285,8 @@ class PrithviRegressionModule(PrithviBaseModule):
             )
 
         # Add labels and title
-        g.ax_joint.set_xlabel("Predicted values")
-        g.ax_joint.set_ylabel("Ground truth values")
+        g.ax_joint.set_xlabel("Ground truth values")
+        g.ax_joint.set_ylabel("Predicted values")
         g.ax_joint.set_title(
             f"Model Predictions vs Ground Truth ({step_type.capitalize()})"
         )
