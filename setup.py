@@ -43,6 +43,15 @@ apps_dependencies = [
     "datashader",
     "matplotlib",
     "streamlit==1.31.1",
+    # new apps components dependencies
+    "fastapi==0.115.12",
+    "uvicorn==0.34.3",
+    "python-dotenv==1.0.1",
+    "pydantic==2.10.4",
+    "redis==6.2.0",
+    "rq==2.4.0",
+    "rq-dashboard==0.8.3.2",
+    "types-redis>=4.6.0",
 ]
 setup(
     name="instageo",

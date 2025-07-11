@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Install dependencies for viewer test
-        run: apt-get update && apt-get install -y xvfb
+        run: apt-get update && apt-get install -y xvfb redis-server
       - name: Checkout your repo 📦
         uses: actions/checkout@v3
 
@@ -21,17 +21,25 @@ jobs:
           pip install -r requirements.txt \
           -r instageo/model/requirements.txt \
           -r instageo/data/requirements.txt \
-          -r instageo/apps/requirements.txt
+          -r instageo/apps/requirements.txt \
+          -r instageo/new_apps/backend/requirements.txt
 
       - run: git config --system --add safe.directory $GITHUB_WORKSPACE
       - name: Run linters 🖌️
         run: pre-commit run --all-files --verbose
+      - name: Start Redis service
+        run: |
+          redis-server --daemonize yes
+          redis-cli ping
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
       - name: Run tests 🧪
         env:
           EARTHDATA_USERNAME: ${{ secrets.EARTHDATA_USERNAME }}
           EARTHDATA_PASSWORD: ${{ secrets.EARTHDATA_PASSWORD }}
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          REDIS_DB: 0
         run: pytest --cov --cov-config=.coveragerc --cov-report=html --cov-report=term-missing --cov-fail-under=50 -m "not auth"
 #      - name: Test build docs 📖
 #        run: mkdocs build --verbose --site-dir docs_public

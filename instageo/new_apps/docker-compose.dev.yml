@@ -1,0 +1,91 @@
+services:
+  instageo-redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  instageo-backend-api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=instageo-redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    depends_on:
+      - instageo-redis
+    volumes:
+      - ./backend/app:/app/app  # For development hot-reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  instageo-backend-data-processing-worker:
+    build: ./backend
+    environment:
+      - REDIS_HOST=instageo-redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    depends_on:
+      - instageo-redis
+    volumes:
+      - ./backend/app:/app/app  # For development hot-reload
+    command: rq worker data-processing
+    deploy:
+      replicas: ${DATA_PROCESSING_WORKER_REPLICAS:-2}  # Default 2 workers, can be overridden
+
+  instageo-backend-model-prediction-worker:
+    build: ./backend
+    environment:
+      - REDIS_HOST=instageo-redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    depends_on:
+      - instageo-redis
+    volumes:
+      - ./backend/app:/app/app  # For development hot-reload
+    command: rq worker model-prediction
+    deploy:
+      replicas: ${MODEL_PREDICTION_WORKER_REPLICAS:-2}  # Default 2 workers, can be overridden
+
+  instageo-backend-rq-dashboard:
+    build: ./backend
+    ports:
+      - "9181:9181"
+    environment:
+      - REDIS_HOST=instageo-redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    depends_on:
+      - instageo-redis
+    command: sh -c "rq-dashboard --redis-url redis://$$REDIS_HOST:$$REDIS_PORT/$$REDIS_DB --port 9181"
+
+  instageo-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    expose:
+      - "3000"
+    environment:
+      - REACT_APP_INSTAGEO_BACKEND_API_BASE_URL=http://localhost
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - instageo-backend-api
+    stdin_open: true
+    tty: true
+
+  instageo-nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - instageo-frontend
+      - instageo-backend-api
+
+volumes:
+  redis_data:
