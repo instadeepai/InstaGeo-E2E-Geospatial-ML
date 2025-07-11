@@ -28,21 +28,24 @@ import pandas as pd
 from absl import app, flags, logging
 from pystac_client import Client
 
-from instageo.data import hls_utils
 from instageo.data.flags import FLAGS  # Import flags from central location
 from instageo.data.hls_utils import HLSRasterPipeline, add_hls_stac_items
+from instageo.data.s2_utils import S2RasterPipeline, add_s2_stac_items
 from instageo.data.settings import (
     HLSAPISettings,
     HLSBandsSettings,
     HLSBlockSizes,
     NoDataValues,
+    S2APISettings,
 )
+from instageo.data.stac_utils import create_records_with_items
 
 # Create instances of the settings classes
 NO_DATA_VALUES = NoDataValues()
 HLS_BLOCKSIZE = HLSBlockSizes()
 HLS_BANDS = HLSBandsSettings()
 HLS_API = HLSAPISettings()
+S2_API = S2APISettings()
 
 logging.set_verbosity(logging.INFO)
 log = pylogging.getLogger(__name__)
@@ -94,7 +97,9 @@ def main(argv: Any) -> None:
             (
                 filtered_obsv_records,
                 hls_dataset,
-            ) = hls_utils.create_hls_records_with_items(obsv_records_with_hls_items)
+            ) = create_records_with_items(
+                obsv_records_with_hls_items, "hls_granules", "hls_items"
+            )
             with open(
                 os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w"
             ) as json_file:
@@ -129,7 +134,64 @@ def main(argv: Any) -> None:
         hls_raster_pipeline.run(hls_dataset, filtered_obsv_records)
 
     elif FLAGS.data_source == "S2":
-        raise NotImplementedError
+        if not (
+            os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
+        ):
+            logging.info("Creating S2 dataset JSON.")
+            logging.info("Retrieving S2 tile ID for each observation.")
+            os.makedirs(os.path.join(FLAGS.output_directory), exist_ok=True)
+
+            obsv_records = gpd.read_file(FLAGS.records_file)
+            obsv_records["geometry_4326"] = obsv_records["geometry"].to_crs("EPSG:4326")
+            obsv_records["date"] = pd.to_datetime(obsv_records["date"])
+
+            client = Client.open(S2_API.URL)
+            obsv_records_with_s2_items = add_s2_stac_items(
+                client,
+                obsv_records,
+                num_steps=FLAGS.num_steps,
+                temporal_step=FLAGS.temporal_step,
+                temporal_tolerance=FLAGS.temporal_tolerance,
+                cloud_coverage=FLAGS.cloud_coverage,
+                daytime_only=FLAGS.daytime_only,
+            )
+            (
+                filtered_obsv_records,
+                s2_dataset,
+            ) = create_records_with_items(
+                obsv_records_with_s2_items, "s2_granules", "s2_items"
+            )
+            with open(
+                os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w"
+            ) as json_file:
+                json.dump(s2_dataset, json_file, indent=4)
+            filtered_obsv_records.to_file(
+                os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg"),
+                driver="GPKG",
+            )
+        else:
+            logging.info("S2 dataset JSON already created")
+            with open(
+                os.path.join(FLAGS.output_directory, "s2_dataset.json")
+            ) as json_file:
+                s2_dataset = json.load(json_file)
+            filtered_obsv_records = gpd.read_file(
+                os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")
+            )
+
+        s2_raster_pipeline = S2RasterPipeline(
+            output_directory=FLAGS.output_directory,
+            chip_size=FLAGS.chip_size,
+            raster_path=FLAGS.raster_path,
+            mask_types=FLAGS.mask_types,
+            masking_strategy=FLAGS.masking_strategy,
+            src_crs=FLAGS.src_crs,
+            spatial_resolution=FLAGS.spatial_resolution,
+            qa_check=FLAGS.qa_check,
+        )
+
+        # Run s2 pipeline
+        s2_raster_pipeline.run(s2_dataset, filtered_obsv_records)
 
     elif FLAGS.data_source == "S1":
         raise NotImplementedError

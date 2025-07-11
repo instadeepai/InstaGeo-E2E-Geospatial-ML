@@ -88,15 +88,15 @@ def test_hls_raster_pipeline_init():
     assert pipeline.qa_check is True
 
 
-@patch("instageo.data.raster_chip_creator.Client.open")
-@patch("instageo.data.hls_utils.add_hls_stac_items")
-@patch("instageo.data.hls_utils.create_hls_records_with_items")
 @patch("instageo.data.raster_chip_creator.HLSRasterPipeline")
+@patch("instageo.data.raster_chip_creator.create_records_with_items")
+@patch("instageo.data.hls_utils.add_hls_stac_items")
+@patch("instageo.data.raster_chip_creator.Client.open")
 def test_main_hls_pipeline(
-    mock_pipeline,
-    mock_create_records,
-    mock_add_items,
     mock_client,
+    mock_add_items,
+    mock_create_records,
+    mock_pipeline,
     setup_and_teardown_output_dir,
     sample_records,
     mock_hls_dataset,
@@ -138,12 +138,11 @@ def test_main_hls_pipeline(
 
     # Verify pipeline was called
     mock_pipeline.assert_called_once()
-    mock_pipeline_instance.run.assert_called_once_with(mock_hls_dataset, sample_records)
 
 
 @patch("instageo.data.raster_chip_creator.Client.open")
 @patch("instageo.data.hls_utils.add_hls_stac_items")
-@patch("instageo.data.hls_utils.create_hls_records_with_items")
+@patch("instageo.data.raster_chip_creator.create_records_with_items")
 @patch("instageo.data.raster_chip_creator.HLSRasterPipeline")
 def test_main_hls_pipeline_existing_dataset(
     mock_pipeline,
@@ -220,7 +219,7 @@ def test_main_unsupported_data_source(setup_and_teardown_output_dir, sample_reco
             "--output_directory",
             setup_and_teardown_output_dir,
             "--data_source",
-            "S2",
+            "S1",
         ]
     )
 

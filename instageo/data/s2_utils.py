@@ -28,27 +28,62 @@ import zipfile
 from datetime import datetime
 from typing import Any, List, Optional, Tuple
 
+import backoff
 import numpy as np
 import pandas as pd
 import planetary_computer
 import rasterio
+import ratelimit
 import requests  # type: ignore
 import stackstac
 import xarray as xr
 from absl import logging
+from planetary_computer import sign
 from pystac.item import Item
 from pystac.item_collection import ItemCollection
 from pystac_client import Client, ItemSearch
 from rasterio.crs import CRS
+from shapely.geometry import shape
 from tqdm import tqdm
 
-from instageo.data.data_pipeline import NO_DATA_VALUES, adjust_dims, get_tile_info
-from instageo.data.geo_utils import make_valid_bbox
+from instageo.data import geo_utils
+from instageo.data.data_pipeline import (
+    BaseRasterDataPipeline,
+    adjust_dims,
+    apply_mask,
+    get_tile_info,
+    mask_segmentation_map,
+)
+from instageo.data.settings import (
+    DataPipelineSettings,
+    NoDataValues,
+    S2APISettings,
+    S2BandsSettings,
+    S2BlockSizes,
+)
+from instageo.data.stac_utils import (
+    find_best_items,
+    get_raster_tile_info,
+    open_stac_items,
+    retrieve_stac_metadata,
+)
 
-BLOCKSIZE = 512
 COLLECTION = ["sentinel-2-l2a"]
 S2_HLS_COMMON_BANDS_ASSET = ["B02", "B03", "B04", "B8A", "B11", "B12"]
 SCL_ASSET = ["SCL"]
+
+# Create instances of the settings classes
+NO_DATA_VALUES = NoDataValues()
+BLOCKSIZE = S2BlockSizes()
+BANDS = S2BandsSettings()
+API = S2APISettings()
+DATA_PIPELINE_SETTINGS = DataPipelineSettings()
+
+
+session = requests.Session()
+session.headers.update({"User-Agent": "my-mpc-client/0.1"})
+
+client = Client.open(API.URL, modifier=lambda r: session.send(r.prepare()))
 
 
 class S2AuthState:
@@ -451,7 +486,7 @@ def retrieve_s2_metadata(
         desc="Retrieving Sentinel-2 Metadata",
         total=len(tile_info_df),
     ):
-        lon_min, lat_min, lon_max, lat_max = make_valid_bbox(
+        lon_min, lat_min, lon_max, lat_max = geo_utils.make_valid_bbox(
             lon_min, lat_min, lon_max, lat_max
         )
         url = (
@@ -779,7 +814,7 @@ def search_and_open_s2_cogs(
     stacked_items = stackstac.stack(
         planetary_computer.sign(ItemCollection(results)),
         assets=assets_to_load,
-        chunksize=BLOCKSIZE,
+        chunksize=(BLOCKSIZE.Y, BLOCKSIZE.X),
         properties=False,
         rescale=False,
         fill_value=NO_DATA_VALUES.S2,
@@ -836,3 +871,180 @@ def get_item_collection(search_objs: List[ItemSearch]) -> List[Item]:
        List[Item]: A list of items from the search objects.
     """
     return [list(search_obj.item_collection())[0] for search_obj in search_objs]
+
+
+class S2RasterPipeline(BaseRasterDataPipeline):
+    """S2 Raster Data Pipeline."""
+
+    def setup(self) -> None:
+        """Setup for environment to be used by Dask workers.
+
+        Configures relevant GDAL options for reading COGs
+        """
+        pass
+
+    @ratelimit.limits(calls=DATA_PIPELINE_SETTINGS.COG_DOWNLOAD_RATELIMIT, period=60)
+    @backoff.on_exception(
+        backoff.expo,
+        (rasterio.errors.RasterioIOError, Exception),
+        max_tries=5,
+        max_time=300,  # 5 minutes max
+        jitter=backoff.full_jitter,
+    )
+    def load_data(
+        self, tile_dict: dict[str, Any]
+    ) -> tuple[xr.Dataset, xr.Dataset, str]:
+        """See parent class. Load Granules."""
+        try:
+            dsb, dsm, crs = open_stac_items(
+                tile_dict["granules"],
+                self.src_crs,
+                self.spatial_resolution,
+                bands_asset=BANDS.ASSET,
+                blocksize=(BLOCKSIZE.X, BLOCKSIZE.Y),
+                mask_band="SCL",
+                load_masks=True,
+                fill_value=NO_DATA_VALUES.S2,
+                sign_func=sign,
+            )
+        except Exception as e:
+            logging.error(f"Error loading data: {str(e)}")
+            time.sleep(10 * 60)  # Wait 10 minutes before retrying
+            raise
+
+        return dsb, dsm, crs
+
+    def process_row(
+        self,
+        row_dict: dict[str, Any],
+        flags_dict: dict[str, Any],
+        tile_dict: dict[str, Any],
+    ) -> None | tuple[str, str]:
+        """See parent class. Process a single row."""
+        label_filename = f"{os.path.splitext(row_dict['label_filename'])[0]}_{row_dict['mgrs_tile_id']}"  # noqa
+        chip_filename = label_filename.replace("label", "chip")
+
+        chip_path = os.path.join(self.output_directory, "chips", f"{chip_filename}.tif")
+        label_path = os.path.join(
+            self.output_directory, "seg_maps", f"{label_filename}.tif"
+        )
+        if os.path.exists(chip_path) and os.path.exists(label_path):
+            logging.info(f"Skipping {chip_path} because it's already created")
+            return chip_path, label_path
+        try:
+            # Process chip
+            dsb, dsm, _ = self.load_data(tile_dict)
+            geometry = shape(row_dict["geometry"])
+
+            chip = geo_utils.slice_xr_dataset(dsb, geometry, chip_size=self.chip_size)
+            seg_map = xr.open_dataarray(
+                os.path.join(self.raster_path, row_dict["label_filename"])
+            )
+
+            if dsm is not None:
+                chip_mask = geo_utils.slice_xr_dataset(
+                    dsm, geometry, chip_size=self.chip_size
+                )
+                chip = apply_mask(
+                    chip=chip,
+                    mask=chip_mask,
+                    no_data_value=0,
+                    mask_decoder=create_mask_from_scl,
+                    data_source="S2",
+                    mask_types=self.mask_types,
+                    masking_strategy=self.masking_strategy,
+                )
+
+            if (
+                chip is not None
+                and chip.sizes["x"] == seg_map.sizes["x"]
+                and chip.sizes["y"] == seg_map.sizes["y"]
+            ):
+                seg_map, chip = xr.align(
+                    seg_map, chip, join="override", exclude=["band"]
+                )
+                chip = chip.where((chip >= 0) & (chip <= 10000), 0)
+
+                if self.qa_check:
+                    if chip.where(chip != NO_DATA_VALUES.S2).count().values == 0:
+                        logging.warning(f"Skipping {chip_filename} due to cloud")
+                        return None
+                    seg_map = mask_segmentation_map(chip, seg_map, NO_DATA_VALUES.S2)
+                    if (
+                        seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values
+                        == 0
+                    ):
+                        logging.warning(f"Skipping {label_filename} due to empty label")
+                        return None
+                seg_map = seg_map.where(
+                    ~np.isnan(seg_map), NO_DATA_VALUES.SEG_MAP
+                ).astype(np.int8)
+                chip = chip.where(~np.isnan(chip), 0).astype(np.uint16)
+
+                seg_map.squeeze().rio.to_raster(label_path)
+                chip.squeeze().rio.to_raster(chip_path)
+                return chip_path, label_path
+            else:
+                logging.warning(f"Skipping {label_filename} due to invalid shapes")
+            return None
+        except Exception as e:
+            logging.error(f"Error processing row {row_dict}: {str(e)}")
+            return None
+
+
+def add_s2_stac_items(
+    client: Client,
+    data: pd.DataFrame,
+    num_steps: int = 3,
+    temporal_step: int = 10,
+    temporal_tolerance: int = 12,
+    cloud_coverage: int = 10,
+    daytime_only: bool = False,
+) -> dict[str, pd.DataFrame]:
+    """Searches and adds S2 Granules.
+
+    Data contains tile_id and a series of date for which the tile is desired. This
+    function takes the tile_id and the dates and finds the S2 granules closest to the
+    desired date with a tolerance of `temporal_tolerance`.
+
+    Args:
+        client (pystac_client.Client): pystac_client client to use to perform the search.
+        data (pd.DataFrame): A dataframe containing observations that fall within a
+            dense tile.
+        num_steps (int): Number of temporal steps into the past to fetch.
+        temporal_step (int): Step size (in days) for creating temporal steps.
+        temporal_tolerance (int): Tolerance (in days) for finding closest S2 items.
+        cloud_coverage (int): Maximum percentage of cloud coverage to be tolerated for a granule.
+        daytime_only (bool): Flag to determine whether to filter out night time granules.
+
+    Returns:
+        A dictionary mapping each MGRS tile ID to a DataFrame containing the observations
+          that fall within that tile with their associated PySTAC items representing granules.
+    """
+    if "input_features_date" not in data.columns:
+        data = data.rename(columns={"date": "input_features_date"})
+    tiles_info, tile_queries = get_raster_tile_info(
+        data,
+        num_steps=num_steps,
+        temporal_step=temporal_step,
+        temporal_tolerance=temporal_tolerance,
+    )
+
+    data["tile_queries"] = tile_queries
+    tiles_database = retrieve_stac_metadata(
+        client,
+        tiles_info,
+        collections=API.COLLECTIONS,
+        bands_nameplate=BANDS.NAMEPLATE,
+        cloud_coverage=cloud_coverage,
+        daytime_only=daytime_only,
+    )
+    best_items = find_best_items(
+        data,
+        tiles_database,
+        item_id_field="s2_item_id",
+        candidate_items_field="s2_candidate_items",
+        items_field="s2_items",
+        temporal_tolerance=temporal_tolerance,
+    )
+    return best_items

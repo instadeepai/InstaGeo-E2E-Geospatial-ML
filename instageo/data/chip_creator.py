@@ -48,6 +48,7 @@ from instageo.data.data_pipeline import (
 from instageo.data.flags import FLAGS
 from instageo.data.hls_utils import HLSPointsPipeline, add_hls_stac_items
 from instageo.data.settings import GDALOptions, S2Bands
+from instageo.data.stac_utils import create_records_with_items
 
 load_dotenv(os.path.expanduser("~/.credentials"))
 logging.set_verbosity(logging.INFO)
@@ -269,7 +270,9 @@ def main(argv: Any) -> None:
             (
                 filtered_obsv_records,
                 hls_dataset,
-            ) = hls_utils.create_hls_records_with_items(sub_data_with_hls_items)
+            ) = create_records_with_items(
+                sub_data_with_hls_items, "hls_granules", "hls_items"
+            )
             with open(
                 os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w"
             ) as json_file:

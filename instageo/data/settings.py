@@ -139,10 +139,48 @@ class HLSBandsSettings(BaseSettings):
 
 
 class HLSAPISettings(BaseSettings):
-    """Settings for API configuration."""
+    """Settings for HLS API configuration."""
 
     URL: str = "https://cmr.earthdata.nasa.gov/stac/LPCLOUD"
     COLLECTIONS: List[str] = ["HLSL30_2.0", "HLSS30_2.0"]
+
+
+class S2BlockSizes(BaseSettings):
+    """Settings for block sizes used in COG tiling."""
+
+    X: int = 256
+    Y: int = 256
+
+
+class S2APISettings(BaseSettings):
+    """Settings for Sentinel-2 API configuration."""
+
+    URL: str = "https://planetarycomputer.microsoft.com/api/stac/v1"
+    COLLECTIONS: List[str] = ["sentinel-2-l2a"]
+
+
+class S2BandsSettings(BaseSettings):
+    """Settings for Sentinel-2 bands configuration."""
+
+    ASSET: List[str] = ["blue", "green", "red", "nir narrow", "swir 1", "swir 2"]
+
+    NAMEPLATE: Dict[str, Dict[str, str]] = {
+        "sentinel-2-l2a": {
+            "B01": "coastal aerosol",  # 443 nm
+            "B02": "blue",  # 490 nm
+            "B03": "green",  # 560 nm
+            "B04": "red",  # 665 nm
+            "B05": "red-edge 1",  # 705 nm
+            "B06": "red-edge 2",  # 740 nm
+            "B07": "red-edge 3",  # 783 nm
+            "B08": "nir broad",  # 842 nm
+            "B8A": "nir narrow",  # 865 nm
+            "B09": "water vapor",  # 945 nm
+            "B10": "cirrus",  # 1375 nm
+            "B11": "swir 1",  # 1610 nm
+            "B12": "swir 2",  # 2190 nm
+        }
+    }
 
 
 class DataPipelineSettings(BaseSettings):

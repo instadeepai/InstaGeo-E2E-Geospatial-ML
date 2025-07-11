@@ -7,32 +7,19 @@ from unittest.mock import MagicMock, patch
 import geopandas as gpd
 import pandas as pd
 import pytest
-import rasterio
-import shapely
 import xarray as xr
 from pystac import Item
 from pystac_client import Client
 from rasterio.crs import CRS
 from shapely.geometry import Point, Polygon
 
-from instageo.data.data_pipeline import apply_mask, get_tiles
+from instageo.data.data_pipeline import apply_mask
 from instageo.data.hls_utils import (
-    add_hls_granules,
-    create_hls_dataset,
     decode_fmask_value,
     dispatch_hls_candidate_items,
-    find_best_hls_items,
-    find_closest_tile,
-    get_raster_tile_info,
-    is_daytime,
     is_valid_dataset_entry,
-    load_cog,
-    open_hls_cogs,
     open_mf_tiff_dataset,
     parallel_download,
-    parse_date_from_entry,
-    retrieve_hls_metadata,
-    retrieve_hls_stac_metadata,
 )
 
 
@@ -156,28 +143,6 @@ def test_open_mf_tiff_dataset_cloud_mask():
     )
 
 
-def test_retrieve_hls_metadata():
-    tile_info = pd.DataFrame(
-        {
-            "tile_id": ["38PMB"],
-            "min_date": ["2022-05-24"],
-            "max_date": ["2022-06-14"],
-            "lon_min": [44.451435],
-            "lon_max": [44.744167],
-            "lat_min": [15.099767],
-            "lat_max": [15.287778],
-        }
-    )
-    tile_database = retrieve_hls_metadata(tile_info, cloud_coverage=0.0001)
-    assert tile_database["38PMB"][0] == [  # ignore links
-        "HLS.S30.T38PMB.2022145T072619.v2.0",
-        "HLS.L30.T38PMB.2022146T072532.v2.0",
-        "HLS.L30.T38PMB.2022154T072604.v2.0",
-        "HLS.L30.T38PMB.2022163T072000.v2.0",
-        "HLS.S30.T38PMB.2022165T072619.v2.0",
-    ]
-
-
 @pytest.mark.parametrize(
     "value, position, result",
     [
@@ -193,270 +158,6 @@ def test_retrieve_hls_metadata():
 )
 def test_decode_fmask_value(value, position, result):
     assert decode_fmask_value(value, position) == result
-
-
-def test_find_closest_tile():
-    # Let's ignore the links when defining the tile_database param
-    tile_database = {
-        "30RYS": (
-            [
-                "HLS.L30.T30RYS.2022140T102748.v2.0.",
-                "HLS.S30.T30RYS.2022142T103629.v2.0.",
-                "HLS.S30.T30RYS.2022144T102611.v2.0.",
-                "HLS.L30.T30RYS.2022147T103357.v2.0.",
-                "HLS.S30.T30RYS.2022147T103631.v2.0.",
-                "HLS.L30.T30RYS.2022148T102722.v2.0.",
-                "HLS.S30.T30RYS.2022149T102559.v2.0.",
-                "HLS.S30.T30RYS.2022152T103629.v2.0.",
-                "HLS.S30.T30RYS.2022154T102611.v2.0.",
-                "HLS.L30.T30RYS.2022155T103334.v2.0.",
-                "HLS.L30.T30RYS.2022156T102755.v2.0.",
-                "HLS.S30.T30RYS.2022157T103631.v2.0.",
-                "HLS.S30.T30RYS.2022159T102559.v2.0.",
-            ],
-            [[], [], [], [], [], [], [], [], [], [], [], [], []],
-        ),
-        "38PMB": (
-            [
-                "HLS.L30.T38PMB.2022139T071922.v2.0.",
-                "HLS.S30.T38PMB.2022140T072621.v2.0.",
-                "HLS.S30.T38PMB.2022142T071619.v2.0.",
-                "HLS.S30.T38PMB.2022145T072619.v2.0.",
-                "HLS.L30.T38PMB.2022146T072532.v2.0.",
-                "HLS.L30.T38PMB.2022147T071947.v2.0.",
-                "HLS.S30.T38PMB.2022147T071621.v2.0.",
-                "HLS.S30.T38PMB.2022150T072621.v2.0.",
-                "HLS.S30.T38PMB.2022152T071619.v2.0.",
-                "HLS.L30.T38PMB.2022154T072604.v2.0.",
-                "HLS.L30.T38PMB.2022155T071923.v2.0.",
-                "HLS.S30.T38PMB.2022155T072619.v2.0.",
-                "HLS.S30.T38PMB.2022157T071631.v2.0.",
-                "HLS.S30.T38PMB.2022160T072621.v2.0.",
-                "HLS.L30.T38PMB.2022162T072536.v2.0.",
-                "HLS.S30.T38PMB.2022162T071619.v2.0.",
-            ],
-            [[], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []],
-        ),
-        "38PNB": (
-            [
-                "HLS.S30.T38PNB.2022142T071619.v2.0.",
-                "HLS.L30.T38PNB.2022147T071947.v2.0.",
-                "HLS.S30.T38PNB.2022147T071621.v2.0.",
-                "HLS.L30.T38PNB.2022148T071311.v2.0.",
-                "HLS.S30.T38PNB.2022152T071619.v2.0.",
-                "HLS.L30.T38PNB.2022155T071923.v2.0.",
-                "HLS.L30.T38PNB.2022156T071344.v2.0.",
-                "HLS.S30.T38PNB.2022157T071631.v2.0.",
-            ],
-            [[], [], [], [], [], [], [], []],
-        ),
-        "38PPB": (
-            [
-                "HLS.L30.T38PPB.2022139T071922.v2.0.",
-                "HLS.L30.T38PPB.2022140T071337.v2.0.",
-                "HLS.S30.T38PPB.2022142T071619.v2.0.",
-                "HLS.L30.T38PPB.2022147T071947.v2.0.",
-                "HLS.S30.T38PPB.2022147T071621.v2.0.",
-                "HLS.L30.T38PPB.2022148T071311.v2.0.",
-                "HLS.S30.T38PPB.2022152T071619.v2.0.",
-                "HLS.L30.T38PPB.2022155T071923.v2.0.",
-                "HLS.L30.T38PPB.2022156T071344.v2.0.",
-                "HLS.S30.T38PPB.2022157T071631.v2.0.",
-            ],
-            [[], [], [], [], [], [], [], [], [], []],
-        ),
-        "38QMC": [],
-        "38QMD": (
-            [
-                "HLS.S30.T38QMD.2022142T071619.v2.0.",
-                "HLS.S30.T38QMD.2022145T072619.v2.0.",
-                "HLS.L30.T38QMD.2022146T072508.v2.0.",
-                "HLS.L30.T38QMD.2022147T071923.v2.0.",
-                "HLS.S30.T38QMD.2022147T071621.v2.0.",
-                "HLS.S30.T38QMD.2022150T072621.v2.0.",
-                "HLS.S30.T38QMD.2022152T071619.v2.0.",
-                "HLS.L30.T38QMD.2022154T072540.v2.0.",
-                "HLS.L30.T38QMD.2022155T071859.v2.0.",
-                "HLS.S30.T38QMD.2022155T072619.v2.0.",
-                "HLS.S30.T38QMD.2022157T071631.v2.0.",
-                "HLS.S30.T38QMD.2022160T072621.v2.0.",
-                "HLS.L30.T38QMD.2022162T072512.v2.0.",
-                "HLS.S30.T38QMD.2022162T071619.v2.0.",
-            ],
-            [[], [], [], [], [], [], [], [], [], [], [], [], [], []],
-        ),
-        "39QTT": [],
-        "39QUT": [],
-    }
-    tile_queries = [
-        ("38PMB", ["2022-06-08", "2022-05-29", "2022-05-19"]),
-        ("38PPB", ["2022-06-08", "2022-05-29", "2022-05-19"]),
-        ("39QTT", ["2022-06-08", "2022-05-29", "2022-05-19"]),
-        ("30RYS", ["2022-06-09", "2022-05-30", "2022-05-20"]),
-        ("38QMC", ["2022-06-09", "2022-05-30", "2022-05-20"]),
-        ("39QUT", ["2022-06-09", "2022-05-30", "2022-05-20"]),
-        ("38PMB", ["2022-06-09", "2022-05-30", "2022-05-20"]),
-        ("38PNB", ["2022-06-10", "2022-05-31", "2022-05-21"]),
-        ("39QTT", ["2022-06-10", "2022-05-31", "2022-05-21"]),
-        ("38QMD", ["2022-06-11", "2022-06-01", "2022-05-22"]),
-        ("38PMB", ["2022-06-11", "2022-06-01", "2022-05-22"]),
-    ]
-
-    tile_queries_str = [
-        f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
-    ]
-    tile_queries = {k: v for k, v in zip(tile_queries_str, tile_queries)}
-    query_result = find_closest_tile(tile_queries, tile_database)
-    hls_tiles_with_links = list(query_result["hls_tiles"])
-    assert list(hls_tiles for hls_tiles in hls_tiles_with_links) == [
-        [
-            "HLS.S30.T38PMB.2022160T072621.v2.0.",
-            "HLS.S30.T38PMB.2022150T072621.v2.0.",
-            "HLS.L30.T38PMB.2022139T071922.v2.0.",
-        ],
-        [
-            "HLS.S30.T38PPB.2022157T071631.v2.0.",
-            "HLS.L30.T38PPB.2022148T071311.v2.0.",
-            "HLS.L30.T38PPB.2022139T071922.v2.0.",
-        ],
-        [None, None, None],
-        [
-            "HLS.S30.T30RYS.2022159T102559.v2.0.",
-            "HLS.S30.T30RYS.2022149T102559.v2.0.",
-            "HLS.L30.T30RYS.2022140T102748.v2.0.",
-        ],
-        [None, None, None],
-        [None, None, None],
-        [
-            "HLS.S30.T38PMB.2022160T072621.v2.0.",
-            "HLS.S30.T38PMB.2022150T072621.v2.0.",
-            "HLS.S30.T38PMB.2022140T072621.v2.0.",
-        ],
-        [
-            "HLS.S30.T38PNB.2022157T071631.v2.0.",
-            "HLS.S30.T38PNB.2022152T071619.v2.0.",
-            "HLS.S30.T38PNB.2022142T071619.v2.0.",
-        ],
-        [None, None, None],
-        [
-            "HLS.L30.T38QMD.2022162T072512.v2.0.",
-            "HLS.S30.T38QMD.2022152T071619.v2.0.",
-            "HLS.S30.T38QMD.2022142T071619.v2.0.",
-        ],
-        [
-            "HLS.L30.T38PMB.2022162T072536.v2.0.",
-            "HLS.S30.T38PMB.2022152T071619.v2.0.",
-            "HLS.S30.T38PMB.2022142T071619.v2.0.",
-        ],
-    ]
-
-
-@pytest.mark.parametrize(
-    "tile_id, result",
-    [
-        ("HLS.L30.T38PMB.2022139T071922.v2.0.", "2022-05-19"),
-        ("HLS.L30.T38PMB.202213T071922.v2.0.", None),
-    ],
-)
-def test_parse_date_from_entry(tile_id, result):
-    parsed_date = parse_date_from_entry(tile_id)
-    if isinstance(parsed_date, datetime.datetime):
-        parsed_date = parsed_date.strftime("%Y-%m-%d")
-    assert parsed_date == result
-
-
-def test_add_hls_granules(observation_data):
-    data = get_tiles(observation_data, min_count=3)
-    result = add_hls_granules(data, cloud_coverage=0.0001)
-    assert list(result["hls_tiles"]) == [
-        [
-            "HLS.L30.T38PMB.2022163T072000.v2.0",
-            "HLS.L30.T38PMB.2022146T072532.v2.0",
-            "HLS.L30.T38PMB.2022139T071922.v2.0",
-        ],
-        [
-            "HLS.L30.T38PMB.2022163T072000.v2.0",
-            "HLS.L30.T38PMB.2022146T072532.v2.0",
-            "HLS.L30.T38PMB.2022139T071922.v2.0",
-        ],
-        [
-            "HLS.L30.T38PMB.2022163T072000.v2.0",
-            "HLS.L30.T38PMB.2022146T072532.v2.0",
-            "HLS.L30.T38PMB.2022139T071922.v2.0",
-        ],
-        [
-            "HLS.L30.T38PMB.2022163T072000.v2.0",
-            "HLS.L30.T38PMB.2022146T072532.v2.0",
-            "HLS.S30.T38PMB.2022140T072621.v2.0",
-        ],
-    ]
-
-
-def test_create_hls_dataset(observation_data):
-    data = get_tiles(observation_data, min_count=3)
-    data_with_tiles = add_hls_granules(
-        data, num_steps=3, temporal_step=10, temporal_tolerance=5, cloud_coverage=0.0001
-    )
-    hls_dataset, tiles_to_download = create_hls_dataset(data_with_tiles, outdir="")
-    assert len(tiles_to_download) == 28
-    assert len(hls_dataset) == 2
-    assert len(hls_dataset["2022-06-08_T38PMB"]["tiles"]) == 18
-    assert len(hls_dataset["2022-06-08_T38PMB"]["fmasks"]) == 3
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_0"]
-        == "hls_tiles/HLS.L30.T38PMB.2022163T072000.v2.0.B02.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_0"]
-        == "hls_tiles/HLS.L30.T38PMB.2022163T072000.v2.0.Fmask.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_1"]
-        == "hls_tiles/HLS.L30.T38PMB.2022146T072532.v2.0.B02.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_1"]
-        == "hls_tiles/HLS.L30.T38PMB.2022146T072532.v2.0.Fmask.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["tiles"]["B02_2"]
-        == "hls_tiles/HLS.L30.T38PMB.2022139T071922.v2.0.B02.tif"
-    )
-    assert (
-        hls_dataset["2022-06-08_T38PMB"]["fmasks"]["Fmask_2"]
-        == "hls_tiles/HLS.L30.T38PMB.2022139T071922.v2.0.Fmask.tif"
-    )
-
-
-def test_load_cog():
-    url = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/Q/WD/2020/7/S2A_36QWD_20200701_0_L2A/TCI.tif"
-    data_array = load_cog(url)
-    result = data_array.compute()
-
-    assert isinstance(result, xr.DataArray)
-    assert result.shape == (3, 10980, 10980)
-    assert result.dtype == ("uint8")
-
-
-@pytest.fixture
-def real_bands_infos():
-    return {
-        "data_links": [
-            [
-                "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/Q/WD/2020/7/S2A_36QWD_20200701_0_L2A/TCI.tif",
-                "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/Q/WD/2020/7/S2A_36QWD_20200701_0_L2A/TCI.tif",
-            ]
-        ]
-    }
-
-
-def test_open_hls_cogs_real_data(real_bands_infos):
-    bands, masks, crs = open_hls_cogs(real_bands_infos, load_masks=False)
-
-    assert isinstance(bands, xr.DataArray)
-    assert bands.attrs["scale_factor"] == 1
-    assert crs is not None
-    assert bands.shape[0] == 3
 
 
 # Tests and mocks for parallel_download
@@ -611,28 +312,6 @@ def mock_item():
     )
 
 
-def test_is_daytime(monkeypatch, mock_item):
-    """Tests the is_daytime function with a known daytime scenario in Tunis."""
-
-    class MockBox:
-        def __init__(self, *args):
-            pass
-
-        @property
-        def centroid(self):
-            class MockPoint:
-                # Tunis coordinates
-                x = 10.1658  # longitude
-                y = 36.8065  # latitude
-
-            return MockPoint()
-
-    monkeypatch.setattr(shapely.geometry, "box", MockBox)
-    expected = True
-
-    assert is_daytime(mock_item) == expected
-
-
 @pytest.fixture
 def sample_data():
     """Creates a sample GeoDataFrame for testing."""
@@ -645,55 +324,6 @@ def sample_data():
         ],
     }
     return gpd.GeoDataFrame(data, geometry="geometry_4326", crs="EPSG:4326")
-
-
-def test_get_raster_tile_info(sample_data):
-    """Test function output for expected behavior."""
-    tile_info, tile_queries = get_raster_tile_info(
-        sample_data,
-        num_steps=2,
-        temporal_step=5,
-        temporal_tolerance=2,
-        temporal_tolerance_minutes=0,
-    )
-
-    assert isinstance(tile_info, pd.DataFrame)
-    assert set(tile_info.columns) == {
-        "tile_id",
-        "min_date",
-        "max_date",
-        "lon_min",
-        "lon_max",
-        "lat_min",
-        "lat_max",
-    }
-    assert isinstance(tile_queries, list)
-    assert all(isinstance(i, tuple) for i in tile_queries)
-    assert all(isinstance(i[1], list) for i in tile_queries)
-    for date_col in ["min_date", "max_date"]:
-        assert tile_info[date_col].apply(lambda x: isinstance(x, str)).all()
-    assert len(tile_queries) == len(sample_data)
-    expected_tile_queries = [
-        ("tile_1", ["2024-01-15T00:00:00", "2024-01-10T00:00:00"]),
-        ("tile_2", ["2024-02-20T00:00:00", "2024-02-15T00:00:00"]),
-    ]
-    assert tile_queries == expected_tile_queries
-    expected_tile_info = pd.DataFrame(
-        {
-            "tile_id": ["tile_1", "tile_2"],
-            "min_date": ["2024-01-08T00:00:00", "2024-02-13T00:00:00"],
-            "max_date": ["2024-01-17T23:59:59", "2024-02-22T23:59:59"],
-            "lon_min": [0.0, 2.0],
-            "lon_max": [1.0, 3.0],
-            "lat_min": [0.0, 2.0],
-            "lat_max": [1.0, 3.0],
-        }
-    )
-    pd.testing.assert_frame_equal(
-        tile_info.sort_values("tile_id").reset_index(drop=True),
-        expected_tile_info.sort_values("tile_id").reset_index(drop=True),
-        check_dtype=True,
-    )
 
 
 @pytest.fixture
@@ -741,38 +371,6 @@ def mock_stac_items():
     )
 
     return [item1, item2]
-
-
-@patch("instageo.data.hls_utils.is_daytime", side_effect=lambda x: x.id == "item_1")
-@patch("instageo.data.hls_utils.rename_hls_stac_items", side_effect=lambda x: x)
-@patch(
-    "instageo.data.geo_utils.make_valid_bbox",
-    return_value=[-77.0365, 38.8977, -76.9365, 38.9977],
-)
-def test_retrieve_hls_stac_metadata(
-    mock_make_valid_bbox,
-    mock_rename_hls_stac_items,
-    mock_is_daytime,
-    mock_client,
-    mock_tile_info_df,
-    mock_stac_items,
-):
-    """Tests retrieve_hls_stac_metadata with mocked data."""
-
-    mock_client.search.return_value.item_collection.return_value = mock_stac_items
-    result = retrieve_hls_stac_metadata(
-        mock_client, mock_tile_info_df, cloud_coverage=10, daytime_only=True
-    )
-
-    assert isinstance(result, dict)
-    assert "tile_1" in result
-    assert isinstance(result["tile_1"], list)
-    assert len(result["tile_1"]) == 1
-    assert result["tile_1"][0].id == "item_1"  # Only item_1 should be in result
-
-    mock_make_valid_bbox.assert_called_once()
-    mock_rename_hls_stac_items.assert_called()
-    mock_is_daytime.assert_called()
 
 
 @pytest.fixture
@@ -847,18 +445,6 @@ def tiles_database(mock_candidate_items):
     return {
         "tile1": mock_candidate_items,
     }
-
-
-@patch("instageo.data.hls_utils.find_closest_hls_items", return_value="mocked_hls_item")
-def test_find_best_hls_items(mock_find_closest, mock_observations, tiles_database):
-    """Test the find_best_hls_items function."""
-    result = find_best_hls_items(mock_observations, tiles_database)
-
-    assert "tile1" in result
-    assert len(result["tile1"]) == 2
-    assert result["tile1"]["hls_items"].iloc[0] == "mocked_hls_item"
-    assert result["tile1"]["hls_items"].iloc[1] == "mocked_hls_item"
-    assert "hls_candidate_items" not in result["tile1"].columns
 
 
 def test_is_valid_dataset_entry():
