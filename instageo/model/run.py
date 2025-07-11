@@ -486,8 +486,6 @@ def main(cfg: DictConfig) -> None:
         monitor = "val_RMSE" if cfg.is_reg_task else "val_IoU"
         mode = "min" if cfg.is_reg_task else "max"
 
-        log_model_complexity(model, cfg, neptune_logger)
-
         trainer = create_trainer(cfg, neptune_logger, monitor, mode)
         trainer.fit(model, train_loader, valid_loader)
 
@@ -497,6 +495,8 @@ def main(cfg: DictConfig) -> None:
         neptune_logger.experiment["model/One training epoch duration"] = (
             elapsed_time / cfg.train.num_epochs
         )
+
+        log_model_complexity(model, cfg, neptune_logger)
 
     elif cfg.mode == "eval":
         check_required_flags(["root_dir", "test_filepath"], cfg)
@@ -524,8 +524,6 @@ def main(cfg: DictConfig) -> None:
             num_workers=cfg.dataloader.num_workers,
         )
 
-        log_model_complexity(model, cfg, neptune_logger)
-
         trainer = create_trainer(cfg, neptune_logger)
         result = trainer.test(model, dataloaders=test_loader)
         log.info(f"Evaluation results:\n{result}")
@@ -533,6 +531,8 @@ def main(cfg: DictConfig) -> None:
         elapsed_time = time.time() - start_time
         print(f"Elapsed time: {elapsed_time:.2f} seconds")
         neptune_logger.experiment["model/Eval duration"] = elapsed_time
+
+        log_model_complexity(model, cfg, neptune_logger)
 
     elif cfg.mode in ["sliding_inference", "chip_inference"]:
         if cfg.mode == "chip_inference":
