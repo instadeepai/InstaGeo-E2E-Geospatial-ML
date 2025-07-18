@@ -506,6 +506,7 @@ class BaseRasterDataPipeline(ABC):
         spatial_resolution: float,
         qa_check: bool = True,
         task_type: str = "seg",
+        is_bbox_feature: bool = False,
     ) -> None:
         """Init."""
         self.output_directory = output_directory
@@ -517,6 +518,7 @@ class BaseRasterDataPipeline(ABC):
         self.spatial_resolution = spatial_resolution
         self.qa_check = qa_check
         self.task_type = task_type
+        self.is_bbox_feature = is_bbox_feature
 
     @abstractmethod
     def setup(self) -> None:
@@ -550,7 +552,7 @@ class BaseRasterDataPipeline(ABC):
         row_dict: Dict[str, Any],
         flags_dict: Dict[str, Any],
         tile_dict: dict[str, Any],
-    ) -> Tuple[str, str] | None:
+    ) -> Tuple[str, str | None] | None:
         """Processes a single row of data.
 
         Arguments:

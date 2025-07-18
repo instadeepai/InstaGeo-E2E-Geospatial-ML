@@ -17,9 +17,11 @@
 # For more details, see https://creativecommons.org/licenses/by-nc-sa/4.0/
 # ------------------------------------------------------------------------------
 """Geospatial Utility Functions."""
-from typing import Callable
+from typing import Callable, Tuple
 
+import geopandas as gpd
 import mgrs
+import numpy as np
 import rasterio
 import xarray as xr
 from pyproj import Transformer
@@ -130,3 +132,93 @@ def slice_xr_dataset(
     except Exception as e:
         print(f"Error occurred: {e}")
         return None
+
+
+def get_extent(  # type: ignore[no-untyped-call]
+    dataset: xr.Dataset,
+) -> Tuple[float, float, float, float]:
+    """Return the spatial extent (lon_min, lat_min, lon_max, lat_max) of an xarray Dataset.
+
+    Args:
+        dataset: xr.Dataset
+
+    Returns:
+        tuple of float: The minimum longitude, minimum latitude, maximum longitude,
+        and maximum latitude.
+    """
+    lat_min = dataset["y"].min().item()
+    lat_max = dataset["y"].max().item()
+    lon_min = dataset["x"].min().item()
+    lon_max = dataset["x"].max().item()
+    return lon_min, lat_min, lon_max, lat_max
+
+
+def create_grid_polygons(
+    bbox_list: list[list[float]],
+    date: str,
+    chip_size: int,
+    spatial_resolution: int,
+    crs: int,
+) -> gpd.GeoDataFrame:
+    """Create a grid of polygons from a list of bounding boxes.
+
+    Args:
+        bbox_list: list of [lon_min, lat_min, lon_max, lat_max]
+        date: date parameter
+        chip_size: size of each chip in pixels
+        spatial_resolution: spatial resolution in crs units per pixel
+        crs: crs of the bounding boxes
+    Returns:
+        gpd.GeoDataFrame: A GeoDataFrame containing the polygons, labels, and date
+    """
+    obsv_records = []
+
+    for bbox in bbox_list:
+        lon_min, lat_min, lon_max, lat_max = bbox
+
+        lons = np.arange(lon_min, lon_max, spatial_resolution)
+        lats = np.arange(lat_min, lat_max, spatial_resolution)
+
+        # Create xarray Dataset with empty/minimal data
+        ds = xr.Dataset(
+            {
+                "data": (
+                    ["y", "x"],
+                    np.zeros((len(lats), len(lons))),
+                ),  # Empty data array
+            },
+            coords={
+                "x": lons,
+                "y": lats,
+            },
+            attrs={"crs": f"EPSG:{crs}"},
+        )
+        # Calculate the number of chips in each dimension
+        n_chips_x = ds.sizes["x"] // chip_size
+        n_chips_y = ds.sizes["y"] // chip_size
+        chip_count = 0
+        for x in range(n_chips_x):
+            for y in range(n_chips_y):
+                label_chip_filename = f"label_x{x}_y{y}_{date}.tif"
+                # Extract the chip
+                label_chip = ds.isel(
+                    x=slice(x * chip_size, (x + 1) * chip_size),
+                    y=slice(y * chip_size, (y + 1) * chip_size),
+                )
+
+                label_geometry = box(*get_extent(label_chip))
+                obsv_records.append([label_chip_filename, date, label_geometry])
+                chip_count += 1
+
+    obsv_records_gdf = gpd.GeoDataFrame(
+        obsv_records,
+        columns=["label_filename", "date", "geometry"],
+        geometry="geometry",
+        crs=f"EPSG:{crs}",
+    )
+    obsv_records_gdf["geometry_4326"] = obsv_records_gdf["geometry"].to_crs("EPSG:4326")
+    obsv_records_gdf["mgrs_tile_id"] = obsv_records_gdf["geometry_4326"].map(
+        get_polygon_tile_ids
+    )
+    obsv_records_gdf = obsv_records_gdf.explode("mgrs_tile_id", ignore_index=True)
+    return obsv_records_gdf

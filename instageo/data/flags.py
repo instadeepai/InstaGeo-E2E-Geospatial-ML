@@ -9,7 +9,7 @@ flags.DEFINE_integer("chip_size", 256, "Size of each chip.")
 flags.DEFINE_integer("src_crs", 4326, "CRS of the geo-coordinates in `dataframe_path`")
 flags.DEFINE_float(
     "spatial_resolution",
-    8.983152841195215e-05,
+    0.0002694945852358564,
     "Spatial Resolution in the specified CRS",
 )
 flags.DEFINE_string(

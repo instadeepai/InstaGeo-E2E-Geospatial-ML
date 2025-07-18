@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 import ratelimit
+import rioxarray  # noqa
 import stackstac
 import xarray as xr
 from pystac.item import Item
@@ -338,7 +339,7 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
         row_dict: dict[str, Any],
         flags_dict: dict[str, Any],
         tile_dict: dict[str, Any],
-    ) -> None | tuple[str, str]:
+    ) -> None | tuple[str, str | None]:
         """See parent class. Process a single row."""
         label_filename = f"{os.path.splitext(row_dict['label_filename'])[0]}_{row_dict['mgrs_tile_id']}"  # noqa
         chip_filename = label_filename.replace("mask", "merged").replace(
@@ -346,21 +347,28 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
         )
 
         chip_path = os.path.join(self.output_directory, "chips", f"{chip_filename}.tif")
+
         label_path = os.path.join(
             self.output_directory, "seg_maps", f"{label_filename}.tif"
         )
         if os.path.exists(chip_path) and os.path.exists(label_path):
             logging.info(f"Skipping {chip_path} because it's already created")
             return chip_path, label_path
+        if os.path.exists(chip_path) and self.is_bbox_feature:
+            logging.info(f"Skipping {chip_path} because it's already created")
+            return chip_path, None
         try:
             dsb, dsm, _ = self.load_data(tile_dict)
             geometry = shape(row_dict["geometry"])
 
             # Process chip
             chip = geo_utils.slice_xr_dataset(dsb, geometry, chip_size=self.chip_size)
-            seg_map = xr.open_dataarray(
-                os.path.join(self.raster_path, row_dict["label_filename"])
-            )
+            if not self.is_bbox_feature:
+                seg_map = xr.open_dataarray(
+                    os.path.join(self.raster_path, row_dict["label_filename"])
+                )
+            else:
+                seg_map = None
 
             if dsm is not None:
                 chip_mask = geo_utils.slice_xr_dataset(
@@ -376,7 +384,13 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
                     masking_strategy=self.masking_strategy,
                 )
 
-            if (
+            if chip is not None and seg_map is None:
+                # Clip values to valid HLS range (0-10000)
+                chip = chip.clip(min=0, max=10000)
+                chip = chip.where(~np.isnan(chip), NO_DATA_VALUES.HLS).astype(np.uint16)
+                chip.squeeze().rio.to_raster(chip_path)
+                return chip_path, None
+            elif (
                 chip is not None
                 and chip.sizes["x"] == seg_map.sizes["x"]
                 and chip.sizes["y"] == seg_map.sizes["y"]
@@ -385,6 +399,7 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
                 seg_map, chip = xr.align(
                     seg_map, chip, join="override", exclude=["band"]
                 )
+
                 # Clip values to valid HLS range (0-10000)
                 chip = chip.clip(min=0, max=10000)
 
@@ -404,7 +419,7 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
                 seg_map = seg_map.where(
                     ~np.isnan(seg_map), NO_DATA_VALUES.SEG_MAP
                 ).astype(np.uint8 if self.task_type == "seg" else np.float32)
-                chip = chip.where(~np.isnan(chip), 0).astype(np.uint16)
+                chip = chip.where(~np.isnan(chip), NO_DATA_VALUES.HLS).astype(np.uint16)
 
                 seg_map.squeeze().rio.to_raster(label_path)
                 chip.squeeze().rio.to_raster(chip_path)

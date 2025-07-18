@@ -21,6 +21,7 @@
 import json
 import logging as pylogging
 import os
+from datetime import datetime
 from typing import Any
 
 import geopandas as gpd
@@ -28,6 +29,7 @@ import pandas as pd
 from absl import app, flags, logging
 from pystac_client import Client
 
+from instageo.data import geo_utils
 from instageo.data.flags import FLAGS  # Import flags from central location
 from instageo.data.hls_utils import HLSRasterPipeline, add_hls_stac_items
 from instageo.data.s2_utils import S2RasterPipeline, add_s2_stac_items
@@ -63,6 +65,20 @@ flags.DEFINE_bool(
     "qa_check", True, "Whether to perform quality assurance check on chip and seg_map."
 )
 
+flags.DEFINE_bool(
+    "is_bbox_feature",
+    False,
+    "Whether to use a bounding box feature file.",
+)
+
+flags.DEFINE_string(
+    "bbox_feature_path",
+    None,
+    "Path to a JSON file containing a list of bounding boxes.",
+)
+
+flags.DEFINE_string("date", None, "Date of the observations.")
+
 
 def main(argv: Any) -> None:
     """Raster Chip Creator.
@@ -71,7 +87,22 @@ def main(argv: Any) -> None:
     larger satellite tiles which is suitable for training segmentation models.
     """
     del argv
-
+    if FLAGS.is_bbox_feature:
+        with open(FLAGS.bbox_feature_path) as json_file:
+            bb_feature = json.load(json_file)
+        obsv_records = geo_utils.create_grid_polygons(
+            bbox_list=bb_feature,
+            date=FLAGS.date
+            if FLAGS.date
+            else datetime.strftime(datetime.now(), "%d-%m-%Y"),
+            chip_size=FLAGS.chip_size,
+            spatial_resolution=FLAGS.spatial_resolution,
+            crs=FLAGS.src_crs,
+        )
+    else:
+        obsv_records = gpd.read_file(FLAGS.records_file)
+        obsv_records["geometry_4326"] = obsv_records["geometry"].to_crs("EPSG:4326")
+        obsv_records["date"] = pd.to_datetime(obsv_records["date"])
     if FLAGS.data_source == "HLS":
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))
@@ -79,10 +110,6 @@ def main(argv: Any) -> None:
             logging.info("Creating HLS dataset JSON.")
             logging.info("Retrieving HLS tile ID for each observation.")
             os.makedirs(os.path.join(FLAGS.output_directory), exist_ok=True)
-
-            obsv_records = gpd.read_file(FLAGS.records_file)
-            obsv_records["geometry_4326"] = obsv_records["geometry"].to_crs("EPSG:4326")
-            obsv_records["date"] = pd.to_datetime(obsv_records["date"])
 
             client = Client.open(HLS_API.URL)
             obsv_records_with_hls_items = add_hls_stac_items(
@@ -128,6 +155,7 @@ def main(argv: Any) -> None:
             spatial_resolution=FLAGS.spatial_resolution,
             qa_check=FLAGS.qa_check,
             task_type=FLAGS.task_type,
+            is_bbox_feature=FLAGS.is_bbox_feature,
         )
 
         # Run HLS pipeline
