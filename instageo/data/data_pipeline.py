@@ -32,6 +32,7 @@ import geopandas as gpd
 import mgrs
 import numpy as np
 import pandas as pd
+import rasterio  # noqa: F401
 import xarray as xr
 from pyproj import Transformer
 from pystac_client import Client
@@ -76,9 +77,9 @@ def mask_segmentation_map(
         The segmentation map after masking
     """
     if masking_strategy == "each":
-        valid_mask = (chip != chip_no_data_value).any(dim="band").astype(np.uint8)
+        valid_mask = (chip != chip_no_data_value).any(dim="band").astype(np.uint16)
     elif masking_strategy == "any":
-        valid_mask = (chip != chip_no_data_value).all(dim="band").astype(np.uint8)
+        valid_mask = (chip != chip_no_data_value).all(dim="band").astype(np.uint16)
     else:
         raise ValueError(f"Invalid masking strategy: {masking_strategy}")
     seg_no_data_value = NO_DATA_VALUES.SEG_MAP
