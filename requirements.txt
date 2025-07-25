@@ -28,7 +28,7 @@ tomli
 astral
 backoff==2.2.1
 ratelimit==2.2.1
-carbontracker==1.2.5
+codecarbon==3.0.2
 ptflops
 oauthlib==3.2.2
 pynvml==11.0.0

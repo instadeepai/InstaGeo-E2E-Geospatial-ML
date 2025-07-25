@@ -21,12 +21,12 @@
 
 import logging
 from enum import Enum
-from typing import Any, Dict, KeysView, Optional, Tuple
+from typing import Any, KeysView, Optional, Tuple
 
 import torch
 import torch.nn as nn
-from carbontracker import parser
-from carbontracker.tracker import CarbonTracker
+from codecarbon import EmissionsTracker
+from codecarbon.output import EmissionsData
 from neptune import Run
 from ptflops import get_model_complexity_info
 from pytorch_lightning import LightningModule, Trainer
@@ -351,50 +351,36 @@ class CarbonTrackerCallback(Callback):
         self.total_epochs = total_epochs
         self.neptune_run = neptune_run
         self.log_dir = log_dir
-        self.tracker = CarbonTracker(
-            epochs=total_epochs,
-            monitor_epochs=1,
-            components="gpu",
-            log_dir=log_dir,
-            ignore_errors=True,
-        )
-        self.eval_tracker = CarbonTracker(
-            epochs=1,
-            monitor_epochs=1,
-            components="gpu",
-            log_dir=log_dir,
-            ignore_errors=True,
+        self.tracker = EmissionsTracker(
+            measure_power_secs=5, tracking_mode="machine", log_level="error"
         )
 
     def on_train_epoch_start(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         """Start carbon tracking for a training epoch."""
-        self.tracker.epoch_start()
+        self.tracker.start()
 
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """End carbon tracking for a training epoch."""
-        self.tracker.epoch_end()
+        self.tracker.stop()
 
     def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Stop training tracker.
 
         Stop training tracker and log carbon consumption metrics to Neptune if provided.
         """
-        self.tracker.stop()
-
-        logs = parser.parse_all_logs(log_dir=self.log_dir)
-        first_log = logs[0]
-        if self.neptune_run is not None:
-            log_carbon_info(self.neptune_run, first_log)
+        _ = self.tracker.stop()
+        emissions_data = self.tracker._prepare_emissions_data()
+        log_carbon_info(self.neptune_run, emissions_data)
 
     def on_test_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Start carbon tracking for a test epoch."""
-        self.eval_tracker.epoch_start()
+        self.tracker.start()
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """End carbon tracking for a test epoch."""
-        self.eval_tracker.epoch_end()
+        self.tracker.start()
 
     def on_test_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Stop test tracker.
@@ -402,12 +388,9 @@ class CarbonTrackerCallback(Callback):
         Stop test tracker and log carbon metrics to Neptune under `carbon/test/*`.
         Assumes the last parsed log is for test.
         """
-        self.eval_tracker.stop()
-
-        logs = parser.parse_all_logs(log_dir=self.log_dir)
-        test_log = logs[-1]
-        if self.neptune_run is not None:
-            log_carbon_info(self.neptune_run, test_log)
+        _ = self.tracker.stop()
+        emissions_data = self.tracker._prepare_emissions_data()
+        log_carbon_info(self.neptune_run, emissions_data)
 
 
 def log_model_complexity(
@@ -443,19 +426,31 @@ def log_model_complexity(
         neptune_logger.experiment["model/params"] = params
 
 
-def log_carbon_info(neptune_run: Optional[Run], first_log: Dict[str, Any]) -> None:
+def log_carbon_info(neptune_run: Optional[Run], emissions_data: EmissionsData) -> None:
     """Logs carbon tracking information to Neptune.
 
     Args:
         neptune_run: Neptune run object (e.g., self.neptune_run).
-        first_log (dict): Dictionary containing carbon log data.
+        emissions_data: EmissionsData object containing carbon log data.
     """
     if neptune_run is not None:
         run = neptune_run.experiment
 
-        run["carbon/output_filename"] = first_log["output_filename"]
-        run["carbon/standard_filename"] = first_log["standard_filename"]
-        run["carbon/early_stop"] = first_log["early_stop"]
-        run["carbon/actual"] = first_log["actual"]
-        run["carbon/pred"] = first_log["pred"]
-        run["carbon/components"] = first_log["components"]["gpu"]["devices"]
+        run["carbon/emissions (g CO₂)"] = 1000 * emissions_data.emissions
+        run["carbon/duration (s)"] = emissions_data.duration
+        run["carbon/emissions_rate (g CO₂/s)"] = 1000 * emissions_data.emissions_rate
+        run["carbon/cpu_power (W)"] = emissions_data.cpu_power
+        run["carbon/gpu_power (W)"] = emissions_data.gpu_power
+        run["carbon/ram_power (W)"] = emissions_data.ram_power
+        run["carbon/cpu_energy (kWh)"] = emissions_data.cpu_energy
+        run["carbon/gpu_energy (kWh)"] = emissions_data.gpu_energy
+        run["carbon/ram_energy (kWh)"] = emissions_data.ram_energy
+        run["carbon/energy_consumed (kWh)"] = emissions_data.energy_consumed
+        run["carbon/cpu_count"] = emissions_data.cpu_count
+        run["carbon/cpu_model"] = emissions_data.cpu_model
+        run["carbon/gpu_count"] = emissions_data.gpu_count
+        run["carbon/gpu_model"] = emissions_data.gpu_model
+        run["carbon/ram_total_size"] = emissions_data.ram_total_size
+        run["carbon/tracking_mode"] = emissions_data.tracking_mode
+        run["carbon/on_cloud"] = emissions_data.on_cloud
+        run["carbon/pue"] = emissions_data.pue
