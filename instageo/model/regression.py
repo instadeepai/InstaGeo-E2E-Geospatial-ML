@@ -517,12 +517,15 @@ class PrithviDistillationRegressionModule(
             torch.Tensor: The loss value for the batch.
         """
         inputs, labels = batch
+        mask = labels.ne(self.ignore_index)
         with torch.no_grad():
             teacher_outputs = self.teacher.net(inputs)
         if self.use_log_scale:
             labels = self.log_scaler.transform(labels)
+            teacher_outputs = self.log_scaler.transform(teacher_outputs)
+            # TODO: Account for teachers trained on log scale. We will need to
+            # skip the log scale transformation for the teacher outputs.
         student_outputs = self.net(inputs)
-        mask = labels.ne(self.ignore_index)
         student_outputs = student_outputs.squeeze(1)[mask]
         teacher_outputs = teacher_outputs.squeeze(1)[mask]
         labels = labels[mask]

@@ -241,6 +241,17 @@ def create_prithvi(
             state_dict = checkpoint_filter_fn_vit(
                 state_dict, model, pretrained_bands, model_bands
             )
+
+            # Only keep blocks from 0 to depth-1
+            state_dict = {
+                k: v
+                for k, v in state_dict.items()
+                if not k.startswith("blocks.")
+                or (
+                    k.startswith("blocks.")
+                    and int(k.split(".")[1]) < model_args["depth"]
+                )
+            }
             model.load_state_dict(state_dict, strict=True)
         except RuntimeError as e:
             log.error(f"Failed to load the pre-trained weights for {variant}.")
