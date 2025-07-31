@@ -1,21 +1,21 @@
 const BASE_PARAMS = {
-    temporalTolerance: 3,
-    chipSize: 224,
-    cloudCover: 20,
+    temporal_tolerance: 3,
+    chip_size: 224,
+    cloud_coverage: 20,
     date: new Date().toISOString().split('T')[0],
-    satelliteSource: 'HLS'
+    data_source: 'HLS'
 };
 
 export const MODEL_CONFIGS = {
     aod: {
         ...BASE_PARAMS,
-        temporalStep: 0,
-        numSteps: 1
+        temporal_step: 0,
+        num_steps: 1
     },
     locust: {
         ...BASE_PARAMS,
-        temporalStep: 30,
-        numSteps: 3
+        temporal_step: 30,
+        num_steps: 3
     }
 };
 

@@ -178,7 +178,30 @@ const TasksMonitor = ({ open, onClose }) => {
     };
 
     const formatDate = (dateString) => {
-        return new Date(dateString).toLocaleString();
+        if (!dateString) return 'N/A';
+
+        const date = new Date(dateString);
+
+        return date.toLocaleString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+    };
+
+    const formatDateOnly = (dateString) => {
+        if (!dateString) return 'N/A';
+
+        const date = new Date(dateString);
+
+        return date.toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
     };
 
     const getTaskProgress = (task) => {
@@ -349,7 +372,7 @@ const TasksMonitor = ({ open, onClose }) => {
                                         Bounding Boxes
                                     </Typography>
                                     <Typography variant="body2">
-                                        {task.bounding_boxes_count}
+                                        {task.bboxes_count}
                                     </Typography>
                                 </Grid>
                                 <Grid item xs={12} md={2}>
@@ -441,9 +464,55 @@ const TasksMonitor = ({ open, onClose }) => {
                                                         )}
 
                                                         {stageData.result && (
-                                                            <Typography variant="caption" display="block" sx={{ mt: 1 }}>
-                                                                Result: {JSON.stringify(stageData.result).slice(0, 100)}...
-                                                            </Typography>
+                                                            <Box sx={{ mt: 1 }}>
+                                                                {stageName === 'data_processing' && stageData.result.chips_created && (
+                                                                    <>
+                                                                        <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'success.main' }}>
+                                                                            ✅ Chips Created: {stageData.result.chips_created}
+                                                                        </Typography>
+
+                                                                        {/* Additional data extraction metrics */}
+                                                                        {stageData.result.chip_size && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                📐 Chip Size: {stageData.result.chip_size} x {stageData.result.chip_size} pixels
+                                                                            </Typography>
+                                                                        )}
+
+                                                                        {stageData.result.processing_duration && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                ⏱️ Extraction Duration: {stageData.result.processing_duration}
+                                                                            </Typography>
+                                                                        )}
+
+
+                                                                        {stageData.result.data_source && stageData.result.data_source !== 'unknown' && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                🛰️ Source: {stageData.result.data_source}
+                                                                            </Typography>
+                                                                        )}
+
+                                                                        {stageData.result.target_date && stageData.result.target_date !== 'unknown' && stageData.result.temporal_tolerance && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                📅 Target Date: {formatDateOnly(stageData.result.target_date)} (±  📅 {stageData.result.temporal_tolerance} days)
+                                                                            </Typography>
+                                                                        )}
+
+                                                                        {stageData.result.bboxes_processed && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                📍 Bounding Boxes Processed: {stageData.result.bboxes_processed}
+                                                                            </Typography>
+                                                                        )}
+
+                                                                    </>
+                                                                )}
+                                                                {/* Fallback for other results */}
+                                                                {!(stageName === 'data_processing' && (stageData.result.chips_created || stageData.result.processing_date)) &&
+                                                                 !(stageName === 'model_prediction' && stageData.result.aod_values) && (
+                                                                    <Typography variant="caption" display="block">
+                                                                        Result: {JSON.stringify(stageData.result).slice(0, 100)}...
+                                                                    </Typography>
+                                                                )}
+                                                            </Box>
                                                         )}
                                                     </CardContent>
                                                 </Card>

@@ -1,24 +1,61 @@
-FROM python:3.10-slim
+FROM ubuntu:latest
 
-# Set working directory
+# Avoid unnecessary writes to disk
+ENV LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+# Install system-level dependencies required by geospatial Python libraries
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    gdal-bin \
+    libgdal-dev \
+    libspatialindex-dev \
+    libproj-dev \
+    python3-dev \
+    python3-pip \
+    python3-venv \
+    curl \
+    && rm -rf /var/lib/{apt,dpkg,cache,log}
+
+
+# Set environment variables for GDAL
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+ENV GDAL_DATA=/usr/share/gdal
+
+# Create a working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Declare build arguments
+ARG DATA_FOLDER
+ARG EARTHDATA_USERNAME
+ARG EARTHDATA_PASSWORD
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Add data folder arg as an environment variable
+ENV DATA_FOLDER=${DATA_FOLDER}
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Add earthdata credentials as environment variables
+ENV EARTHDATA_USERNAME=${EARTHDATA_USERNAME}
+ENV EARTHDATA_PASSWORD=${EARTHDATA_PASSWORD}
 
-# Copy application code
-COPY app/ ./app/
+# Create and activate a virtual environment
+ENV VENV_PATH="/opt/instageo-venv"
+RUN python3 -m venv $VENV_PATH
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
+# Use the virtualenv for all future commands
+ENV PATH="$VENV_PATH/bin:$PATH"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+COPY setup.py setup.cfg pyproject.toml ./
+COPY instageo ./instageo
+
+RUN pip install --upgrade pip
+RUN pip install -e .[all]
+
+RUN chown -R ubuntu:ubuntu /app
+RUN mkdir -p ${DATA_FOLDER} && chown -R ubuntu:ubuntu ${DATA_FOLDER}
+USER ubuntu
+
+# Add earthdata credentials in .netrc file
+RUN echo machine urs.earthdata.nasa.gov login ${EARTHDATA_USERNAME} password ${EARTHDATA_PASSWORD} >> ~/.netrc
+
+CMD ["bash"]

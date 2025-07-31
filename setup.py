@@ -24,6 +24,9 @@ data_dependencies = [
     "cartopy==0.24.1",
     "seaborn==0.13.2",
     "scikit-learn==1.6.0",
+    "backoff==2.2.1",
+    "ratelimit==2.2.1",
+    "astral==3.2",
 ]
 model_dependencies = [
     # Add dependencies specific to the model component

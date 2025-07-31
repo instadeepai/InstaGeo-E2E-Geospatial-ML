@@ -26,7 +26,7 @@ const ControlPanel = ({ open, onClose, onModelChange, onParamsChange, hasBoundin
   };
 
   const handleSatelliteSourceChange = (event) => {
-    handleParamChange('satelliteSource', event.target.value);
+    handleParamChange('data_source', event.target.value);
   };
 
   const renderSlider = (label, param, min, max, step = 1) => (
@@ -123,7 +123,7 @@ const ControlPanel = ({ open, onClose, onModelChange, onParamsChange, hasBoundin
         <FormControl fullWidth sx={{ mb: 3 }}>
           <InputLabel>Satellite Source</InputLabel>
           <Select
-            value={params.satelliteSource}
+            value={params.data_source}
             label="Satellite Source"
             onChange={handleSatelliteSourceChange}
           >
@@ -133,7 +133,7 @@ const ControlPanel = ({ open, onClose, onModelChange, onParamsChange, hasBoundin
           </Select>
         </FormControl>
 
-        {renderSlider('Temporal Tolerance (days)', 'temporalTolerance', 1, 30)}
+        {renderSlider('Temporal Tolerance (days)', 'temporal_tolerance', 1, 30)}
 
         {model === 'aod' ? (
           <>
@@ -166,12 +166,12 @@ const ControlPanel = ({ open, onClose, onModelChange, onParamsChange, hasBoundin
           </>
         ) : (
           <>
-            {renderSlider('Number of Steps', 'numSteps', 1, 10)}
-            {renderSlider('Temporal Step (days)', 'temporalStep', 1, 90)}
+            {renderSlider('Number of Steps', 'num_steps', 1, 10)}
+            {renderSlider('Temporal Step (days)', 'temporal_step', 1, 90)}
           </>
         )}
 
-        {renderSlider('Maximum Cloud Cover', 'cloudCover', 0, 100)}
+        {renderSlider('Maximum Cloud Cover', 'cloud_coverage', 0, 100)}
 
         <Button
           variant="contained"

@@ -8,24 +8,15 @@ This is the backend service for the InstaGeo application, providing API endpoint
 1. **Data Processing**: Extract satellite data from bounding boxes
 2. **Model Prediction**: Run models
 
-Each task has a unique ID and progresses through stages automatically.
+Each task has a unique ID and progresses through stages automatically. Tasks are managed using Redis for persistence and RQ (Redis Queue) for job processing.
 
-## Quick Start
+### Key Components
 
-### Using Docker (Recommended)
+- **DataProcessor**: Proxy class that integrates with the `instageo.data.raster_chip_creator` pipeline
+- **Task Management**: Redis-backed task tracking with stage-based progression
+- **Job Queues**: Separate RQ queues for data processing and model prediction
+- **Error Handling**: Comprehensive error tracking and recovery
 
-```bash
-cd instageo/new_apps
-docker-compose -f docker-compose.dev.yml up -d
-```
-
-### Manual Setup
-
-```bash
-cd backend
-pip install -r requirements.txt
-python -m app.main
-```
 
 ## Services
 
@@ -41,13 +32,19 @@ python -m app.main
 ```bash
 POST /api/run-model
 {
-  "bounding_boxes": [
-    {
-      "coordinates": [[116.0, 39.0, 116.5, 39.5]],
-      "date": "2024-01-01"
-    }
+  "bboxes": [
+    [116.0, 39.0, 116.5, 39.5],
+    [-74.1, 40.6, -73.9, 40.8],
+    [2.2, 48.8, 2.4, 49.0]
   ],
-  "parameters": {"test": true}
+  "model_type": "aod_estimation",
+  "date": "2024-06-01",
+  "chip_size": 256,
+  "cloud_coverage": 15,
+  "num_steps": 5,
+  "data_source": "S2",
+  "temporal_step": 10,
+  "temporal_tolerance": 3
 }
 ```
 
@@ -85,6 +82,9 @@ GET /api/queues/status
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
+EARTHDATA_USERNAME=xxxxxxx
+EARTHDATA_PASSWORD=xxxxxxx
+DATA_FOLDER=/app/instageo-data
 DATA_PROCESSING_WORKER_REPLICAS=2
 MODEL_PREDICTION_WORKER_REPLICAS=2
 ```

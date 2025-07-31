@@ -95,6 +95,13 @@ REDIS_HOST=instageo-redis
 REDIS_PORT=6379
 REDIS_DB=0
 
+# EarthData credentials
+EARTHDATA_USERNAME=xxxxxxx
+EARTHDATA_PASSWORD=xxxxxxx
+
+# Storage folder
+DATA_FOLDER=/app/instageo-data
+
 # Worker Configuration
 DATA_PROCESSING_WORKER_REPLICAS=2
 MODEL_PREDICTION_WORKER_REPLICAS=2
@@ -117,17 +124,11 @@ REACT_APP_INSTAGEO_BACKEND_API_BASE_URL=http://localhost
 ```
 
 ## Development
-
 ### Docker Development
+Navigate at the root directory of the project and run
 ```bash
 # Start all services
-./start.sh
-
-# View logs
-docker-compose logs -f
-
-# Scale workers
-docker-compose up -d --scale instageo-backend-data-processing-worker=4
+./start_app_stack.sh
 ```
 
 ## Monitoring
@@ -139,17 +140,38 @@ Access at http://localhost:9181 to:
 - Check job history
 - Restart failed jobs
 
-### Logs
-```bash
-# All services
-docker-compose logs -f
+### Useful Commands (from the root directory of the project)
 
-# Specific service
-docker-compose logs -f instageo-frontend
-# or
-# docker-compose logs -f instageo-backend-api
-# docker-compose logs -f instageo-backend-data-processing-worker
+```bash
+# View all service logs
+docker-compose -f instageo/new_apps/docker-compose.dev.yml logs -f
+
+# View specific service logs
+docker-compose -f instageo/new_apps/docker-compose.dev.yml logs -f instageo-backend-api
+docker-compose -f instageo/new_apps/docker-compose.dev.yml logs -f instageo-frontend
+
+# Stop services
+docker-compose -f instageo/new_apps/docker-compose.dev.yml down
+
+# Restart all services
+docker-compose -f instageo/new_apps/docker-compose.dev.yml restart
+
+# Restart specific service
+docker-compose -f instageo/new_apps/docker-compose.dev.yml restart instageo-backend-api
+
+# Scale data processing workers
+docker-compose -f instageo/new_apps/docker-compose.dev.yml up -d --scale instageo-backend-data-processing-worker=4
+
+# Scale model prediction workers
+docker-compose -f instageo/new_apps/docker-compose.dev.yml up -d --scale instageo-backend-model-prediction-worker=4
+
+# Rebuild and restart services
+docker-compose -f instageo/new_apps/docker-compose.dev.yml up -d --build
+
+# Check service status
+docker-compose -f instageo/new_apps/docker-compose.dev.yml ps
 ```
+
 
 ## Troubleshooting
 
@@ -172,51 +194,54 @@ docker-compose logs -f instageo-frontend
    - This is now fixed: all fields are stored as strings, never as `None`.
    - If you see this error, ensure you are not passing `None` to Redis in your own code.
 
-### Scaling
-
-```bash
-# Scale data processing workers
-docker-compose up -d --scale instageo-backend-data-processing-worker=4
-
-# Scale model prediction workers
-docker-compose up -d --scale instageo-backend-model-prediction-worker=4
-```
 
 ## Project Structure
 
 ```
-new_apps/
-├── backend/                 # FastAPI backend
-│   ├── app/                # Application code
-│   │   ├── main.py         # FastAPI application
-│   │   ├── tasks.py        # Task management
-│   │   ├── jobs.py         # Job queue handling
-│   │   └── __init__.py     # Package initialization
-│   ├── tests/              # Backend tests
-│   │   └── test_api.py     # API endpoint tests
-│   ├── Dockerfile          # Backend container
-│   ├── requirements.txt    # Python dependencies
-│   ├── config.env.example  # Environment template
-│   ├── README.md           # Backend documentation
-│   └── .gitignore          # Backend git ignore rules
-├── frontend/               # React frontend
-│   ├── src/               # Source code
-│   │   ├── components/    # React components
-│   │   │   ├── BoundingBoxInfo.js
-│   │   │   ├── ControlPanel.js
-│   │   │   ├── MapComponent.js
-│   │   │   └── TaskResultPopup.js
-│   │   ├── config.js      # Application configuration
-│   │   ├── constants.js   # Shared constants
-│   │   ├── index.js       # Application entry point
-│   │   └── App.js         # Main application component
-│   ├── public/            # Static files
-│   ├── Dockerfile.dev     # Development container
-│   ├── package.json       # Node dependencies
-│   ├── README.md          # Frontend documentation
-│   └── .gitignore         # Frontend git ignore rules
-├── nginx.conf              # Nginx reverse proxy config
-├── docker-compose.dev.yml  # Development services
-├── start.sh                # Startup script
-└── README.md               # This file
+InstaGeo/                           # Root project directory
+├── start_app_stack.sh              # Main startup script for app
+├── instageo/                       # Core InstaGeo package
+│   ├── data/                       # Data processing modules
+│   │   └── ...
+│   ├── model/                      # Model implementations
+│   │   └── ...
+│   └── new_apps/                   # Full-stack application
+│       ├── backend/                # FastAPI backend
+│       │   ├── app/               # Application code
+│       │   │   ├── main.py        # FastAPI application
+│       │   │   ├── tasks.py       # Task management
+│       │   │   ├── jobs.py        # Job queue handling
+│       │   │   ├── data_processor.py  # Data pipeline integration
+│       │   │   └── __init__.py    # Package initialization
+│       │   ├── tests/             # Backend tests
+│       │   │   └── test_api.py    # API endpoint tests
+│       │   ├── Dockerfile         # Backend container
+│       │   ├── requirements.txt   # Python dependencies
+│       │   ├── config.env.example # Environment template
+│       │   └── README.md          # Backend documentation
+│       ├── frontend/              # React frontend
+│       │   ├── src/              # Source code
+│       │   │   ├── components/   # React components
+│       │   │   │   ├── BoundingBoxInfo.js
+│       │   │   │   ├── ControlPanel.js
+│       │   │   │   ├── MapComponent.js
+│       │   │   │   ├── TaskResultPopup.js
+│       │   │   │   └── TasksMonitor.js  # Task monitoring
+│       │   │   ├── config.js     # Application configuration
+│       │   │   ├── constants.js  # Shared constants
+│       │   │   ├── index.js      # Application entry point
+│       │   │   └── App.js        # Main application component
+│       │   ├── public/           # Static files
+│       │   ├── Dockerfile.dev    # Development container
+│       │   ├── package.json      # Node dependencies
+│       │   └── .env.example      # Environment template
+│       ├── nginx.conf            # Reverse proxy configuration
+│       ├── docker-compose.dev.yml # Development services
+│       ├── restart-nginx-on-deps.sh # Nginx restart utility
+│       └── README.md             # This file
+├── experiments/                    # Research experiments
+│   └── ...
+├── tests/                          # Project tests
+│   └── ...
+└── ...                             # Other project files
 ```

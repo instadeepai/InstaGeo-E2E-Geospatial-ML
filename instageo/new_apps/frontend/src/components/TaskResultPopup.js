@@ -158,7 +158,9 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
             }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     {getStatusIcon(result.status)}
-                    <Typography variant="h6">Task Submitted Successfully</Typography>
+                    <Typography variant="h6">
+                        {result.status === 'failed' ? 'Task Failed' : 'Task Submitted Successfully'}
+                    </Typography>
                 </Box>
                 <IconButton onClick={onClose} size="small">
                     <CloseIcon />
@@ -167,9 +169,11 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
 
             <DialogContent>
                 <Box sx={{ mb: 3 }}>
-                    <Alert severity="success" sx={{ mb: 2 }}>
+                    <Alert severity={result.status === 'failed' ? 'error' : 'success'} sx={{ mb: 2 }}>
                         <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
-                            {result.message || 'Your task has been submitted successfully!'}
+                            {result.status === 'failed'
+                                ? (result.message || 'Task failed. Please check the details in the tasks monitor panel or try again.')
+                                : (result.message || 'Your task has been submitted successfully!')}
                         </Typography>
                     </Alert>
                 </Box>

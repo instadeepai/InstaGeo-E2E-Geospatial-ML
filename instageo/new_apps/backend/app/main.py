@@ -36,29 +36,26 @@ redis_conn: Any = redis.Redis(
 )
 
 
-class BoundingBox(BaseModel):
-    """Bounding box model."""
+class TaskCreationRequest(BaseModel):
+    """Request model for task creation through run-model endpoint."""
 
-    coordinates: List[
-        List[float]
-    ]  # [[lon_min_1, lat_min_1, lon_max_1, lat_max_1], ...]
+    bboxes: List[List[float]]
+    model_type: str
     date: str
+    chip_size: Optional[int] = None
+    cloud_coverage: Optional[int] = None
+    num_steps: Optional[int] = None
+    data_source: Optional[str] = None
+    temporal_step: Optional[int] = None
+    temporal_tolerance: Optional[int] = None
 
 
-class ProcessDataRequest(BaseModel):
-    """Request model for process-data endpoint."""
-
-    bounding_boxes: List[BoundingBox]
-    parameters: Optional[Dict[str, Any]] = None
-
-
-class ProcessDataResponse(BaseModel):
-    """Response model for process-data endpoints."""
+class TaskCreationResponse(BaseModel):
+    """Response model for task creation."""
 
     status: str
     task_id: Optional[str] = None
     message: Optional[str] = None
-    error: Optional[str] = None
 
 
 class TaskStatusResponse(BaseModel):
@@ -69,7 +66,7 @@ class TaskStatusResponse(BaseModel):
     created_at: str
     data_processing_job_id: Optional[str] = None
     model_prediction_job_id: Optional[str] = None
-    bounding_boxes: Optional[List[Dict[str, Any]]] = None
+    bboxes: Optional[List[List[float]]] = None
     parameters: Optional[Dict[str, Any]] = None
     stages: Dict[str, Any]
 
@@ -80,38 +77,30 @@ async def root() -> Dict[str, str]:
     return {"message": "Welcome to InstaGeo API"}
 
 
-@app.post("/api/run-model", response_model=ProcessDataResponse)
-async def process_data(request: ProcessDataRequest) -> ProcessDataResponse:
+@app.post("/api/run-model", response_model=TaskCreationResponse)
+async def create_task(task_request: TaskCreationRequest) -> TaskCreationResponse:
     """Submit a task for data processing and model prediction."""
     try:
-        logger.info(
-            f"Received request with {len(request.bounding_boxes)} bounding boxes"
-        )
-
-        # Convert Pydantic models to dictionaries
-        bounding_boxes = [bbox.model_dump() for bbox in request.bounding_boxes]
-        logger.info(f"Converted bounding boxes: {bounding_boxes}")
-
+        logger.info(f"Received task creation request: {task_request}")
         # Generate task ID
         task_id = str(uuid.uuid4())
 
         # Create task instance (this automatically starts data processing)
         task = Task(
             task_id=task_id,
-            bounding_boxes=bounding_boxes,
-            parameters=request.parameters,
+            bboxes=task_request.bboxes,
+            parameters=task_request.model_dump(exclude={"bboxes"}),
         )
-
         logger.info(f"Created task with ID: {task_id}")
 
-        return ProcessDataResponse(
+        return TaskCreationResponse(
             status=task.status,
             task_id=task_id,
             message="Task submitted successfully. Data processing will start automatically.",
         )
 
     except Exception as e:
-        logger.error(f"Error in process_data endpoint: {str(e)}")
+        logger.error(f"Error in task creation process: {str(e)}")
         import traceback
 
         traceback.print_exc()
@@ -127,13 +116,13 @@ async def get_task_status_endpoint(task_id: str) -> TaskStatusResponse:
             task_id=task.task_id,
             status=task.status,
             created_at=task.created_at,
-            data_processing_job_id=task.data_processing_job.job_id
-            if task.data_processing_job
-            else None,
-            model_prediction_job_id=task.model_prediction_job.job_id
-            if task.model_prediction_job
-            else None,
-            bounding_boxes=task.bounding_boxes,
+            data_processing_job_id=(
+                task.data_processing_job.job_id if task.data_processing_job else None
+            ),
+            model_prediction_job_id=(
+                task.model_prediction_job.job_id if task.model_prediction_job else None
+            ),
+            bboxes=task.bboxes,
             parameters=task.parameters,
             stages=task.stages,
         )
@@ -161,10 +150,12 @@ async def get_all_tasks() -> List[Dict[str, Any]]:
                         "task_id": task.task_id,
                         "status": task.status,
                         "created_at": task.created_at,
-                        "bounding_boxes_count": len(task.bounding_boxes),
-                        "model_type": task.parameters.get("model_type", "unknown")
-                        if task.parameters
-                        else "unknown",
+                        "bboxes_count": len(task.bboxes),
+                        "model_type": (
+                            task.parameters.get("model_type", "unknown")
+                            if task.parameters
+                            else "unknown"
+                        ),
                         "stages": task.stages,
                     }
                 )

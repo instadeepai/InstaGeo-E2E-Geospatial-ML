@@ -1,3 +1,13 @@
+# Define a reusable block for backend services
+x-instageo-backend-service-defaults: &backend-defaults
+  environment:
+    - REDIS_HOST=instageo-redis
+    - REDIS_PORT=6379
+    - REDIS_DB=0
+  volumes:
+    - ../../instageo:/app/instageo
+    - shared-data:${DATA_FOLDER}
+
 services:
   instageo-redis:
     image: redis:8-alpine
@@ -8,57 +18,46 @@ services:
     command: redis-server --appendonly yes
 
   instageo-backend-api:
-    build: ./backend
+    <<: *backend-defaults
+    build:
+      context: ../..         # Project root
+      dockerfile: instageo/new_apps/backend/Dockerfile
+      args:
+        DATA_FOLDER: ${DATA_FOLDER}
+        EARTHDATA_USERNAME: ${EARTHDATA_USERNAME}
+        EARTHDATA_PASSWORD: ${EARTHDATA_PASSWORD}
+    image: instageo-backend:dev
+    depends_on:
+      - instageo-redis
     ports:
       - "8000:8000"
-    environment:
-      - REDIS_HOST=instageo-redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-    depends_on:
-      - instageo-redis
-    volumes:
-      - ./backend/app:/app/app  # For development hot-reload
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn instageo.new_apps.backend.app.main:app --host 0.0.0.0 --port 8000 --reload
 
   instageo-backend-data-processing-worker:
-    build: ./backend
-    environment:
-      - REDIS_HOST=instageo-redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
+    <<: *backend-defaults
+    image: instageo-backend:dev
     depends_on:
-      - instageo-redis
-    volumes:
-      - ./backend/app:/app/app  # For development hot-reload
-    command: rq worker data-processing
+      - instageo-backend-api
     deploy:
-      replicas: ${DATA_PROCESSING_WORKER_REPLICAS:-2}  # Default 2 workers, can be overridden
+      replicas: ${DATA_PROCESSING_WORKER_REPLICAS:-2}
+    command: rq worker data-processing
 
   instageo-backend-model-prediction-worker:
-    build: ./backend
-    environment:
-      - REDIS_HOST=instageo-redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
+    <<: *backend-defaults
+    image: instageo-backend:dev
     depends_on:
-      - instageo-redis
-    volumes:
-      - ./backend/app:/app/app  # For development hot-reload
-    command: rq worker model-prediction
+      - instageo-backend-api
     deploy:
-      replicas: ${MODEL_PREDICTION_WORKER_REPLICAS:-2}  # Default 2 workers, can be overridden
+      replicas: ${MODEL_PREDICTION_WORKER_REPLICAS:-2}
+    command: rq worker model-prediction
 
   instageo-backend-rq-dashboard:
-    build: ./backend
+    <<: *backend-defaults
+    image: instageo-backend:dev
     ports:
       - "9181:9181"
-    environment:
-      - REDIS_HOST=instageo-redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
     depends_on:
-      - instageo-redis
+      - instageo-backend-api
     command: sh -c "rq-dashboard --redis-url redis://$$REDIS_HOST:$$REDIS_PORT/$$REDIS_DB --port 9181"
 
   instageo-frontend:
@@ -89,3 +88,4 @@ services:
 
 volumes:
   redis_data:
+  shared-data:

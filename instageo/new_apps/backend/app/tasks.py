@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import redis  # type: ignore
 
+from .data_processor import DataProcessor
 from .jobs import Job, JobStatus
 
 # Configure logging
@@ -18,6 +19,11 @@ redis_conn: Any = redis.Redis(
     host=os.getenv("REDIS_HOST", "localhost"),
     port=int(os.getenv("REDIS_PORT", 6379)),
     db=int(os.getenv("REDIS_DB", 0)),
+)
+
+# Initialize data processor
+data_processor = DataProcessor(
+    base_output_dir=os.getenv("DATA_FOLDER", "/app/instageo-data")
 )
 
 
@@ -36,7 +42,7 @@ class Task:
     def __init__(
         self,
         task_id: str,
-        bounding_boxes: List[Dict[str, Any]],
+        bboxes: List[List[float]],
         parameters: Optional[Dict[str, Any]] = None,
         created_at: Optional[str] = None,
         is_new: bool = True,
@@ -45,25 +51,30 @@ class Task:
 
         Args:
             task_id: Unique task identifier.
-            bounding_boxes: List of bounding box dictionaries.
+            bboxes: List of bounding box dictionaries.
             parameters: Optional processing parameters.
             created_at: Task creation timestamp.
             is_new: If True, start jobs and save; if False, just initialize for loading.
         """
         logger.debug(
-            f"Creating Task {task_id} with bounding_boxes: {bounding_boxes}, "
+            f"Creating Task {task_id} with bboxes: {bboxes}, "
             f"parameters: {parameters}, is_new={is_new}"
         )
 
         self.task_id = task_id
-        self.bounding_boxes = bounding_boxes
+        self.bboxes = bboxes
         self.parameters = parameters or {}
-        self.created_at = created_at or datetime.now().isoformat()
+        self.created_at = created_at or datetime.utcnow().isoformat() + "Z"
         # Store timestamp for efficient Redis sorting
-        self.created_timestamp = datetime.fromisoformat(self.created_at).timestamp()
+        # Handle timezone-aware timestamp for Redis sorting
+        self.created_timestamp = (
+            datetime.fromisoformat(self.created_at[:-1])
+            .replace(tzinfo=None)
+            .timestamp()
+        )
 
         logger.debug(
-            f"Task {task_id} initialized with self.bounding_boxes: {self.bounding_boxes}, "
+            f"Task {task_id} initialized with self.bboxes: {self.bboxes}, "
             f"self.parameters: {self.parameters}"
         )
 
@@ -97,7 +108,7 @@ class Task:
             self.start_data_processing()
             # Save task to Redis (after jobs are set up)
             logger.debug(
-                f"Task {task_id} saving to Redis with self.bounding_boxes: {self.bounding_boxes}, "
+                f"Task {task_id} saving to Redis with self.bboxes: {self.bboxes}, "
                 f"self.parameters: {self.parameters}"
             )
             self.save()
@@ -106,17 +117,17 @@ class Task:
         """Save task to Redis."""
         task_meta = {
             "task_id": self.task_id,
-            "bounding_boxes": json.dumps(self.bounding_boxes),
+            "bboxes": json.dumps(self.bboxes),
             "parameters": json.dumps(self.parameters),
             "status": self.status,
             "created_at": self.created_at,
             "created_timestamp": self.created_timestamp,
-            "data_processing_job_id": self.data_processing_job.job_id
-            if self.data_processing_job
-            else "",
-            "model_prediction_job_id": self.model_prediction_job.job_id
-            if self.model_prediction_job
-            else "",
+            "data_processing_job_id": (
+                self.data_processing_job.job_id if self.data_processing_job else ""
+            ),
+            "model_prediction_job_id": (
+                self.model_prediction_job.job_id if self.model_prediction_job else ""
+            ),
         }
 
         # Store task metadata in Redis
@@ -131,9 +142,9 @@ class Task:
                 "status": stage_data["status"],
                 "started_at": stage_data["started_at"] or "",
                 "completed_at": stage_data["completed_at"] or "",
-                "result": json.dumps(stage_data["result"])
-                if stage_data["result"]
-                else "",
+                "result": (
+                    json.dumps(stage_data["result"]) if stage_data["result"] else ""
+                ),
                 "error": stage_data["error"] or "",
             }
             redis_conn.hset(stage_key, mapping=updates)
@@ -157,13 +168,13 @@ class Task:
                     value = None
                 elif key == "parameters":
                     value = {}
-                elif key == "bounding_boxes":
+                elif key == "bboxes":
                     value = []
             # Handle numeric fields
             elif key == "created_timestamp" and value:
                 value = float(value)
             # Parse JSON fields
-            if key in ["bounding_boxes", "parameters"] and value not in [None, [], {}]:
+            if key in ["bboxes", "parameters"] and value not in [None, [], {}]:
                 try:
                     if isinstance(value, str):
                         parsed = json.loads(value)
@@ -176,7 +187,7 @@ class Task:
             else:
                 setattr(self, key, value)
         logger.debug(
-            f"Task {self.task_id} after load: bounding_boxes={self.bounding_boxes}, "
+            f"Task {self.task_id} after load: bboxes={self.bboxes}, "
             f"parameters={self.parameters}"
         )
         # Load job instances if job IDs exist
@@ -241,11 +252,13 @@ class Task:
         """
         self.status = TaskStatus.DATA_PROCESSING
         self.stages["data_processing"]["status"] = JobStatus.RUNNING
-        self.stages["data_processing"]["started_at"] = datetime.now().isoformat()
+        self.stages["data_processing"]["started_at"] = (
+            datetime.utcnow().isoformat() + "Z"
+        )
 
         # Create and enqueue data processing job
         self.data_processing_job = Job.create_data_processing(
-            self.task_id, self.bounding_boxes, self.parameters
+            self.task_id, self.bboxes, self.parameters
         )
         job_id = self.data_processing_job.enqueue(timeout="2h")
 
@@ -264,7 +277,9 @@ class Task:
         """
         self.status = TaskStatus.MODEL_PREDICTION
         self.stages["model_prediction"]["status"] = JobStatus.RUNNING
-        self.stages["model_prediction"]["started_at"] = datetime.now().isoformat()
+        self.stages["model_prediction"]["started_at"] = (
+            datetime.utcnow().isoformat() + "Z"
+        )
 
         # Create and enqueue model prediction job
         self.model_prediction_job = Job.create_model_prediction(
@@ -295,7 +310,7 @@ class Task:
         self.stages[stage]["status"] = (
             JobStatus.FAILED if error else JobStatus.COMPLETED
         )
-        self.stages[stage]["completed_at"] = datetime.now().isoformat()
+        self.stages[stage]["completed_at"] = datetime.utcnow().isoformat() + "Z"
         self.stages[stage]["result"] = result
         self.stages[stage]["error"] = error
 
@@ -345,13 +360,13 @@ class Task:
             "task_id": self.task_id,
             "status": self.status,
             "created_at": self.created_at,
-            "data_processing_job_id": self.data_processing_job.job_id
-            if self.data_processing_job
-            else None,
-            "model_prediction_job_id": self.model_prediction_job.job_id
-            if self.model_prediction_job
-            else None,
-            "bounding_boxes": self.bounding_boxes,
+            "data_processing_job_id": (
+                self.data_processing_job.job_id if self.data_processing_job else None
+            ),
+            "model_prediction_job_id": (
+                self.model_prediction_job.job_id if self.model_prediction_job else None
+            ),
+            "bboxes": self.bboxes,
             "parameters": self.parameters,
             "stages": self.stages,
             "jobs": {
@@ -377,14 +392,14 @@ class Task:
 
 def process_data_extraction_with_task(
     task_id: str,
-    bounding_boxes: List[Dict[str, Any]],
-    parameters: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    bboxes: List[List[float]],
+    parameters: Dict[str, Any],
+) -> None:
     """Process data extraction with task tracking.
 
     Args:
         task_id: Task ID.
-        bounding_boxes: List of bounding box dictionaries.
+        bboxes: List of bounding box dictionaries.
         parameters: Optional processing parameters.
 
     Returns:
@@ -393,58 +408,85 @@ def process_data_extraction_with_task(
     try:
         task = Task.get(task_id)
 
-        logger.debug(
-            f"Processing data extraction for task {task_id} with {len(bounding_boxes)} "
+        logger.info(
+            f"Processing data extraction for task {task_id} with {len(bboxes)} "
             f"bounding boxes"
         )
 
-        # TODO: Implement actual data extraction logic
-        import time
+        # Extract data from bounding boxes using the DataProcessor
+        processed_data = data_processor.extract_data_from_bboxes(
+            task_id=task_id,
+            bboxes=bboxes,
+            parameters=parameters,
+        )
 
-        time.sleep(5)
+        # Add bounding boxes to processed data for model prediction
+        processed_data["bboxes"] = bboxes
+        processed_data["parameters"] = parameters
 
-        # Prepare data for model prediction
-        processed_data = {
-            "bounding_boxes": bounding_boxes,
-            "processed_tiles": ["tile_1.tif", "tile_2.tif"],
-            "data_path": "/tmp/processed_data/",
-            "metadata": {
-                "processing_date": datetime.now().isoformat(),
-                "parameters": parameters,
-            },
+        # Add data paths for model prediction (not exposed to frontend)
+        data_path = data_processor.get_data_path()
+        dataset_csv_path = data_processor.get_dataset_csv_path()
+
+        if data_path:
+            processed_data["data_path"] = data_path
+        if dataset_csv_path:
+            processed_data["dataset_csv_path"] = dataset_csv_path
+
+        # Create safe results (without internal paths)
+        safe_results = {
+            "chips_created": processed_data.get("chips_created"),
+            "chip_size": processed_data.get("chip_size"),
+            "processing_duration": processed_data.get("processing_duration"),
+            "data_source": processed_data.get("data_source"),
+            "target_date": processed_data.get("target_date"),
+            "temporal_tolerance": processed_data.get("temporal_tolerance"),
+            "bboxes_processed": processed_data.get("bboxes_processed"),
         }
 
         # Mark data processing as completed
-        task.complete_stage("data_processing", result=processed_data)
+        task.complete_stage("data_processing", result=safe_results)
 
-        # Start model prediction stage
-        model_job_id = task.start_model_prediction(processed_data)
+        # Check if data is ready for model prediction
+        if data_processor.check_data_ready_for_model():
+            # Start model prediction stage
+            model_job_id = task.start_model_prediction(processed_data)
+            processed_data["model_job_id"] = model_job_id
+        else:
+            logger.warning(f"Data not ready for model prediction for task {task_id}")
+            processed_data["model_job_id"] = None
 
-        return {
-            "status": "success",
-            "message": "Data extraction completed successfully.",
-            "processed_data": processed_data,
-            "model_job_id": model_job_id,
-            "completed_at": datetime.now().isoformat(),
-        }
+        logger.info(
+            {
+                "status": "success",
+                "message": "Data extraction completed successfully.",
+                "processed_data": safe_results,
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "model_job_id": processed_data.get("model_job_id"),
+            }
+        )
 
     except Exception as e:
+        logger.error(f"Data extraction failed for task {task_id}: {str(e)}")
+
         # Mark data processing as failed
         task = Task.get(task_id)
         task.complete_stage("data_processing", error=str(e))
 
-        return {
-            "status": "error",
-            "message": f"Data extraction failed: {str(e)}",
-            "completed_at": datetime.now().isoformat(),
-        }
+        logger.error(
+            {
+                "status": "error",
+                "message": f"Data extraction failed: {str(e)}",
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+            }
+        )
 
 
 def process_model_prediction_with_task(
     task_id: str,
     processed_data: Dict[str, Any],
     parameters: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+) -> None:
     """Process model prediction with task tracking.
 
     Args:
@@ -463,33 +505,39 @@ def process_model_prediction_with_task(
         # TODO: Implement actual model prediction logic
         import time
 
+        logger.info(f"Running model prediction for task {task_id}")
+        logger.info(f"Processed data: {processed_data}")
         time.sleep(100)
 
         # Example prediction results
         prediction_results = {
             "aod_values": [0.15, 0.22, 0.18, 0.31],
             "confidence_scores": [0.85, 0.78, 0.92, 0.71],
-            "bounding_boxes": processed_data["bounding_boxes"],
-            "prediction_date": datetime.now().isoformat(),
+            "bboxes": processed_data["bboxes"],
+            "prediction_date": datetime.utcnow().isoformat() + "Z",
         }
 
         # Mark model prediction as completed
         task.complete_stage("model_prediction", result=prediction_results)
 
-        return {
-            "status": "success",
-            "message": "Model prediction completed successfully.",
-            "results": prediction_results,
-            "completed_at": datetime.now().isoformat(),
-        }
+        logger.info(
+            {
+                "status": "success",
+                "message": "Model prediction completed successfully.",
+                "results": prediction_results,
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+            }
+        )
 
     except Exception as e:
         # Mark model prediction as failed
         task = Task.get(task_id)
         task.complete_stage("model_prediction", error=str(e))
 
-        return {
-            "status": "error",
-            "message": f"Model prediction failed: {str(e)}",
-            "completed_at": datetime.now().isoformat(),
-        }
+        logger.error(
+            {
+                "status": "error",
+                "message": f"Model prediction failed: {str(e)}",
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+            }
+        )

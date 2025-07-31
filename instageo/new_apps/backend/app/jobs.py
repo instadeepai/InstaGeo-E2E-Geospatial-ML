@@ -72,7 +72,7 @@ class Job:
         self.args = args
         self.meta = meta or {}
         self.queue = queue
-        self.created_at = created_at or datetime.now().isoformat()
+        self.created_at = created_at or datetime.utcnow().isoformat() + "Z"
 
         # Status tracking
         self.status = JobStatus.PENDING
@@ -81,11 +81,13 @@ class Job:
         self.result: Optional[Dict[str, Any]] = None
         self.error: Optional[str] = None
 
-    def enqueue(self, timeout: str = "1h") -> str:
+    def enqueue(self, timeout: str = "4h", ttl: str = "2h") -> str:
         """Enqueue the job in the appropriate queue.
 
         Args:
             timeout: Job timeout.
+            ttl: Job time to live.
+
 
         Returns:
             Job ID.
@@ -99,6 +101,7 @@ class Job:
             args=self.args,
             meta=self.meta,
             job_timeout=timeout,
+            ttl=ttl,
         )
 
         self.job_id = str(rq_job.id)
@@ -169,9 +172,9 @@ class Job:
         self.status = status
 
         if status == JobStatus.RUNNING:
-            self.started_at = datetime.now().isoformat()
+            self.started_at = datetime.utcnow().isoformat() + "Z"
         elif status in [JobStatus.COMPLETED, JobStatus.FAILED]:
-            self.completed_at = datetime.now().isoformat()
+            self.completed_at = datetime.utcnow().isoformat() + "Z"
 
         if result:
             self.result = result
@@ -216,14 +219,14 @@ class Job:
     def create_data_processing(
         cls,
         task_id: str,
-        bounding_boxes: List[Dict[str, Any]],
+        bboxes: List[List[float]],
         parameters: Optional[Dict[str, Any]] = None,
     ) -> "Job":
         """Create a new data processing job.
 
         Args:
             task_id: Associated task ID.
-            bounding_boxes: List of bounding box dictionaries.
+            bboxes: List of bounding box dictionaries.
             parameters: Optional processing parameters.
 
         Returns:
@@ -233,9 +236,9 @@ class Job:
 
         meta = {
             "task_id": task_id,
-            "bounding_boxes": bounding_boxes,
+            "bboxes": bboxes,
             "parameters": parameters,
-            "submitted_at": datetime.now().isoformat(),
+            "submitted_at": datetime.utcnow().isoformat() + "Z",
             "stage": "data_processing",
         }
 
@@ -243,8 +246,8 @@ class Job:
             job_id=job_id,
             job_type=JobType.DATA_PROCESSING,
             task_id=task_id,
-            function_name="app.tasks.process_data_extraction_with_task",
-            args=(task_id, bounding_boxes, parameters),
+            function_name="instageo.new_apps.backend.app.tasks.process_data_extraction_with_task",
+            args=(task_id, bboxes, parameters),
             meta=meta,
             queue=data_processing_queue,
         )
@@ -274,7 +277,7 @@ class Job:
             "task_id": task_id,
             "processed_data": processed_data,
             "parameters": parameters,
-            "submitted_at": datetime.now().isoformat(),
+            "submitted_at": datetime.utcnow().isoformat() + "Z",
             "stage": "model_prediction",
         }
 
@@ -282,7 +285,7 @@ class Job:
             job_id=job_id,
             job_type=JobType.MODEL_PREDICTION,
             task_id=task_id,
-            function_name="app.tasks.process_model_prediction_with_task",
+            function_name="instageo.new_apps.backend.app.tasks.process_model_prediction_with_task",
             args=(task_id, processed_data, parameters),
             meta=meta,
             queue=model_prediction_queue,

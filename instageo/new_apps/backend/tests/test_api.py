@@ -1,6 +1,11 @@
+import os
+import tempfile
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+
+# Set a temporary directory for tests before importing the app
+os.environ["DATA_FOLDER"] = tempfile.gettempdir()
 
 from instageo.new_apps.backend.app.main import app
 
@@ -32,12 +37,16 @@ def test_run_model_and_task_status():
             "model_output": "/tmp/test_model_output",
         }
 
-        # Prepare a minimal valid request
+        # Prepare a valid request matching TaskCreationRequest format
         payload = {
-            "bounding_boxes": [
-                {"coordinates": [[10.0, 20.0, 30.0, 40.0]], "date": "2023-01-01"}
-            ],
-            "parameters": {"param1": "value1"},
+            "bboxes": [
+                [10.0, 20.0, 30.0, 40.0],
+                [4.0, 2.0, 3.0, 4.0],
+            ],  # List of bounding boxes
+            "model_type": "aod",  # Required field
+            "date": "2023-01-01",  # Required field
+            "chip_size": 256,  # Optional field
+            "cloud_coverage": 10,  # Optional field
         }
         response = client.post("/api/run-model", json=payload)
         assert response.status_code == 200
@@ -84,12 +93,15 @@ def test_get_all_tasks():
             "predictions": "test_predictions",
         }
 
-        # First create a task
+        # First create a task with correct format
         payload = {
-            "bounding_boxes": [
-                {"coordinates": [[10.0, 20.0, 30.0, 40.0]], "date": "2023-01-01"}
-            ],
-            "parameters": {"model_type": "aod", "param1": "value1"},
+            "bboxes": [
+                [10.0, 20.0, 30.0, 40.0],
+                [4.0, 2.0, 3.0, 4.0],
+            ],  # List of bounding boxes
+            "model_type": "aod",  # Required field
+            "date": "2023-01-01",  # Required field
+            "chip_size": 256,  # Optional field
         }
         response = client.post("/api/run-model", json=payload)
         assert response.status_code == 200
@@ -108,7 +120,7 @@ def test_get_all_tasks():
         assert "task_id" in task
         assert "status" in task
         assert "created_at" in task
-        assert "bounding_boxes_count" in task
+        assert "bboxes_count" in task
         assert "model_type" in task
         assert "stages" in task
 

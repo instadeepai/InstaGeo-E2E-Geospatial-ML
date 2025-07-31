@@ -6,7 +6,7 @@ echo "🚀 Starting InstaGeo Full-Stack Application..."
 
 
 #TODO: Add a check for the environment and use the appropriate compose file
-COMPOSE_FILE="docker-compose.dev.yml"
+COMPOSE_FILE="instageo/new_apps/docker-compose.dev.yml"
 
 # Check if Docker is running
 if ! docker info > /dev/null 2>&1; then
@@ -15,16 +15,16 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 # Check if config.env exists in backend
-if [ ! -f "backend/config.env" ]; then
-    echo "⚠️  backend/config.env not found. Creating from example..."
-    cp backend/config.env.example backend/config.env
-    echo "📝 Please edit backend/config.env with your specific settings before running again."
+if [ ! -f "instageo/new_apps/backend/config.env" ]; then
+    echo "⚠️  instageo/new_apps/backend/config.env not found. Creating from example..."
+    cp instageo/new_apps/backend/config.env.example instageo/new_apps/backend/config.env
+    echo "📝 Please edit instageo/new_apps/backend/config.env with your specific settings before running again."
     exit 1
 fi
 
 # Load environment variables from backend config
 set -a
-source backend/config.env
+source instageo/new_apps/backend/config.env
 set +a
 
 # Enable Docker Compose Bake for better build performance
@@ -32,7 +32,8 @@ export COMPOSE_BAKE=true
 
 # Build and start services
 echo "🔨 Building and starting services with $COMPOSE_FILE..."
-docker-compose -f $COMPOSE_FILE up -d --build
+docker-compose -f $COMPOSE_FILE build --no-cache
+docker-compose -f $COMPOSE_FILE up -d
 
 # Wait for services to be ready
 echo "⏳ Waiting for services to be ready..."

@@ -107,23 +107,15 @@ const App = () => {
             // Get all bounding box coordinates from the feature group
             const boundingBoxes = featureGroupRef.current.getLayers().map(layer => {
                 const bounds = layer.getBounds();
-                return {
-                    coordinates: [
-                        [bounds.getWest(), bounds.getSouth()],
-                        [bounds.getEast(), bounds.getSouth()],
-                        [bounds.getEast(), bounds.getNorth()],
-                        [bounds.getWest(), bounds.getNorth()]
-                    ],
-                    date: new Date().toISOString().split('T')[0] // Current date in YYYY-MM-DD format
-                };
+                return [
+                    bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()
+                ];
             });
 
             const payload = {
-                bounding_boxes: boundingBoxes,
-                parameters: {
+                    bboxes: boundingBoxes,
                     model_type: selectedModel,
                     ...modelParams
-                }
             };
             console.log('Payload being sent:', payload);
             const response = await fetch(INSTAGEO_BACKEND_API_ENDPOINTS.RUN_MODEL, {
