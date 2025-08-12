@@ -193,7 +193,6 @@ def test_training_step(model, mock_dataloader):
     assert loss.requires_grad
     # Check that metrics were updated
     assert model.train_metrics.total > 0
-    assert model.train_auc.n_pos.sum() > 0 or model.train_auc.n_neg.sum() > 0
 
 
 def test_reg_training_step(reg_model, mock_reg_dataloader):
@@ -218,7 +217,6 @@ def test_validation_step(model, mock_dataloader):
     assert not loss.requires_grad
     # Check that metrics were updated
     assert model.val_metrics.total > 0
-    assert model.val_auc.n_pos.sum() > 0 or model.val_auc.n_neg.sum() > 0
 
 
 def test_reg_validation_step(reg_model, mock_reg_dataloader):
@@ -296,12 +294,10 @@ def test_on_train_epoch_end(model, mock_dataloader):
     model.training_step(batch, 0)
     # Verify that metrics are not empty before epoch end
     assert model.train_metrics.total > 0
-    assert model.train_auc.n_pos.sum() > 0 or model.train_auc.n_neg.sum() > 0
     # Call epoch end
     model.on_train_epoch_end()
     # Verify that metrics are reset
     assert model.train_metrics.total == 0
-    assert model.train_auc.n_pos.sum() == 0 and model.train_auc.n_neg.sum() == 0
 
 
 def test_reg_on_train_epoch_end(reg_model, mock_reg_dataloader):
@@ -324,12 +320,10 @@ def test_on_validation_epoch_end(model, mock_dataloader):
     model.validation_step(batch, 0)
     # Verify that metrics are not empty before epoch end
     assert model.val_metrics.total > 0
-    assert model.val_auc.n_pos.sum() > 0 or model.val_auc.n_neg.sum() > 0
     # Call epoch end
     model.on_validation_epoch_end()
     # Verify that metrics are reset
     assert model.val_metrics.total == 0
-    assert model.val_auc.n_pos.sum() == 0 and model.val_auc.n_neg.sum() == 0
 
 
 def test_reg_on_validation_epoch_end(reg_model, mock_reg_dataloader):

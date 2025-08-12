@@ -131,8 +131,11 @@ class PrithviSegmentationModule(PrithviBaseModule):
         # Update metrics
         metrics = getattr(self, f"{step_type}_metrics")
         metrics.update(labels, preds)
-        auc_metrics = getattr(self, f"{step_type}_auc")
-        auc_metrics.update(labels, probs)
+
+        # Only compute AUC metrics during testing
+        if step_type == "test":
+            auc_metrics = getattr(self, f"{step_type}_auc")
+            auc_metrics.update(labels, probs)
 
         # Log the loss
         self.log(
@@ -153,7 +156,6 @@ class PrithviSegmentationModule(PrithviBaseModule):
             step_type (str): Type of step ('train', 'val', or 'test').
         """
         metrics = getattr(self, f"{step_type}_metrics").compute()
-        auc_metrics = getattr(self, f"{step_type}_auc").score()
 
         # Log overall metrics
         self.log(f"{step_type}_Acc", metrics["accuracy"], logger=True)
@@ -161,7 +163,11 @@ class PrithviSegmentationModule(PrithviBaseModule):
         self.log(f"{step_type}_F1", metrics["f1"], logger=True)
         self.log(f"{step_type}_Precision", metrics["precision"], logger=True)
         self.log(f"{step_type}_Recall", metrics["recall"], logger=True)
-        self.log(f"{step_type}_roc_auc", auc_metrics["roc_auc_macro"], logger=True)
+
+        # Only compute and log ROC-AUC metrics during testing
+        if step_type == "test":
+            auc_metrics = getattr(self, f"{step_type}_auc").score()
+            self.log(f"{step_type}_roc_auc", auc_metrics["roc_auc_macro"], logger=True)
 
         # Log per-class metrics
         for idx, value in enumerate(metrics["jaccard_per_class"]):
@@ -171,7 +177,8 @@ class PrithviSegmentationModule(PrithviBaseModule):
 
         # Reset metrics for next epoch
         getattr(self, f"{step_type}_metrics").reset()
-        getattr(self, f"{step_type}_auc").reset()
+        if step_type == "test":
+            getattr(self, f"{step_type}_auc").reset()
 
     def predict_step(self, batch: Any) -> torch.Tensor:
         """Perform a prediction step.
@@ -403,17 +410,17 @@ class PrithviDistillationSegmentationModule(
 
             # Update metrics - ensure integer type
             metrics = getattr(self, f"{step_type}_metrics")
-
-            auc_metrics = getattr(self, f"{step_type}_auc")
-
             metrics.update(
                 labels.cpu().numpy().astype(np.int64),
                 preds.cpu().numpy().astype(np.int64),
             )
 
-            auc_metrics.update(
-                labels.cpu().numpy().astype(np.int64), probs.cpu().numpy()
-            )
+            # Only compute AUC metrics during testing
+            if step_type == "test":
+                auc_metrics = getattr(self, f"{step_type}_auc")
+                auc_metrics.update(
+                    labels.cpu().numpy().astype(np.int64), probs.cpu().numpy()
+                )
 
         for loss_name, loss_value in loss_metrics.items():
             self.log(
