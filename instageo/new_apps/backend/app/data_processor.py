@@ -67,7 +67,7 @@ class DataProcessor:
             # Add processing metadata
             end_time = datetime.now()
             processing_duration = (end_time - start_time).total_seconds()
-            results["processing_duration"] = f"{processing_duration:.1f}s"
+            results["processing_duration"] = f"{processing_duration:.1f}"
             results["data_source"] = parameters.get("data_source", "unknown")
             results["bboxes_processed"] = len(bboxes)
             results["target_date"] = parameters.get("date", "unknown")

@@ -40,6 +40,7 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
                 return 'error';
             case 'data_processing':
             case 'model_prediction':
+            case 'visualization_preparation':
                 return 'primary';
             default:
                 return 'default';
@@ -54,6 +55,7 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
                 return <ErrorIcon color="error" />;
             case 'data_processing':
             case 'model_prediction':
+            case 'visualization_preparation':
                 return <RunningIcon color="primary" />;
             default:
                 return <CircularProgress size={20} />;
@@ -62,30 +64,68 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
 
     const getTaskStageStatus = (taskStatus, stages) => {
         // If we have detailed stages information, use it
-        if (stages && stages.data_processing && stages.model_prediction) {
+        if (stages && stages.data_processing && stages.model_prediction && stages.visualization_preparation) {
             return {
                 dataProcessing: stages.data_processing.status || 'pending',
-                modelPrediction: stages.model_prediction.status || 'pending'
+                modelPrediction: stages.model_prediction.status || 'pending',
+                visualizationPreparation: stages.visualization_preparation.status || 'pending'
             };
         }
 
         // Fallback to task status mapping
         switch (taskStatus) {
             case 'data_processing':
-                return { dataProcessing: 'running', modelPrediction: 'pending' };
+                return {
+                    dataProcessing: 'running',
+                    modelPrediction: 'pending',
+                    visualizationPreparation: 'pending'
+                };
             case 'model_prediction':
-                return { dataProcessing: 'completed', modelPrediction: 'running' };
+                return {
+                    dataProcessing: 'completed',
+                    modelPrediction: 'running',
+                    visualizationPreparation: 'pending'
+                };
+            case 'visualization_preparation':
+                return {
+                    dataProcessing: 'completed',
+                    modelPrediction: 'completed',
+                    visualizationPreparation: 'running'
+                };
             case 'completed':
-                return { dataProcessing: 'completed', modelPrediction: 'completed' };
+                return {
+                    dataProcessing: 'completed',
+                    modelPrediction: 'completed',
+                    visualizationPreparation: 'completed'
+                };
             case 'failed':
-                // Check if data processing failed or model prediction failed
+                // Check which stage failed
                 if (stages && stages.data_processing && stages.data_processing.status === 'failed') {
-                    return { dataProcessing: 'failed', modelPrediction: 'pending' };
-                } else {
-                    return { dataProcessing: 'completed', modelPrediction: 'failed' };
+                    return {
+                        dataProcessing: 'failed',
+                        modelPrediction: 'pending',
+                        visualizationPreparation: 'pending'
+                    };
+                } else if (stages && stages.model_prediction && stages.model_prediction.status === 'failed') {
+                    return {
+                        dataProcessing: 'completed',
+                        modelPrediction: 'failed',
+                        visualizationPreparation: 'pending'
+                    };
+                } else if (stages && stages.visualization_preparation && stages.visualization_preparation.status === 'failed') {
+                    return {
+                        dataProcessing: 'completed',
+                        modelPrediction: 'completed',
+                        visualizationPreparation: 'failed'
+                    };
                 }
+                break;
             default:
-                return { dataProcessing: 'pending', modelPrediction: 'pending' };
+                return {
+                    dataProcessing: 'pending',
+                    modelPrediction: 'pending',
+                    visualizationPreparation: 'pending'
+                };
         }
     };
 
@@ -99,6 +139,8 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
                 return 'Data Processing';
             case 'model_prediction':
                 return 'Model Prediction';
+            case 'visualization_preparation':
+                return 'Visualization Preparation';
             default:
                 return status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
         }
@@ -292,6 +334,67 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
                                 )}
                                 {stageStatus.modelPrediction === 'running' && (
                                     <LinearProgress sx={{ mt: 1 }} />
+                                )}
+                            </StepContent>
+                        </Step>
+
+                        <Step active={stageStatus.visualizationPreparation === 'running'} completed={stageStatus.visualizationPreparation === 'completed'}>
+                            <StepLabel>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    {getStatusIcon(stageStatus.visualizationPreparation)}
+                                    <Typography variant="body2">Visualization Preparation</Typography>
+                                </Box>
+                            </StepLabel>
+                            <StepContent>
+                                <Typography variant="body2" color="text.secondary">
+                                    Converting data to web-optimized format and preparing visualization endpoints.
+                                </Typography>
+                                {result.stages?.visualization_preparation?.started_at && (
+                                    <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+                                        Started: {new Date(result.stages.visualization_preparation.started_at).toLocaleString()}
+                                    </Typography>
+                                )}
+                                {result.stages?.visualization_preparation?.completed_at && (
+                                    <Typography variant="caption" color="text.secondary" display="block">
+                                        Completed: {new Date(result.stages.visualization_preparation.completed_at).toLocaleString()}
+                                    </Typography>
+                                )}
+                                {result.stages?.visualization_preparation?.error && (
+                                    <Alert severity="error" sx={{ mt: 1 }}>
+                                        <Typography variant="caption">
+                                            {result.stages.visualization_preparation.error}
+                                        </Typography>
+                                    </Alert>
+                                )}
+                                {stageStatus.visualizationPreparation === 'running' && (
+                                    <LinearProgress sx={{ mt: 1 }} />
+                                )}
+                                {stageStatus.visualizationPreparation === 'completed' && result.visualization_data && (
+                                    <Box sx={{ mt: 2, p: 2, bgcolor: 'success.50', borderRadius: 1 }}>
+                                        <Typography variant="subtitle2" color="success.dark" gutterBottom>
+                                            Visualization Data Ready
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                                            {result.visualization_data.datasets?.length || 0} datasets converted to web-optimized format
+                                        </Typography>
+                                        {result.visualization_data.endpoints && result.visualization_data.endpoints.length > 0 && (
+                                            <Box sx={{ mt: 1 }}>
+                                                <Typography variant="caption" color="text.secondary" display="block">
+                                                    Available endpoints:
+                                                </Typography>
+                                                {result.visualization_data.endpoints.slice(0, 3).map((endpoint, index) => (
+                                                    <Typography key={index} variant="caption" color="primary" display="block" sx={{ ml: 1 }}>
+                                                        • {endpoint.type}: {endpoint.dataset_name}
+                                                    </Typography>
+                                                ))}
+                                                {result.visualization_data.endpoints.length > 3 && (
+                                                    <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 1 }}>
+                                                        ... and {result.visualization_data.endpoints.length - 3} more
+                                                    </Typography>
+                                                )}
+                                            </Box>
+                                        )}
+                                    </Box>
                                 )}
                             </StepContent>
                         </Step>

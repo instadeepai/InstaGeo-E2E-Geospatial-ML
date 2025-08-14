@@ -8,8 +8,10 @@ import redis  # type: ignore
 from rq import Queue
 from rq.job import Job as RQJob
 
+PACKAGE_TASKS_PATH = "instageo.new_apps.backend.app.tasks"
 DATA_PROCESSING_QUEUE_NAME = "data-processing"
 MODEL_PREDICTION_QUEUE_NAME = "model-prediction"
+VISUALIZATION_PREPARATION_QUEUE_NAME = "visualization-preparation"
 
 # Initialize Redis connection
 redis_conn: Any = redis.Redis(
@@ -21,6 +23,9 @@ redis_conn: Any = redis.Redis(
 # Initialize RQ queues for the two-stage pipeline
 data_processing_queue = Queue(DATA_PROCESSING_QUEUE_NAME, connection=redis_conn)
 model_prediction_queue = Queue(MODEL_PREDICTION_QUEUE_NAME, connection=redis_conn)
+visualization_preparation_queue = Queue(
+    VISUALIZATION_PREPARATION_QUEUE_NAME, connection=redis_conn
+)
 
 
 class JobType:
@@ -28,6 +33,7 @@ class JobType:
 
     DATA_PROCESSING = "data_processing"
     MODEL_PREDICTION = "model_prediction"
+    VISUALIZATION_PREPARATION = "visualization_preparation"
 
 
 class JobStatus:
@@ -57,7 +63,7 @@ class Job:
 
         Args:
             job_id: Unique job identifier.
-            job_type: Type of job (data_processing or model_prediction).
+            job_type: Type of job (data_processing, model_prediction, visualization_preparation).
             task_id: Associated task ID.
             function_name: Name of the function to execute.
             args: Arguments to pass to the function.
@@ -155,6 +161,8 @@ class Job:
             self.queue = data_processing_queue
         elif self.job_type == JobType.MODEL_PREDICTION:
             self.queue = model_prediction_queue
+        elif self.job_type == JobType.VISUALIZATION_PREPARATION:
+            self.queue = visualization_preparation_queue
 
     def update_status(
         self,
@@ -246,7 +254,7 @@ class Job:
             job_id=job_id,
             job_type=JobType.DATA_PROCESSING,
             task_id=task_id,
-            function_name="instageo.new_apps.backend.app.tasks.process_data_extraction_with_task",
+            function_name=f"{PACKAGE_TASKS_PATH}.process_data_extraction_with_task",
             args=(task_id, bboxes, parameters),
             meta=meta,
             queue=data_processing_queue,
@@ -285,13 +293,42 @@ class Job:
             job_id=job_id,
             job_type=JobType.MODEL_PREDICTION,
             task_id=task_id,
-            function_name="instageo.new_apps.backend.app.tasks.process_model_prediction_with_task",
+            function_name=f"{PACKAGE_TASKS_PATH}.process_model_prediction_with_task",
             args=(task_id, processed_data, parameters),
             meta=meta,
             queue=model_prediction_queue,
         )
 
         return job
+
+    @classmethod
+    def create_visualization_preparation(
+        cls,
+        task_id: str,
+        processed_data: Dict[str, Any],
+        parameters: Optional[Dict[str, Any]] = None,
+    ) -> "Job":
+        """Create a visualization preparation job.
+
+        Args:
+            task_id: Task ID.
+            processed_data: Data from data processing stage.
+            prediction_results: Results from model prediction stage.
+            parameters: Optional job parameters.
+
+        Returns:
+            Job instance.
+        """
+        job_id = f"vp_{task_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        return cls(
+            job_id=job_id,
+            job_type=JobType.VISUALIZATION_PREPARATION,
+            task_id=task_id,
+            queue=visualization_preparation_queue,
+            function_name=f"{PACKAGE_TASKS_PATH}.process_visualization_preparation_with_task",
+            args=(task_id, processed_data, parameters),
+        )
 
     @classmethod
     def get(cls, job_id: str) -> "Job":
@@ -330,7 +367,7 @@ def get_job_status(job_id: str) -> Dict[str, Any]:
 
 
 def get_queues_status() -> Dict[str, Any]:
-    """Get status of both queues.
+    """Get status of all job queues.
 
     Returns:
         Dictionary with queue status information.
@@ -345,5 +382,10 @@ def get_queues_status() -> Dict[str, Any]:
             "name": "model-prediction",
             "job_count": len(model_prediction_queue),
             "is_empty": model_prediction_queue.is_empty(),
+        },
+        "visualization_preparation": {
+            "name": "visualization-preparation",
+            "job_count": len(visualization_preparation_queue),
+            "is_empty": visualization_preparation_queue.is_empty(),
         },
     }

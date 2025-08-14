@@ -42,11 +42,12 @@ def test_run_model_and_task_status():
             "bboxes": [
                 [10.0, 20.0, 30.0, 40.0],
                 [4.0, 2.0, 3.0, 4.0],
-            ],  # List of bounding boxes
-            "model_type": "aod",  # Required field
-            "date": "2023-01-01",  # Required field
-            "chip_size": 256,  # Optional field
-            "cloud_coverage": 10,  # Optional field
+            ],
+            "model_key": "aod-estimator",
+            "model_size": "tiny",
+            "date": "2023-01-01",
+            "cloud_coverage": 10,
+            "temporal_tolerance": 30,
         }
         response = client.post("/api/run-model", json=payload)
         assert response.status_code == 200
@@ -54,6 +55,7 @@ def test_run_model_and_task_status():
         assert data["status"] in (
             "data_processing",
             "model_prediction",
+            "visualization_preparation",
             "completed",
             "failed",
         )
@@ -75,6 +77,7 @@ def test_queues_status():
     data = response.json()
     assert "data_processing" in data
     assert "model_prediction" in data
+    assert "visualization_preparation" in data
 
 
 def test_get_all_tasks():
@@ -83,7 +86,9 @@ def test_get_all_tasks():
         "instageo.new_apps.backend.app.tasks.process_data_extraction_with_task"
     ) as mock_data_process, patch(
         "instageo.new_apps.backend.app.tasks.process_model_prediction_with_task"
-    ) as mock_model_process:
+    ) as mock_model_process, patch(
+        "instageo.new_apps.backend.app.tasks.process_visualization_preparation_with_task"
+    ) as mock_visualization_process:
         mock_data_process.return_value = {
             "status": "completed",
             "data": "test_processed_data",
@@ -92,16 +97,22 @@ def test_get_all_tasks():
             "status": "completed",
             "predictions": "test_predictions",
         }
+        mock_visualization_process.return_value = {
+            "status": "completed",
+            "visualization": "test_visualization",
+        }
 
         # First create a task with correct format
         payload = {
             "bboxes": [
                 [10.0, 20.0, 30.0, 40.0],
                 [4.0, 2.0, 3.0, 4.0],
-            ],  # List of bounding boxes
-            "model_type": "aod",  # Required field
-            "date": "2023-01-01",  # Required field
-            "chip_size": 256,  # Optional field
+            ],
+            "model_key": "aod-estimator",
+            "model_size": "tiny",
+            "date": "2023-01-01",
+            "cloud_coverage": 10,
+            "temporal_tolerance": 30,
         }
         response = client.post("/api/run-model", json=payload)
         assert response.status_code == 200
@@ -134,3 +145,92 @@ def test_health_check():
     assert "redis" in data["components"]
     assert "queues" in data["components"]
     assert "workers" in data["components"]
+
+
+def test_visualize_task_id_endpoint():
+    """Test the /api/visualize/{task_id} endpoint comprehensively."""
+
+    # Test 1: Non-existent task should return 404
+    fake_task_id = "non-existent-task-12345"
+    response = client.get(f"/api/visualize/{fake_task_id}")
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+    assert "not found" in data["detail"].lower()
+
+    # Test 2: Invalid task ID format
+    invalid_task_id = ""
+    response = client.get(f"/api/visualize/{invalid_task_id}")
+    assert response.status_code == 404  # FastAPI returns 404 for empty path params
+
+    # Test 3: Task ID with special characters
+    special_task_id = "task-with-special-chars-!@#"
+    response = client.get(f"/api/visualize/{special_task_id}")
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+
+
+@patch(
+    "instageo.new_apps.backend.app.tiler_service.InstaGeoTilerService._get_chips_cog_file"
+)
+@patch(
+    "instageo.new_apps.backend.app.tiler_service.InstaGeoTilerService._get_predictions_cog_file"
+)
+def test_visualize_task_id_with_mocked_cogs(mock_predictions_cog, mock_chips_cog):
+    """Test the visualize endpoint with mocked COG files to verify response structure."""
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    # Create mock Path objects
+    mock_chips_path = MagicMock(spec=Path)
+    mock_chips_path.exists.return_value = True
+    mock_chips_path.__str__.return_value = "/tmp/test_chips.tif"
+    mock_chips_path.__fspath__.return_value = "/tmp/test_chips.tif"
+
+    mock_predictions_path = MagicMock(spec=Path)
+    mock_predictions_path.exists.return_value = True
+    mock_predictions_path.__str__.return_value = "/tmp/test_predictions.tif"
+    mock_predictions_path.__fspath__.return_value = "/tmp/test_predictions.tif"
+
+    # Configure the mocks
+    mock_chips_cog.return_value = mock_chips_path
+    mock_predictions_cog.return_value = mock_predictions_path
+
+    # Test with a valid task ID
+    task_id = "test-task-with-cogs-123"
+    response = client.get(f"/api/visualize/{task_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Verify response structure
+    assert "task_id" in data
+    assert "satellite" in data
+    assert "prediction" in data
+    assert "status" in data
+
+    assert data["task_id"] == task_id
+    assert data["status"] == "ready"
+
+    # Verify satellite data structure
+    satellite = data["satellite"]
+    assert "tiles_url" in satellite
+    assert "tilejson_url" in satellite
+    assert "preview_url" in satellite
+
+    # Verify URLs contain correct task ID references
+    assert f"{task_id}_chips" in satellite["tiles_url"]
+    assert f"{task_id}_chips" in satellite["tilejson_url"]
+    assert f"{task_id}_chips" in satellite["preview_url"]
+
+    # Verify prediction data structure
+    prediction = data["prediction"]
+    assert "tiles_url" in prediction
+    assert "tilejson_url" in prediction
+    assert "preview_url" in prediction
+
+    # Verify URLs contain correct task ID references
+    assert f"{task_id}_predictions" in prediction["tiles_url"]
+    assert f"{task_id}_predictions" in prediction["tilejson_url"]
+    assert f"{task_id}_predictions" in prediction["preview_url"]

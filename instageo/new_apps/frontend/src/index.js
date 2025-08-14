@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ThemeProvider, createTheme } from '@mui/material';
 
+// Import Leaflet CSS
+import 'leaflet/dist/leaflet.css';
+
 const theme = createTheme({
   palette: {
     primary: {

@@ -1,30 +1,39 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import L from 'leaflet';
 import { IconButton, Tooltip } from '@mui/material';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import MapComponent from './components/MapComponent';
+import TaskLayers from './components/TaskLayers';
 import ControlPanel from './components/ControlPanel';
 import BoundingBoxInfo from './components/BoundingBoxInfo';
 import TaskResultPopup from './components/TaskResultPopup';
 import TasksMonitor from './components/TasksMonitor';
-import { DEFAULT_PARAMS } from './constants';
 import { INSTAGEO_BACKEND_API_ENDPOINTS } from './config';
+import TaskLayersControl from './components/TaskLayersControl';
+
+// Configure default Leaflet marker icons
+L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
 
 const App = () => {
     const [controlPanelOpen, setControlPanelOpen] = useState(false);
-    const [selectedModel, setSelectedModel] = useState('aod');
-    const [modelParams, setModelParams] = useState(DEFAULT_PARAMS);
     const [hasBoundingBox, setHasBoundingBox] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [totalArea, setTotalArea] = useState(0);
-    const [showInfo, setShowInfo] = useState(true);
+    const [showInfo, setShowInfo] = useState(false);
     const [taskResult, setTaskResult] = useState(null);
     const [taskError, setTaskError] = useState(null);
     const [showTaskPopup, setShowTaskPopup] = useState(false);
     const [showTasksMonitor, setShowTasksMonitor] = useState(false);
+    const [taskLayers, setTaskLayers] = useState([]);
     const featureGroupRef = React.useRef(null);
     const statusPollingRef = useRef(null);
 
@@ -51,8 +60,8 @@ const App = () => {
                 }
             };
 
-            // Poll every 5 seconds
-            statusPollingRef.current = setInterval(pollStatus, 5000);
+            // Poll every 15 seconds
+            statusPollingRef.current = setInterval(pollStatus, 15000);
 
             // Cleanup on unmount or when taskResult changes
             return () => {
@@ -64,12 +73,63 @@ const App = () => {
         }
     }, [taskResult?.task_id, taskResult?.status]);
 
-    const handleModelChange = (model) => {
-        setSelectedModel(model);
+    const handleAddTaskLayer = (taskLayerData) => {
+        console.log('handleAddTaskLayer called with:', taskLayerData);
+
+        // Add new task layer to the list
+        const newTaskLayer = {
+            ...taskLayerData,
+            id: Date.now(), // Simple ID for React key
+            visible: true,
+            opacity: 0.8,
+            satelliteVisible: true,
+            predictionVisible: true,
+            satelliteOpacity: 0.8,
+            predictionOpacity: 0.8
+        };
+
+        console.log('Creating task layer:', newTaskLayer);
+
+        setTaskLayers(prev => {
+            const filtered = prev.filter(taskLayer => taskLayer.taskId !== taskLayerData.taskId);
+            const newTaskLayers = [...filtered, newTaskLayer];
+            console.log('Updated task layers:', newTaskLayers);
+            return newTaskLayers;
+        });
     };
 
-    const handleParamsChange = (params) => {
-        setModelParams(params);
+    const handleTaskLayerChange = (taskLayerId, layerType, changeType, value) => {
+        console.log('handleTaskLayerChange:', { taskLayerId, layerType, changeType, value });
+
+        setTaskLayers(prev => {
+            if (changeType === 'remove') {
+                // Remove the task layer completely
+                return prev.filter(taskLayer => taskLayer.id !== taskLayerId);
+            }
+
+            return prev.map(taskLayer => {
+                if (taskLayer.id === taskLayerId) {
+                    const updated = { ...taskLayer };
+
+                    if (changeType === 'visibility') {
+                        if (layerType === 'satellite') {
+                            updated.satelliteVisible = value;
+                        } else if (layerType === 'prediction') {
+                            updated.predictionVisible = value;
+                        }
+                    } else if (changeType === 'opacity') {
+                        if (layerType === 'satellite') {
+                            updated.satelliteOpacity = value;
+                        } else if (layerType === 'prediction') {
+                            updated.predictionOpacity = value;
+                        }
+                    }
+
+                    return updated;
+                }
+                return taskLayer;
+            });
+        });
     };
 
     const handleDrawCreated = (layer) => {
@@ -96,7 +156,7 @@ const App = () => {
         }
     };
 
-    const handleRunModel = async () => {
+    const handleRunModel = async (modelParams) => {
         if (!hasBoundingBox || !featureGroupRef.current) return;
 
         setIsProcessing(true);
@@ -113,9 +173,8 @@ const App = () => {
             });
 
             const payload = {
-                    bboxes: boundingBoxes,
-                    model_type: selectedModel,
-                    ...modelParams
+                bboxes: boundingBoxes,
+                ...(modelParams),
             };
             console.log('Payload being sent:', payload);
             const response = await fetch(INSTAGEO_BACKEND_API_ENDPOINTS.RUN_MODEL, {
@@ -176,6 +235,34 @@ const App = () => {
                         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     />
+
+                    {/* Locate (GPS) button */}
+                    <LocateControl />
+
+                    {/* Task Layers */}
+                    {taskLayers.map(taskLayer => (
+                        <TaskLayers
+                            key={taskLayer.id}
+                            satelliteTilesUrl={taskLayer.satelliteTilesUrl}
+                            predictionTilesUrl={taskLayer.predictionTilesUrl}
+                            satelliteVisible={taskLayer.satelliteVisible}
+                            predictionVisible={taskLayer.predictionVisible}
+                            satelliteOpacity={taskLayer.satelliteOpacity}
+                            predictionOpacity={taskLayer.predictionOpacity}
+                            visible={taskLayer.visible}
+                            bounds={taskLayer.bounds}
+                            minZoom={taskLayer.minZoom}
+                            maxZoom={taskLayer.maxZoom}
+                            taskName={taskLayer.taskName}
+                        />
+                    ))}
+
+                    {/* Task Layers Control */}
+                    <TaskLayersControl
+                        taskLayers={taskLayers}
+                        onTaskLayerChange={handleTaskLayerChange}
+                    />
+
                     <MapComponent
                         onDrawCreated={handleDrawCreated}
                         onDrawEdited={handleDrawEdited}
@@ -232,8 +319,6 @@ const App = () => {
             <ControlPanel
                 open={controlPanelOpen}
                 onClose={() => setControlPanelOpen(false)}
-                onModelChange={handleModelChange}
-                onParamsChange={handleParamsChange}
                 hasBoundingBox={hasBoundingBox}
                 onRunModel={handleRunModel}
                 isProcessing={isProcessing}
@@ -253,9 +338,57 @@ const App = () => {
             <TasksMonitor
                 open={showTasksMonitor}
                 onClose={() => setShowTasksMonitor(false)}
+                onAddTaskLayer={handleAddTaskLayer}
             />
         </div>
     );
 };
+
+function LocateControl() {
+    const map = useMap();
+    const [locating, setLocating] = React.useState(false);
+    const markerRef = React.useRef(null);
+
+    const handleLocate = () => {
+        if (!navigator.geolocation || locating) return;
+        setLocating(true);
+        navigator.geolocation.getCurrentPosition(
+            ({ coords }) => {
+                const { latitude, longitude, accuracy } = coords;
+                const latlng = [latitude, longitude];
+                if (markerRef.current) markerRef.current.remove();
+                markerRef.current = L.marker(latlng).addTo(map);
+                const currentZoom = map.getZoom();
+                const targetZoom = currentZoom < 10 ? (accuracy && accuracy > 2000 ? 10 : 12) : currentZoom;
+                map.flyTo(latlng, targetZoom, { duration: 1 });
+                setLocating(false);
+            },
+            () => setLocating(false),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+    };
+
+    return (
+        <Tooltip title="Fly to my location">
+            <IconButton
+                aria-label="Locate me"
+                onClick={handleLocate}
+                sx={{
+                    position: 'absolute',
+                    left: '50%',
+                    bottom: 20,
+                    transform: 'translateX(-50%)',
+                    zIndex: 1000,
+                    backgroundColor: 'white',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                    '&:hover': { backgroundColor: '#f5f5f5' }
+                }}
+                size="small"
+            >
+                <MyLocationIcon fontSize="small" color={locating ? 'disabled' : 'action'} />
+            </IconButton>
+        </Tooltip>
+    );
+}
 
 export default App;

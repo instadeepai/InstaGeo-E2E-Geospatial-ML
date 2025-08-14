@@ -1,38 +1,97 @@
-import React, { useState } from 'react';
-import { Drawer, Box, Typography, Select, MenuItem, FormControl, InputLabel, Slider, Button, TextField, CircularProgress } from '@mui/material';
-import { DEFAULT_PARAMS, MODEL_CONFIGS } from '../constants';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Drawer, Box, Typography, Select, MenuItem, FormControl, InputLabel, Slider, Button, TextField, CircularProgress, Tooltip, IconButton, Collapse, Divider, Paper, Chip, InputAdornment } from '@mui/material';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import { DEFAULT_TASK_PARAMS, PARAMS_HELP } from '../constants';
+import { INSTAGEO_BACKEND_API_ENDPOINTS } from '../config';
+import { fetchModelsWithTTL, clearModelsCache } from '../utils/modelsCache';
 
-const ControlPanel = ({ open, onClose, onModelChange, onParamsChange, hasBoundingBox, onRunModel, isProcessing }) => {
-  const [model, setModel] = useState('aod');
-  const [params, setParams] = useState(DEFAULT_PARAMS);
+const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing }) => {
 
-  const handleModelChange = (event) => {
-    const newModel = event.target.value;
-    setModel(newModel);
-    const newParams = MODEL_CONFIGS[newModel];
-    setParams(newParams);
-    onModelChange(newModel);
-    onParamsChange(newParams);
+  const [params, setParams] = useState(DEFAULT_TASK_PARAMS);
+  const [models, setModels] = useState([]);
+  const [selectedModelKey, setSelectedModelKey] = useState('');
+  const [selectedSize, setSelectedSize] = useState('');
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [helpOpen, setHelpOpen] = useState({
+    model_description: false,
+    chip_size: false,
+    num_steps: false,
+    data_source: false,
+    temporal_step: false,
+    temporal_tolerance: false,
+    cloud_coverage: false,
+  });
+
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setLoadingModels(true);
+      try {
+        const data = await fetchModelsWithTTL(INSTAGEO_BACKEND_API_ENDPOINTS.GET_MODELS);
+        if (!mounted) return;
+        setModels(data || []);
+      } catch (e) {
+        console.warn('Failed to load models:', e);
+      } finally {
+        if (mounted) setLoadingModels(false);
+      }
+    };
+    load();
+    return () => { mounted = false; };
+  }, []);
+
+  const handleReloadModels = async () => {
+    try {
+      clearModelsCache();
+    } catch {}
+    setLoadingModels(true);
+    try {
+      const data = await fetchModelsWithTTL(INSTAGEO_BACKEND_API_ENDPOINTS.GET_MODELS);
+      setModels(data || []);
+    } catch (e) {
+      console.warn('Failed to reload models:', e);
+    } finally {
+      setLoadingModels(false);
+    }
   };
+
+  const modelsByKey = useMemo(() => {
+    const map = {};
+    for (const m of models) {
+      if (!map[m.model_key]) map[m.model_key] = [];
+      map[m.model_key].push(m);
+    }
+    return map;
+  }, [models]);
+
+  const modelKeys = useMemo(() => Object.keys(modelsByKey).sort(), [modelsByKey]);
+  const sizesForSelected = useMemo(() => (selectedModelKey ? (modelsByKey[selectedModelKey] || []).map(m => m.model_size) : []), [modelsByKey, selectedModelKey]);
 
   const handleParamChange = (param, value) => {
     const newParams = { ...params, [param]: value };
     setParams(newParams);
-    onParamsChange(newParams);
   };
 
   const handleDateChange = (event) => {
     handleParamChange('date', event.target.value);
   };
 
-  const handleSatelliteSourceChange = (event) => {
-    handleParamChange('data_source', event.target.value);
-  };
 
-  const renderSlider = (label, param, min, max, step = 1) => (
+  const renderSlider = (label, param, min, max, step = 1, infoKey = null) => (
     <Box sx={{ mb: 2 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-        <Typography gutterBottom>{label}</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography gutterBottom>{label}</Typography>
+          {infoKey && (
+            <Tooltip title="More info">
+              <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, [infoKey]: !prev[infoKey] }))}>
+                <InfoOutlinedIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
         <Typography variant="caption" color="text.secondary">
           {min} - {max}
         </Typography>
@@ -45,6 +104,11 @@ const ControlPanel = ({ open, onClose, onModelChange, onParamsChange, hasBoundin
         step={step}
         valueLabelDisplay="auto"
       />
+      {infoKey && (
+        <Collapse in={helpOpen[infoKey] === true}>
+          <Typography variant="caption" color="text.secondary">{PARAMS_HELP[infoKey]}</Typography>
+        </Collapse>
+      )}
     </Box>
   );
 
@@ -92,19 +156,170 @@ const ControlPanel = ({ open, onClose, onModelChange, onParamsChange, hasBoundin
           </Box>
         )}
 
+        {/* Dynamic model list from /api/models (cached 24h) */}
+        <TextField
+          select
+          fullWidth
+          label="Available Models"
+          value={selectedModelKey}
+          onChange={(e) => setSelectedModelKey(e.target.value)}
+          disabled={!hasBoundingBox || loadingModels || modelKeys.length === 0}
+          sx={{
+            mb: 2,
+            position: 'relative',
+            '& .MuiSelect-icon': { zIndex: 3 },
+            '& .MuiInputBase-input': { pr: 7 },
+          }}
+          slotProps={{
+            input: {
+              endAdornment: (
+                <InputAdornment position="end" sx={{ position: 'absolute', right: 30, zIndex: 2 }}>
+                <Tooltip title="Reload models">
+                  <IconButton size="small" onClick={handleReloadModels} disabled={loadingModels} edge="start">
+                    <RefreshIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                </InputAdornment>
+              )
+            }
+          }}
+        >
+          {modelKeys.map((k) => {
+            const name = (modelsByKey[k]?.[0]?.model_name) || k;
+            return (
+              <MenuItem key={k} value={k}>{name}</MenuItem>
+            );
+          })}
+        </TextField>
+
         <FormControl fullWidth sx={{ mb: 3 }}>
-          <InputLabel>Model</InputLabel>
+          <InputLabel>Model Size</InputLabel>
           <Select
-            value={model}
-            label="Model"
-            onChange={handleModelChange}
-            disabled={!hasBoundingBox}
+            value={selectedSize}
+            label="Model Size"
+            onChange={(e) => setSelectedSize(e.target.value)}
+            disabled={!selectedModelKey}
           >
-            <MenuItem value="aod">Aerosol Optical Depth Estimation</MenuItem>
-            <MenuItem value="locust">Locust Breeding Ground Prediction</MenuItem>
+            {sizesForSelected.map((s) => (
+              <MenuItem key={s} value={s}>{s}</MenuItem>
+            ))}
           </Select>
         </FormControl>
 
+        {/* Read-only model metadata */}
+        {selectedModelKey && selectedSize && (() => {
+          const info = (modelsByKey[selectedModelKey] || []).find(m => m.model_size === selectedSize);
+          if (!info) return null;
+          return (
+            <Paper elevation={0} sx={{ mb: 3, p: 2, border: '1px solid #e3f2fd', backgroundColor: '#f9fbff', borderLeft: '4px solid #1E88E5' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#1E88E5' }}>
+                  Model Info
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Tooltip title="About this model">
+                    <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, model_description: !prev.model_description }))}>
+                      <InfoOutlinedIcon fontSize="inherit" />
+                    </IconButton>
+                  </Tooltip>
+                  <Chip size="small" color="primary" variant="outlined" label={`${info.model_type} • ${info.model_short_name} • ${selectedSize}`} />
+                </Box>
+              </Box>
+              {info.model_description && (
+                <Collapse in={helpOpen.model_description}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                    {info.model_description}
+                  </Typography>
+                </Collapse>
+              )}
+              <Divider sx={{ mb: 1.5 }} />
+
+              {/* Number of Parameters */}
+              <Box sx={{ mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Typography variant="subtitle2">Number of Parameters</Typography>
+                  <Typography variant="body2">
+                    {typeof info.num_params === 'number' ? `${Number(info.num_params.toFixed(2))} M` : info.num_params}
+                  </Typography>
+                </Box>
+              </Box>
+
+              {/* Chip Size */}
+              <Box sx={{ mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="subtitle2">Chip Size</Typography>
+                    <Tooltip title="More info">
+                      <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, chip_size: !prev.chip_size }))}>
+                        <InfoOutlinedIcon fontSize="inherit" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                  <Typography variant="body2">{info.chip_size} x {info.chip_size} pixels</Typography>
+                </Box>
+                <Collapse in={helpOpen.chip_size}>
+                  <Typography variant="caption" color="text.secondary">{PARAMS_HELP.chip_size}</Typography>
+                </Collapse>
+              </Box>
+
+              {/* Num Steps */}
+              <Box sx={{ mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="subtitle2">Number of Steps</Typography>
+                    <Tooltip title="More info">
+                      <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, num_steps: !prev.num_steps }))}>
+                        <InfoOutlinedIcon fontSize="inherit" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                  <Typography variant="body2">{info.num_steps}</Typography>
+                </Box>
+                <Collapse in={helpOpen.num_steps}>
+                  <Typography variant="caption" color="text.secondary">{PARAMS_HELP.num_steps}</Typography>
+                </Collapse>
+              </Box>
+
+              {/* Temporal Step */}
+              <Box sx={{ mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="subtitle2">Temporal Step</Typography>
+                    <Tooltip title="More info">
+                      <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, temporal_step: !prev.temporal_step }))}>
+                        <InfoOutlinedIcon fontSize="inherit" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                  <Typography variant="body2">{info.temporal_step}</Typography>
+                </Box>
+                <Collapse in={helpOpen.temporal_step}>
+                  <Typography variant="caption" color="text.secondary">{PARAMS_HELP.temporal_step}</Typography>
+                </Collapse>
+              </Box>
+
+              {/* Data Source */}
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="subtitle2">Data Source</Typography>
+                    <Tooltip title="More info">
+                      <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, data_source: !prev.data_source }))}>
+                        <InfoOutlinedIcon fontSize="inherit" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                  <Typography variant="body2">{info.data_source}</Typography>
+                </Box>
+                <Collapse in={helpOpen.data_source}>
+                  <Typography variant="caption" color="text.secondary">{PARAMS_HELP.data_source}</Typography>
+                </Collapse>
+              </Box>
+            </Paper>
+          );
+        })()}
+
+        {/* Date Picker */}
         <TextField
           label="Date"
           type="date"
@@ -120,65 +335,30 @@ const ControlPanel = ({ open, onClose, onModelChange, onParamsChange, hasBoundin
           }}
         />
 
-        <FormControl fullWidth sx={{ mb: 3 }}>
-          <InputLabel>Satellite Source</InputLabel>
-          <Select
-            value={params.data_source}
-            label="Satellite Source"
-            onChange={handleSatelliteSourceChange}
-          >
-            <MenuItem value="HLS">HLS (Harmonized Landsat Sentinel-2)</MenuItem>
-            <MenuItem value="S2">Sentinel-2 (S2)</MenuItem>
-            <MenuItem value="S1">Sentinel-1 (S1)</MenuItem>
-          </Select>
-        </FormControl>
+        {renderSlider('Temporal Tolerance (days)', 'temporal_tolerance', 1, 30, 1, 'temporal_tolerance')}
 
-        {renderSlider('Temporal Tolerance (days)', 'temporal_tolerance', 1, 30)}
 
-        {model === 'aod' ? (
-          <>
-            <Box sx={{ mb: 2, backgroundColor: '#f5f5f5', p: 2, borderRadius: 1 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                <Typography gutterBottom color="text.secondary">
-                  Number of Steps
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  1 - 10
-                </Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Fixed value: 1
-              </Typography>
-            </Box>
-            <Box sx={{ mb: 2, backgroundColor: '#f5f5f5', p: 2, borderRadius: 1 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                <Typography gutterBottom color="text.secondary">
-                  Temporal Step (days)
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  1 - 90
-                </Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Fixed value: 0
-              </Typography>
-            </Box>
-          </>
-        ) : (
-          <>
-            {renderSlider('Number of Steps', 'num_steps', 1, 10)}
-            {renderSlider('Temporal Step (days)', 'temporal_step', 1, 90)}
-          </>
-        )}
-
-        {renderSlider('Maximum Cloud Cover', 'cloud_coverage', 0, 100)}
+        {renderSlider('Maximum Cloud Cover', 'cloud_coverage', 0, 100, 1, 'cloud_coverage')}
 
         <Button
           variant="contained"
           color="primary"
           fullWidth
-          onClick={onRunModel}
-          disabled={!hasBoundingBox || isProcessing}
+          onClick={() => {
+            // Inject selected model info into params for submission
+            const info = (modelsByKey[selectedModelKey] || []).find(m => m.model_size === selectedSize);
+            if (info) {
+              const merged = {
+                ...params,
+                model_key: info.model_key,
+                model_size: info.model_size,
+              };
+              console.log('Merged params:', merged);
+              onRunModel(merged);
+              return;
+            }
+          }}
+          disabled={!hasBoundingBox || isProcessing || !selectedModelKey || !selectedSize}
           sx={{
             mt: 2,
             mb: 3,

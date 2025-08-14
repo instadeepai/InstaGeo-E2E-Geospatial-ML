@@ -1,54 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     Dialog,
     DialogTitle,
     DialogContent,
-    IconButton,
-    Chip,
+    Button,
     Typography,
     Box,
-    CircularProgress,
-    Alert,
-    Button,
-    LinearProgress,
-    Grid,
     Card,
     CardContent,
+    Chip,
+    IconButton,
+    Alert,
+    CircularProgress,
+    LinearProgress,
     TextField,
-    FormControl,
-    InputLabel,
-    Select,
     MenuItem,
-    Pagination,
+    Pagination
 } from '@mui/material';
 import {
     Close as CloseIcon,
     Refresh as RefreshIcon,
     CheckCircle as CheckCircleIcon,
     Error as ErrorIcon,
-    Schedule as ScheduleIcon,
     PlayArrow as PlayArrowIcon,
+    Schedule as ScheduleIcon,
     Pause as PauseIcon,
     Visibility as VisibilityIcon,
-    Search as SearchIcon,
+    FilterList as FilterListIcon
 } from '@mui/icons-material';
+import VisualizationDialog from './VisualizationDialog';
 import { INSTAGEO_BACKEND_API_ENDPOINTS } from '../config';
 
-const TasksMonitor = ({ open, onClose }) => {
+const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
     const [tasks, setTasks] = useState([]);
     const [filteredTasks, setFilteredTasks] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [expandedTask, setExpandedTask] = useState(null);
-    const [pollingInterval, setPollingInterval] = useState(null);
-
-    // Filter states
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [visualizationDialogOpen, setVisualizationDialogOpen] = useState(false);
+    const [selectedTaskForVisualization, setSelectedTaskForVisualization] = useState(null);
+    const tasksPerPage = 5;
+    const pollingInterval = useRef(null);
+
+    // Filter states
+    // const [searchTerm, setSearchTerm] = useState('');
+    // const [statusFilter, setStatusFilter] = useState('all');
 
     // Pagination states
-    const [currentPage, setCurrentPage] = useState(1);
-    const tasksPerPage = 5;
+    // const [currentPage, setCurrentPage] = useState(1);
+    // const tasksPerPage = 5;
 
     const fetchTasks = async () => {
         try {
@@ -84,7 +87,7 @@ const TasksMonitor = ({ open, onClose }) => {
             filtered = filtered.filter(task => task.status === statusFilter);
         }
 
-        setFilteredTasks(filtered);
+        setFilteredTasks(filtered); // Update filteredTasks state
     }, [tasks, searchTerm, statusFilter]);
 
     // Reset to first page when filters change (but not when tasks data updates)
@@ -93,28 +96,27 @@ const TasksMonitor = ({ open, onClose }) => {
     }, [searchTerm, statusFilter]);
 
     // Calculate pagination
-    const totalPages = Math.ceil(filteredTasks.length / tasksPerPage);
+    const totalPages = Math.ceil(filteredTasks.length / tasksPerPage); // Use filteredTasks.length
     const startIndex = (currentPage - 1) * tasksPerPage;
     const endIndex = startIndex + tasksPerPage;
-    const currentTasks = filteredTasks.slice(startIndex, endIndex);
+    const currentTasks = filteredTasks.slice(startIndex, endIndex); // Use filteredTasks directly
 
     useEffect(() => {
         if (open) {
             fetchTasks();
-            // Start polling every 10 seconds
-            const interval = setInterval(fetchTasks, 10000);
-            setPollingInterval(interval);
+            // Start polling every 30 seconds
+            pollingInterval.current = setInterval(fetchTasks, 30000);
         } else {
             // Clear polling when dialog is closed
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
-                setPollingInterval(null);
+            if (pollingInterval.current) {
+                clearInterval(pollingInterval.current);
+                pollingInterval.current = null;
             }
         }
 
         return () => {
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
+            if (pollingInterval.current) {
+                clearInterval(pollingInterval.current);
             }
         };
     }, [open]);
@@ -127,6 +129,7 @@ const TasksMonitor = ({ open, onClose }) => {
                 return 'error';
             case 'data_processing':
             case 'model_prediction':
+            case 'visualization_preparation':
                 return 'warning';
             default:
                 return 'default';
@@ -141,6 +144,7 @@ const TasksMonitor = ({ open, onClose }) => {
                 return <ErrorIcon fontSize="small" />;
             case 'data_processing':
             case 'model_prediction':
+            case 'visualization_preparation':
                 return <PlayArrowIcon fontSize="small" />;
             default:
                 return <ScheduleIcon fontSize="small" />;
@@ -159,6 +163,19 @@ const TasksMonitor = ({ open, onClose }) => {
                 return 'default';
             default:
                 return 'default';
+        }
+    };
+
+    const getStageDisplayName = (stageName) => {
+        switch (stageName) {
+            case 'data_processing':
+                return 'Data Processing';
+            case 'model_prediction':
+                return 'Model Prediction';
+            case 'visualization_preparation':
+                return 'Visualization Preparation';
+            default:
+                return stageName.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
         }
     };
 
@@ -206,11 +223,12 @@ const TasksMonitor = ({ open, onClose }) => {
 
     const getTaskProgress = (task) => {
         const stages = task.stages;
-        const totalStages = 2; // data_processing and model_prediction
+        const totalStages = 3; // data_processing, model_prediction, and visualization_preparation
         let completedStages = 0;
 
         if (stages.data_processing?.status === 'completed') completedStages++;
         if (stages.model_prediction?.status === 'completed') completedStages++;
+        if (stages.visualization_preparation?.status === 'completed') completedStages++;
 
         return (completedStages / totalStages) * 100;
     };
@@ -223,10 +241,32 @@ const TasksMonitor = ({ open, onClose }) => {
         setExpandedTask(expandedTask === taskId ? null : taskId);
     };
 
-    const handleVisualize = (taskId) => {
-        // Dummy function for now - will be implemented later
-        console.log(`Visualize results for task: ${taskId}`);
-        alert(`Visualize functionality will be implemented later for task: ${taskId}`);
+    const handleVisualize = async (task) => {
+        try {
+            // Call the TiTiler service API to get visualization data
+            const response = await fetch(INSTAGEO_BACKEND_API_ENDPOINTS.VISUALIZE(task.task_id));
+
+            if (!response.ok) {
+                throw new Error(`Failed to get visualization data: ${response.status}`);
+            }
+
+            const titilerData = await response.json();
+
+            if (!titilerData || (titilerData && !titilerData.prediction && !titilerData.satellite)) {
+                throw new Error('Visualization data is not available yet for this task');
+            }
+
+            // Set the visualization data and open dialog
+            setSelectedTaskForVisualization({
+                ...task,
+                titiler_data: titilerData
+            });
+            setVisualizationDialogOpen(true);
+
+        } catch (error) {
+            console.error('Error getting visualization data:', error);
+            setError(`Failed to load visualization data: ${error.message}`);
+        }
     };
 
     const handleSearchChange = (event) => {
@@ -247,6 +287,7 @@ const TasksMonitor = ({ open, onClose }) => {
     };
 
     return (
+        <>
         <Dialog
             open={open}
             onClose={onClose}
@@ -279,25 +320,30 @@ const TasksMonitor = ({ open, onClose }) => {
                         value={searchTerm}
                         onChange={handleSearchChange}
                         InputProps={{
-                            startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                            startAdornment: <FilterListIcon sx={{ mr: 1, color: 'text.secondary' }} />,
                         }}
                         sx={{ minWidth: 250 }}
                     />
 
-                    <FormControl size="small" sx={{ minWidth: 150 }}>
-                        <InputLabel>Status Filter</InputLabel>
-                        <Select
-                            value={statusFilter}
-                            label="Status Filter"
-                            onChange={handleStatusFilterChange}
-                        >
-                            <MenuItem value="all">All Statuses</MenuItem>
-                            <MenuItem value="data_processing">Data Processing</MenuItem>
-                            <MenuItem value="model_prediction">Model Prediction</MenuItem>
-                            <MenuItem value="completed">Completed</MenuItem>
-                            <MenuItem value="failed">Failed</MenuItem>
-                        </Select>
-                    </FormControl>
+                    <TextField
+                        label="Status Filter"
+                        variant="outlined"
+                        size="small"
+                        value={statusFilter}
+                        onChange={handleStatusFilterChange}
+                        InputProps={{
+                            startAdornment: <FilterListIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                        }}
+                        sx={{ minWidth: 150 }}
+                        select
+                    >
+                        <MenuItem value="all">All Statuses</MenuItem>
+                        <MenuItem value="data_processing">Data Processing</MenuItem>
+                        <MenuItem value="model_prediction">Model Prediction</MenuItem>
+                        <MenuItem value="visualization_preparation">Visualization Preparation</MenuItem>
+                        <MenuItem value="completed">Completed</MenuItem>
+                        <MenuItem value="failed">Failed</MenuItem>
+                    </TextField>
 
                     <Button
                         variant="outlined"
@@ -339,16 +385,16 @@ const TasksMonitor = ({ open, onClose }) => {
                 {currentTasks.map((task) => (
                     <Card key={task.task_id} sx={{ mb: 2 }}>
                         <CardContent>
-                            <Grid container spacing={2} alignItems="center">
-                                <Grid item xs={12} md={2}>
+                            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(6, 1fr)' }, alignItems: 'center' }}>
+                                <Box>
                                     <Typography variant="subtitle2" color="textSecondary">
                                         Task ID
                                     </Typography>
                                     <Typography variant="body2" fontFamily="monospace">
                                         {task.task_id.slice(0, 8)}...
                                     </Typography>
-                                </Grid>
-                                <Grid item xs={12} md={2}>
+                                </Box>
+                                <Box>
                                     <Typography variant="subtitle2" color="textSecondary">
                                         Status
                                     </Typography>
@@ -358,32 +404,32 @@ const TasksMonitor = ({ open, onClose }) => {
                                         color={getStatusColor(task.status)}
                                         size="small"
                                     />
-                                </Grid>
-                                <Grid item xs={12} md={2}>
+                                </Box>
+                                <Box>
                                     <Typography variant="subtitle2" color="textSecondary">
                                         Model Type
                                     </Typography>
                                     <Typography variant="body2">
                                         {task.model_type}
                                     </Typography>
-                                </Grid>
-                                <Grid item xs={12} md={2}>
+                                </Box>
+                                <Box>
                                     <Typography variant="subtitle2" color="textSecondary">
                                         Bounding Boxes
                                     </Typography>
                                     <Typography variant="body2">
                                         {task.bboxes_count}
                                     </Typography>
-                                </Grid>
-                                <Grid item xs={12} md={2}>
+                                </Box>
+                                <Box>
                                     <Typography variant="subtitle2" color="textSecondary">
                                         Created
                                     </Typography>
                                     <Typography variant="body2">
                                         {formatDate(task.created_at)}
                                     </Typography>
-                                </Grid>
-                                <Grid item xs={12} md={2}>
+                                </Box>
+                                <Box>
                                     <Box display="flex" gap={1}>
                                         <Button
                                             size="small"
@@ -396,15 +442,15 @@ const TasksMonitor = ({ open, onClose }) => {
                                                 size="small"
                                                 variant="contained"
                                                 startIcon={<VisibilityIcon />}
-                                                onClick={() => handleVisualize(task.task_id)}
+                                                onClick={() => handleVisualize(task)}
                                                 sx={{ minWidth: 'auto' }}
                                             >
                                                 Visualize
                                             </Button>
                                         )}
                                     </Box>
-                                </Grid>
-                            </Grid>
+                                </Box>
+                            </Box>
 
                             {/* Progress Bar */}
                             <Box mt={2}>
@@ -427,9 +473,9 @@ const TasksMonitor = ({ open, onClose }) => {
                                     <Typography variant="h6" gutterBottom>
                                         Stage Details
                                     </Typography>
-                                    <Grid container spacing={2}>
+                                    <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' } }}>
                                         {Object.entries(task.stages).map(([stageName, stageData]) => (
-                                            <Grid item xs={12} md={6} key={stageName}>
+                                            <Box key={stageName}>
                                                 <Card variant="outlined">
                                                     <CardContent>
                                                         <Box display="flex" alignItems="center" mb={1}>
@@ -441,7 +487,7 @@ const TasksMonitor = ({ open, onClose }) => {
                                                                 sx={{ mr: 1 }}
                                                             />
                                                             <Typography variant="subtitle2">
-                                                                {stageName.replace('_', ' ')}
+                                                                {getStageDisplayName(stageName)}
                                                             </Typography>
                                                         </Box>
 
@@ -480,7 +526,7 @@ const TasksMonitor = ({ open, onClose }) => {
 
                                                                         {stageData.result.processing_duration && (
                                                                             <Typography variant="caption" display="block">
-                                                                                ⏱️ Extraction Duration: {stageData.result.processing_duration}
+                                                                                ⏱️ Extraction Duration: {stageData.result.processing_duration} s
                                                                             </Typography>
                                                                         )}
 
@@ -505,9 +551,27 @@ const TasksMonitor = ({ open, onClose }) => {
 
                                                                     </>
                                                                 )}
+
+                                                                {stageName === 'visualization_preparation' && stageData.result && (
+                                                                    <>
+                                                                        <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'success.main' }}>
+                                                                            ✅ Visualization Data Prepared
+                                                                        </Typography>
+
+                                                                        {stageData.result.processing_duration && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                ⏱️ Processing Duration: {stageData.result.processing_duration} s
+                                                                            </Typography>
+                                                                        )}
+
+                                                                    </>
+                                                                )}
+
                                                                 {/* Fallback for other results */}
                                                                 {!(stageName === 'data_processing' && (stageData.result.chips_created || stageData.result.processing_date)) &&
-                                                                 !(stageName === 'model_prediction' && stageData.result.aod_values) && (
+                                                                 !(stageName === 'model_prediction' && stageData.result.aod_values) &&
+                                                                 !(stageName === 'visualization_preparation' && stageData.result.processing_duration) && (
+
                                                                     <Typography variant="caption" display="block">
                                                                         Result: {JSON.stringify(stageData.result).slice(0, 100)}...
                                                                     </Typography>
@@ -516,9 +580,9 @@ const TasksMonitor = ({ open, onClose }) => {
                                                         )}
                                                     </CardContent>
                                                 </Card>
-                                            </Grid>
+                                            </Box>
                                         ))}
-                                    </Grid>
+                                    </Box>
                                 </Box>
                             )}
                         </CardContent>
@@ -550,6 +614,16 @@ const TasksMonitor = ({ open, onClose }) => {
                 )}
             </DialogContent>
         </Dialog>
+
+        {/* Visualization Data Dialog */}
+        <VisualizationDialog
+            open={visualizationDialogOpen}
+            onClose={() => setVisualizationDialogOpen(false)}
+            task={selectedTaskForVisualization}
+            onAddToMap={onAddTaskLayer}
+            onCloseTasksMonitor={onClose}
+        />
+    </>
     );
 };
 

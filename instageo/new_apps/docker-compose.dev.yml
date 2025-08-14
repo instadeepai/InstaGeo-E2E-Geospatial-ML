@@ -6,7 +6,7 @@ x-instageo-backend-service-defaults: &backend-defaults
     - REDIS_DB=0
   volumes:
     - ../../instageo:/app/instageo
-    - shared-data:${DATA_FOLDER}
+    - shared-data:${DATA_FOLDER:-/app/instageo-data}
 
 services:
   instageo-redis:
@@ -50,6 +50,15 @@ services:
     deploy:
       replicas: ${MODEL_PREDICTION_WORKER_REPLICAS:-2}
     command: rq worker model-prediction
+
+  instageo-backend-visualization-preparation-worker:
+    <<: *backend-defaults
+    image: instageo-backend:dev
+    depends_on:
+      - instageo-backend-api
+    deploy:
+      replicas: ${VISUALIZATION_PREPARATION_WORKER_REPLICAS:-1}
+    command: rq worker visualization-preparation
 
   instageo-backend-rq-dashboard:
     <<: *backend-defaults

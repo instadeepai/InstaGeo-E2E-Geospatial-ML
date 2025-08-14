@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import redis  # type: ignore
 
+from .cog_converter import COGConverter
 from .data_processor import DataProcessor
 from .jobs import Job, JobStatus
 
@@ -21,10 +22,13 @@ redis_conn: Any = redis.Redis(
     db=int(os.getenv("REDIS_DB", 0)),
 )
 
+DATA_FOLDER = os.getenv("DATA_FOLDER", "/app/instageo-data")
+
 # Initialize data processor
-data_processor = DataProcessor(
-    base_output_dir=os.getenv("DATA_FOLDER", "/app/instageo-data")
-)
+data_processor = DataProcessor(base_output_dir=DATA_FOLDER)
+
+# Initialize cog converter
+cog_converter = COGConverter()
 
 
 class TaskStatus:
@@ -32,6 +36,7 @@ class TaskStatus:
 
     DATA_PROCESSING = "data_processing"
     MODEL_PREDICTION = "model_prediction"
+    VISUALIZATION_PREPARATION = "visualization_preparation"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -81,26 +86,25 @@ class Task:
         # Job instances
         self.data_processing_job: Optional[Job] = None
         self.model_prediction_job: Optional[Job] = None
+        self.visualization_preparation_job: Optional[Job] = None
 
         # Task status - starts with data processing since it's created and immediately started
         self.status = TaskStatus.DATA_PROCESSING
 
         # Stages information
         self.stages: Dict[str, Dict[str, Union[str, None, Dict[str, Any]]]] = {
-            "data_processing": {
+            stage: {
                 "status": JobStatus.PENDING,
                 "started_at": None,
                 "completed_at": None,
                 "result": None,
                 "error": None,
-            },
-            "model_prediction": {
-                "status": JobStatus.PENDING,
-                "started_at": None,
-                "completed_at": None,
-                "result": None,
-                "error": None,
-            },
+            }
+            for stage in [
+                TaskStatus.DATA_PROCESSING,
+                TaskStatus.MODEL_PREDICTION,
+                TaskStatus.VISUALIZATION_PREPARATION,
+            ]
         }
 
         if is_new:
@@ -127,6 +131,11 @@ class Task:
             ),
             "model_prediction_job_id": (
                 self.model_prediction_job.job_id if self.model_prediction_job else ""
+            ),
+            "visualization_preparation_job_id": (
+                self.visualization_preparation_job.job_id
+                if self.visualization_preparation_job
+                else ""
             ),
         }
 
@@ -164,7 +173,11 @@ class Task:
             logger.debug(f"Task {self.task_id} loading key={key}, value={value}")
             # Handle empty strings
             if value == "":
-                if key in ["data_processing_job_id", "model_prediction_job_id"]:
+                if key in [
+                    "data_processing_job_id",
+                    "model_prediction_job_id",
+                    "visualization_preparation_job_id",
+                ]:
                     value = None
                 elif key == "parameters":
                     value = {}
@@ -201,6 +214,17 @@ class Task:
                 self.model_prediction_job = Job.get(self.model_prediction_job_id)
             except ValueError:
                 self.model_prediction_job = None
+        if (
+            hasattr(self, "visualization_preparation_job_id")
+            and self.visualization_preparation_job_id
+        ):
+            try:
+                self.visualization_preparation_job = Job.get(
+                    self.visualization_preparation_job_id
+                )
+            except ValueError:
+                self.visualization_preparation_job = None
+
         # Load stages information
         self.stages = self._load_stages()
 
@@ -208,7 +232,11 @@ class Task:
         """Load stages information from Redis."""
         stages = {}
 
-        for stage in ["data_processing", "model_prediction"]:
+        for stage in [
+            TaskStatus.DATA_PROCESSING,
+            TaskStatus.MODEL_PREDICTION,
+            TaskStatus.VISUALIZATION_PREPARATION,
+        ]:
             stage_data = redis_conn.hgetall(f"task:{self.task_id}:stage:{stage}")
 
             if stage_data:
@@ -291,6 +319,31 @@ class Task:
 
         return job_id
 
+    def start_visualization_preparation(self, processed_data: Dict[str, Any]) -> str:
+        """Start the visualization preparation stage.
+
+        Args:
+            processed_data: Data from model prediction stage.
+
+        Returns:
+            Job ID.
+        """
+        self.status = TaskStatus.VISUALIZATION_PREPARATION
+        self.stages["visualization_preparation"]["status"] = JobStatus.RUNNING
+        self.stages["visualization_preparation"]["started_at"] = (
+            datetime.utcnow().isoformat() + "Z"
+        )
+
+        # Create and enqueue visualization preparation job
+        self.visualization_preparation_job = Job.create_visualization_preparation(
+            self.task_id, processed_data, self.parameters
+        )
+        job_id = self.visualization_preparation_job.enqueue(timeout="1h")
+
+        self.save()
+
+        return job_id
+
     def complete_stage(
         self,
         stage: str,
@@ -327,12 +380,18 @@ class Task:
                 result=result,
                 error=error,
             )
-
+        elif (
+            stage == "visualization_preparation" and self.visualization_preparation_job
+        ):
+            self.visualization_preparation_job.update_status(
+                JobStatus.FAILED if error else JobStatus.COMPLETED,
+                result=result,
+                error=error,
+            )
         if error:
             self.status = TaskStatus.FAILED
-        elif stage == "model_prediction" and not error:
+        elif stage == "visualization_preparation" and not error:
             self.status = TaskStatus.COMPLETED
-
         self.save()
 
     def get_job_status(self, job_type: str) -> Optional[Dict[str, Any]]:
@@ -344,10 +403,15 @@ class Task:
         Returns:
             Job status dictionary or None if job doesn't exist.
         """
-        if job_type == "data_processing" and self.data_processing_job:
+        if job_type == TaskStatus.DATA_PROCESSING and self.data_processing_job:
             return self.data_processing_job.to_dict()
-        elif job_type == "model_prediction" and self.model_prediction_job:
+        elif job_type == TaskStatus.MODEL_PREDICTION and self.model_prediction_job:
             return self.model_prediction_job.to_dict()
+        elif (
+            job_type == TaskStatus.VISUALIZATION_PREPARATION
+            and self.visualization_preparation_job
+        ):
+            return self.visualization_preparation_job.to_dict()
         return None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -370,8 +434,15 @@ class Task:
             "parameters": self.parameters,
             "stages": self.stages,
             "jobs": {
-                "data_processing": self.get_job_status("data_processing"),
-                "model_prediction": self.get_job_status("model_prediction"),
+                TaskStatus.DATA_PROCESSING: self.get_job_status(
+                    TaskStatus.DATA_PROCESSING
+                ),
+                TaskStatus.MODEL_PREDICTION: self.get_job_status(
+                    TaskStatus.MODEL_PREDICTION
+                ),
+                TaskStatus.VISUALIZATION_PREPARATION: self.get_job_status(
+                    TaskStatus.VISUALIZATION_PREPARATION
+                ),
             },
         }
 
@@ -507,18 +578,22 @@ def process_model_prediction_with_task(
 
         logger.info(f"Running model prediction for task {task_id}")
         logger.info(f"Processed data: {processed_data}")
-        time.sleep(100)
+        time.sleep(10)
 
         # Example prediction results
         prediction_results = {
+            "data_path": processed_data["data_path"],
+            "dataset_csv_path": processed_data["dataset_csv_path"],
             "aod_values": [0.15, 0.22, 0.18, 0.31],
             "confidence_scores": [0.85, 0.78, 0.92, 0.71],
             "bboxes": processed_data["bboxes"],
             "prediction_date": datetime.utcnow().isoformat() + "Z",
+            "chip_size": processed_data["chip_size"],
         }
 
         # Mark model prediction as completed
         task.complete_stage("model_prediction", result=prediction_results)
+        task.start_visualization_preparation(prediction_results)
 
         logger.info(
             {
@@ -538,6 +613,68 @@ def process_model_prediction_with_task(
             {
                 "status": "error",
                 "message": f"Model prediction failed: {str(e)}",
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+            }
+        )
+
+
+def process_visualization_preparation_with_task(
+    task_id: str,
+    processed_data: Dict[str, Any],
+    parameters: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Process visualization preparation with task tracking.
+
+    Args:
+        task_id: Task ID.
+        processed_data: Data from model prediction stage.
+        parameters: Optional model parameters.
+
+    Returns:
+        Job result dictionary.
+    """
+    try:
+        task = Task.get(task_id)
+        logger.info(f"Running visualization preparation for task {task_id}")
+        logger.info(f"Processed data: {processed_data}")
+        results = cog_converter.merge_task_files_to_cog(
+            data_path=processed_data["data_path"],
+            chip_size=processed_data["chip_size"],
+            compute_seg_stats=(processed_data.get("model_type") == "seg"),
+        )
+        logger.info(f"Chips merged cog path: {results['chips_merged_cog_path']}")
+        logger.info(
+            f"Predictions merged cog path: {results['predictions_merged_cog_path']}"
+        )
+        logger.info(f"Segmentation stats: {results['segmentation_stats']}")
+
+        safe_results = {
+            "viz_data_ready": True,
+            "processing_duration": results["processing_duration"],
+            "segmentation_stats": results["segmentation_stats"],
+        }
+
+        # Mark visualization preparation as completed
+        task.complete_stage(TaskStatus.VISUALIZATION_PREPARATION, result=safe_results)
+
+        logger.info(
+            {
+                "status": "success",
+                "message": "Visualization preparation completed successfully.",
+                "results": results,
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+            }
+        )
+
+    except Exception as e:
+        # Mark visualization preparation as failed
+        task = Task.get(task_id)
+        task.complete_stage("visualization_preparation", error=str(e))
+
+        logger.error(
+            {
+                "status": "error",
+                "message": f"Visualization preparation failed: {str(e)}",
                 "completed_at": datetime.utcnow().isoformat() + "Z",
             }
         )

@@ -56,6 +56,7 @@ apps_dependencies = [
     "rq==2.4.0",
     "rq-dashboard==0.8.3.2",
     "types-redis>=4.6.0",
+    "titiler.core==0.22.4",
 ]
 setup(
     name="instageo",
