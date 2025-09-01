@@ -165,6 +165,7 @@ class PrithviSegmentationModule(PrithviBaseModule):
         self.log(f"{step_type}_Recall", metrics["recall"], logger=True)
 
         # Only compute and log ROC-AUC metrics during testing
+
         if step_type == "test":
             auc_metrics = getattr(self, f"{step_type}_auc").score()
             self.log(f"{step_type}_roc_auc", auc_metrics["roc_auc_macro"], logger=True)

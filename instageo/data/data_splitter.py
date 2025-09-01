@@ -22,6 +22,8 @@ from absl import app, flags, logging
 from haversine import haversine
 from matplotlib.patches import Patch
 from shapely.geometry import Point
+from sklearn.cluster import KMeans
+from sklearn.discriminant_analysis import StandardScaler
 from sklearn.model_selection import train_test_split
 
 # Visualization constants
@@ -110,6 +112,10 @@ flags.DEFINE_float(
 flags.DEFINE_string("input_file", "", "Path to input CSV file")
 
 flags.DEFINE_string("output_dir", "", "Base directory for output files")
+
+flags.DEFINE_integer("n_clusters", 20, "Number of clusters to create")
+
+flags.DEFINE_bool("use_kmeans", True, "Whether to use KMeans clustering")
 
 
 # ===== Basic Utility Functions =====
@@ -801,6 +807,149 @@ def _split_data(
     return test_df, train_df, val_df
 
 
+def find_closest_clusters(
+    centroids: np.ndarray, available_clusters: Set[int]
+) -> Tuple[int, int] | None:
+    """Function to find closest clusters.
+
+    Args:
+        centroids: np.ndarray of cluster centroids
+        available_clusters: Set of available clusters
+
+    Returns:
+        Tuple of (int, int) of the closest pair of clusters, or None if no closest pair is found
+    """
+    min_dist = float("inf")
+    closest_pair = None
+
+    for i in available_clusters:
+        for j in available_clusters:
+            if i < j:  # Avoid comparing same cluster and duplicates
+                dist = np.linalg.norm(centroids[i] - centroids[j])
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_pair = (i, j)
+
+    return closest_pair
+
+
+def merge_clusters(
+    cluster1: int, cluster2: int, df_with_clusters: pd.DataFrame
+) -> pd.DataFrame:
+    """Function to merge two clusters.
+
+    Args:
+        cluster1: int of the first cluster
+        cluster2: int of the second cluster
+        df_with_clusters: pd.DataFrame with clusters
+
+    Returns:
+        pd.DataFrame with clusters
+    """
+    # Assign all points from cluster2 to cluster1
+    df_with_clusters.loc[df_with_clusters["cluster"] == cluster2, "cluster"] = cluster1
+    return df_with_clusters
+
+
+def _try_kmeans_groups(df: pd.DataFrame, n_clusters: int) -> None:
+    """Try to create groups based on KMeans clustering.
+
+    Args:
+        df: Input DataFrame
+        n_clusters: Number of clusters to create
+    """
+    df = df.copy()
+    df[["lat", "lon"]] = df["mgrs_tile"].apply(
+        lambda x: pd.Series(mgrs_coord_cache.get(x))
+    )
+    std = StandardScaler()
+    df[["lat", "lon"]] = std.fit_transform(df[["lat", "lon"]])
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    df["cluster"] = kmeans.fit_predict(df[["lat", "lon"]])
+
+    # Calculate target sizes
+    total_size = len(df)
+    target_test_size = int(total_size * FLAGS.test_ratio)
+    target_val_size = int(total_size * FLAGS.val_ratio)
+
+    # Get cluster centroids
+    cluster_centroids = kmeans.cluster_centers_
+
+    # Initialize splits
+    test_clusters = set()
+    val_clusters = set()
+    train_clusters = set()
+
+    # Start with all clusters available
+    available_clusters = set(range(n_clusters))
+    current_test_size = 0
+    current_val_size = 0
+
+    # Merge clusters for test set
+    while current_test_size < target_test_size and len(available_clusters) > 1:
+        # Find closest pair of clusters
+        closest_pair = find_closest_clusters(cluster_centroids, available_clusters)
+        if closest_pair is None:
+            break
+
+        cluster1, cluster2 = closest_pair
+
+        # Merge the clusters
+        df = merge_clusters(cluster1, cluster2, df)
+
+        # Update available clusters
+        available_clusters.remove(cluster2)
+        test_clusters.add(cluster1)
+
+        # Update current size
+        current_test_size = len(df[df["cluster"].isin(test_clusters)])
+
+    # Get remaining data for validation set
+    remaining_df = df[~df["cluster"].isin(test_clusters)]
+    available_clusters = available_clusters - test_clusters
+
+    # Merge clusters for validation set
+    while current_val_size < target_val_size and len(available_clusters) > 1:
+        # Find closest pair of clusters
+        closest_pair = find_closest_clusters(cluster_centroids, available_clusters)
+        if closest_pair is None:
+            break
+
+        cluster1, cluster2 = closest_pair
+
+        # Merge the clusters
+        remaining_df = merge_clusters(cluster1, cluster2, remaining_df)
+
+        # Update available clusters
+        available_clusters.remove(cluster2)
+        val_clusters.add(cluster1)
+
+        # Update current size
+        current_val_size = len(remaining_df[remaining_df["cluster"].isin(val_clusters)])
+
+    # Get training set (everything else)
+    train_clusters = available_clusters - val_clusters
+
+    # Create the splits
+    test_df = df[df["cluster"].isin(test_clusters)].copy()
+    val_df = remaining_df[remaining_df["cluster"].isin(val_clusters)].copy()
+    train_df = remaining_df[remaining_df["cluster"].isin(train_clusters)].copy()
+
+    # Clean up temporary columns
+    for df_split in [test_df, val_df, train_df]:
+        if df_split is not None:
+            df_split.drop(columns=["cluster", "lat", "lon"], inplace=True)
+
+    logging.info(
+        f"KMeans splits created: test={len(test_df)}, val={len(val_df)}, train={len(train_df)}"
+    )
+
+    # Save the splits
+    save_splits(train_df, val_df, test_df, FLAGS.output_dir, FLAGS.visualize)
+
+    return None  # Return None since we've already saved the splits
+
+
 def split_dataset(
     df: pd.DataFrame,
     val_ratio: float = 0.15,
@@ -815,7 +964,9 @@ def split_dataset(
 ) -> None:
     """Split dataset into train, validation, and test sets.
 
-    First attempts to split based on MGRS tiles, keeping geographically close
+    First tries to split based on KMeans clustering, then attempts to split based
+    on MGRS tiles,
+    keeping geographically close
     tiles together and ensuring test set has more recent years. If not enough
     groups are available, falls back to splitting by years only. If year-based
     splitting is not possible, falls back to random splitting.
@@ -835,6 +986,12 @@ def split_dataset(
     random.seed(random_state)
     np.random.seed(random_state)
     pd.set_option("mode.chained_assignment", None)
+
+    # Try KMeans clustering first if enabled
+    if FLAGS.use_kmeans:
+        logging.info("Using KMeans clustering strategy")
+        _try_kmeans_groups(df, n_clusters=FLAGS.n_clusters)
+        return
 
     # Try MGRS tile grouping first
     mgrs_groups = _try_mgrs_groups(df, distance_threshold)
