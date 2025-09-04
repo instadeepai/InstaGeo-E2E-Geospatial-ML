@@ -5,8 +5,7 @@ from unittest.mock import MagicMock, patch
 import geopandas as gpd
 import pandas as pd
 import pytest
-import shapely
-from pystac import Item
+from pystac import Asset, Item
 from pystac_client import Client
 from shapely.geometry import Point, Polygon
 
@@ -14,9 +13,11 @@ from instageo.data.settings import HLSAPISettings, HLSBandsSettings
 from instageo.data.stac_utils import (
     dispatch_candidate_items,
     find_best_items,
+    find_closest_items,
     get_raster_tile_info,
     is_daytime,
     is_valid_dataset_entry,
+    rename_stac_items,
     retrieve_stac_metadata,
 )
 
@@ -42,26 +43,62 @@ def mock_item():
     )
 
 
-def test_is_daytime(monkeypatch, mock_item):
+def test_is_daytime():
     """Tests the is_daytime function with a known daytime scenario in Tunis."""
+    tunis_daytime_item = Item(
+        id="test_item",
+        geometry=None,
+        bbox=[10.1658, 36.8065, 10.1658, 36.8065],  # Coordinates for Tunis,
+        properties={"datetime": "2024-03-27T13:00:00Z"},
+        href="",
+        datetime=datetime.datetime(
+            2024, 3, 27, 13, 0, 0, tzinfo=timezone.utc  # daytime
+        ),
+    )
+    # Test daytime scenario for Tunis at 13:00 UTC
+    assert is_daytime(tunis_daytime_item) is True
 
-    class MockBox:
-        def __init__(self, *args):
-            pass
 
-        @property
-        def centroid(self):
-            class MockPoint:
-                # Tunis coordinates
-                x = 10.1658  # longitude
-                y = 36.8065  # latitude
+def test_is_daytime_edge_cases():
+    """Test is_daytime with edge cases."""
+    # Test with item at sunrise
+    sunrise_item = Item(
+        id="sunrise",
+        geometry=None,
+        bbox=[30.0, -2.0, 30.2, -1.8],  # Kigali
+        properties={"datetime": "2024-03-27T04:30:00Z"},
+        datetime=datetime.datetime(
+            2024, 3, 27, 4, 30, 0, tzinfo=timezone.utc
+        ),  # 6:30am Kigali time (UTC+2)
+        href="",
+    )
+    assert is_daytime(sunrise_item) is True
 
-            return MockPoint()
+    # Test with item at sunset
+    sunset_item = Item(
+        id="sunset",
+        geometry=None,
+        bbox=[30.0, -2.0, 30.2, -1.8],  # Kigali
+        properties={"datetime": "2024-03-27T16:00:00Z"},
+        datetime=datetime.datetime(
+            2024, 3, 27, 16, 0, 0, tzinfo=timezone.utc
+        ),  # 6pm Kigali time (UTC+2)
+        href="",
+    )
+    assert is_daytime(sunset_item) is True
 
-    monkeypatch.setattr(shapely.geometry, "box", MockBox)
-    expected = True
-
-    assert is_daytime(mock_item) == expected
+    # Test with item at midnight
+    midnight_item = Item(
+        id="midnight",
+        geometry=None,
+        bbox=[30.0, -2.0, 30.2, -1.8],  # Kigali
+        properties={"datetime": "2024-03-27T22:00:00Z"},
+        datetime=datetime.datetime(
+            2024, 3, 27, 22, 0, 0, tzinfo=timezone.utc
+        ),  # Midnight Kigali time (UTC+2)
+        href="",
+    )
+    assert is_daytime(midnight_item) is False
 
 
 @pytest.fixture
@@ -108,7 +145,7 @@ def test_get_raster_tile_info(sample_data):
     expected_tile_info = pd.DataFrame(
         {
             "tile_id": ["tile_1", "tile_2"],
-            "min_date": ["2024-01-08", "2024-02-13"],
+            "min_date": ["2024-01-08T00:00:00", "2024-02-13T00:00:00"],
             "max_date": ["2024-01-17T23:59:59", "2024-02-22T23:59:59"],
             "lon_min": [0.0, 2.0],
             "lon_max": [1.0, 3.0],
@@ -321,3 +358,149 @@ def test_dispatch_hls_candidate_items(mock_observations, mock_candidate_items):
     actual_output = result[["id", "hls_candidate_items"]].set_index("id")
 
     assert actual_output.equals(expected_output)
+
+
+def test_rename_stac_items():
+    """Test rename_stac_items function."""
+    # Create mock items with different collections and all their assets
+    item1 = Item(
+        id="item1",
+        geometry=None,
+        bbox=[0, 0, 1, 1],
+        properties={},
+        collection="HLSL30_2.0",
+        datetime=datetime.datetime.now(timezone.utc),
+        href="",
+    )
+    # Add all HLSL30 assets
+    item1.add_asset("B01", Asset(href="test_b01.tif", media_type="image/tiff"))
+    item1.add_asset("B02", Asset(href="test_b02.tif", media_type="image/tiff"))
+    item1.add_asset("B03", Asset(href="test_b03.tif", media_type="image/tiff"))
+    item1.add_asset("B04", Asset(href="test_b04.tif", media_type="image/tiff"))
+    item1.add_asset("B05", Asset(href="test_b05.tif", media_type="image/tiff"))
+    item1.add_asset("B06", Asset(href="test_b06.tif", media_type="image/tiff"))
+    item1.add_asset("B07", Asset(href="test_b07.tif", media_type="image/tiff"))
+    item1.add_asset("B09", Asset(href="test_b09.tif", media_type="image/tiff"))
+    item1.add_asset("B10", Asset(href="test_b10.tif", media_type="image/tiff"))
+    item1.add_asset("B11", Asset(href="test_b11.tif", media_type="image/tiff"))
+
+    item2 = Item(
+        id="item2",
+        geometry=None,
+        bbox=[0, 0, 1, 1],
+        properties={},
+        collection="HLSS30_2.0",
+        datetime=datetime.datetime.now(timezone.utc),
+        href="",
+    )
+    # Add all HLSS30 assets
+    item2.add_asset("B01", Asset(href="test_b01.tif", media_type="image/tiff"))
+    item2.add_asset("B02", Asset(href="test_b02.tif", media_type="image/tiff"))
+    item2.add_asset("B03", Asset(href="test_b03.tif", media_type="image/tiff"))
+    item2.add_asset("B04", Asset(href="test_b04.tif", media_type="image/tiff"))
+    item2.add_asset("B05", Asset(href="test_b05.tif", media_type="image/tiff"))
+    item2.add_asset("B06", Asset(href="test_b06.tif", media_type="image/tiff"))
+    item2.add_asset("B07", Asset(href="test_b07.tif", media_type="image/tiff"))
+    item2.add_asset("B08", Asset(href="test_b08.tif", media_type="image/tiff"))
+    item2.add_asset("B8A", Asset(href="test_b8a.tif", media_type="image/tiff"))
+    item2.add_asset("B09", Asset(href="test_b09.tif", media_type="image/tiff"))
+    item2.add_asset("B10", Asset(href="test_b10.tif", media_type="image/tiff"))
+    item2.add_asset("B11", Asset(href="test_b11.tif", media_type="image/tiff"))
+    item2.add_asset("B12", Asset(href="test_b12.tif", media_type="image/tiff"))
+
+    # Test renaming
+    renamed_items = rename_stac_items([item1, item2], nameplate=BANDS.NAMEPLATE)
+    assert len(renamed_items) == 2
+
+    # Check HLSL30 assets were renamed correctly
+    assert "coastal aerosol" in renamed_items[0].assets
+    assert "blue" in renamed_items[0].assets
+    assert "green" in renamed_items[0].assets
+    assert "red" in renamed_items[0].assets
+    assert "nir narrow" in renamed_items[0].assets
+    assert "swir 1" in renamed_items[0].assets
+    assert "swir 2" in renamed_items[0].assets
+
+    # Check HLSS30 assets were renamed correctly
+    assert "coastal aerosol" in renamed_items[1].assets
+    assert "blue" in renamed_items[1].assets
+    assert "green" in renamed_items[1].assets
+    assert "red" in renamed_items[1].assets
+    assert "red-edge 1" in renamed_items[1].assets
+    assert "red-edge 2" in renamed_items[1].assets
+    assert "red-edge 3" in renamed_items[1].assets
+    assert "nir broad" in renamed_items[1].assets
+    assert "nir narrow" in renamed_items[1].assets
+    assert "water vapor" in renamed_items[1].assets
+    assert "cirrus" in renamed_items[1].assets
+    assert "swir 1" in renamed_items[1].assets
+    assert "swir 2" in renamed_items[1].assets
+
+
+def test_find_closest_items():
+    """Test find_closest_hls_items function."""
+    # Create mock observation with dates
+    obsv = pd.Series(
+        {
+            "tile_queries": ("tile1", ["2024-03-01T12:00:00Z", "2024-03-02T12:00:00Z"]),
+            "hls_candidate_items": [
+                Item(
+                    id="item1",
+                    geometry=None,
+                    bbox=[0, 0, 1, 1],
+                    properties={
+                        "datetime": "2024-03-01T12:00:00Z",
+                        "eo:cloud_cover": 10,
+                    },
+                    datetime=datetime.datetime(
+                        2024, 3, 1, 12, 0, 0, tzinfo=timezone.utc
+                    ),
+                    href="",
+                ),
+                Item(
+                    id="item2",
+                    geometry=None,
+                    bbox=[0, 0, 1, 1],
+                    properties={
+                        "datetime": "2024-03-02T12:00:00Z",
+                        "eo:cloud_cover": 10,
+                    },
+                    datetime=datetime.datetime(
+                        2024, 3, 2, 12, 0, 0, tzinfo=timezone.utc
+                    ),
+                    href="",
+                ),
+            ],
+        }
+    )
+
+    # Test with valid temporal tolerance
+    result = find_closest_items(
+        obsv, temporal_tolerance=0, candidate_items_field="hls_candidate_items"
+    )
+    assert len(result) == 2
+    assert result[0].id == "item1"
+    assert result[1].id == "item2"
+
+    # Test with no matching items
+    obsv_no_match = pd.Series(
+        {
+            "tile_queries": ("tile1", ["2024-03-10"]),
+            "hls_candidate_items": [
+                Item(
+                    id="item1",
+                    geometry=None,
+                    bbox=[0, 0, 1, 1],
+                    properties={"datetime": "2024-03-01T12:00:00Z"},
+                    datetime=datetime.datetime(
+                        2024, 3, 1, 12, 0, 0, tzinfo=timezone.utc
+                    ),
+                    href="",
+                )
+            ],
+        }
+    )
+    result = find_closest_items(
+        obsv_no_match, temporal_tolerance=1, candidate_items_field="hls_candidate_items"
+    )
+    assert result[0] is None

@@ -13,10 +13,11 @@ from pystac_client import Client
 from rasterio.crs import CRS
 from shapely.geometry import Point, Polygon
 
-from instageo.data.data_pipeline import apply_mask
+from instageo.data.data_pipeline import apply_mask, get_tile_info
 from instageo.data.hls_utils import (
     decode_fmask_value,
     dispatch_hls_candidate_items,
+    get_raster_tile_info,
     is_valid_dataset_entry,
     open_mf_tiff_dataset,
     parallel_download,
@@ -86,7 +87,7 @@ def observation_data():
 def setup_and_teardown_output_dir():
     output_dir = "/tmp/test_hls"
     os.makedirs(output_dir, exist_ok=True)
-    yield
+    yield output_dir
     shutil.rmtree(output_dir)
 
 
@@ -295,24 +296,6 @@ def test_parallel_download_removes_small_files(
 
 
 @pytest.fixture
-def mock_item():
-    """Creates a mock PySTAC Item with a fixed time and location for testing."""
-    properties = {"datetime": "2024-03-27T13:00:00Z"}
-
-    bbox = [10.1658, 36.8065, 10.1658, 36.8065]  # Coordinates for Tunis
-    return Item(
-        id="test_item",
-        geometry=None,
-        bbox=bbox,
-        properties=properties,
-        href="",
-        datetime=datetime.datetime(
-            2024, 3, 27, 13, 0, 0, tzinfo=timezone.utc  # daytime
-        ),
-    )
-
-
-@pytest.fixture
 def sample_data():
     """Creates a sample GeoDataFrame for testing."""
     data = {
@@ -439,14 +422,6 @@ def test_dispatch_hls_candidate_items(mock_observations, mock_candidate_items):
     assert actual_output.equals(expected_output)
 
 
-@pytest.fixture
-def tiles_database(mock_candidate_items):
-    """Creates a mock tiles database."""
-    return {
-        "tile1": mock_candidate_items,
-    }
-
-
 def test_is_valid_dataset_entry():
     """Test the is_valid_dataset_entry function."""
     valid_obsv = pd.Series({"hls_granules": ["granule_1", "granule_2", "granule_3"]})
@@ -459,3 +434,82 @@ def test_is_valid_dataset_entry():
         {"hls_granules": ["granule_1", "granule_1", "granule_3"]}
     )
     assert is_valid_dataset_entry(duplicate_granule_obsv) is False
+
+
+@pytest.fixture
+def mock_earthaccess_login():
+    with patch("instageo.data.hls_utils.earthaccess.login") as mock_login:
+        yield mock_login
+
+
+@pytest.fixture
+def mock_earthaccess_download():
+    with patch("instageo.data.hls_utils.earthaccess.download") as mock_download:
+        yield mock_download
+
+
+@pytest.fixture
+def mock_os_path_exists():
+    with patch("instageo.data.hls_utils.os.path.exists") as mock_exists:
+        yield mock_exists
+
+
+@pytest.fixture
+def mock_os_operations():
+    with patch("instageo.data.hls_utils.os.listdir") as mock_listdir, patch(
+        "instageo.data.hls_utils.os.remove"
+    ) as mock_remove, patch(
+        "instageo.data.hls_utils.os.path.getsize", return_value=2000
+    ):
+        yield mock_listdir, mock_remove
+
+
+@pytest.fixture
+def mock_logging_warning():
+    with patch("instageo.data.hls_utils.logging.warning") as mock_warn:
+        yield mock_warn
+
+
+def test_get_raster_tile_info(sample_data):
+    """Test function output for expected behavior."""
+    tile_info, tile_queries = get_raster_tile_info(
+        sample_data, num_steps=2, temporal_step=5, temporal_tolerance=2
+    )
+
+    assert isinstance(tile_info, pd.DataFrame)
+    assert set(tile_info.columns) == {
+        "tile_id",
+        "min_date",
+        "max_date",
+        "lon_min",
+        "lon_max",
+        "lat_min",
+        "lat_max",
+    }
+    assert isinstance(tile_queries, list)
+    assert all(isinstance(i, tuple) for i in tile_queries)
+    assert all(isinstance(i[1], list) for i in tile_queries)
+    for date_col in ["min_date", "max_date"]:
+        assert tile_info[date_col].apply(lambda x: isinstance(x, str)).all()
+    assert len(tile_queries) == len(sample_data)
+    expected_tile_queries = [
+        ("tile_1", ["2024-01-15T00:00:00", "2024-01-10T00:00:00"]),
+        ("tile_2", ["2024-02-20T00:00:00", "2024-02-15T00:00:00"]),
+    ]
+    assert tile_queries == expected_tile_queries
+    expected_tile_info = pd.DataFrame(
+        {
+            "tile_id": ["tile_1", "tile_2"],
+            "min_date": ["2024-01-08T00:00:00", "2024-02-13T00:00:00"],
+            "max_date": ["2024-01-17T23:59:59", "2024-02-22T23:59:59"],
+            "lon_min": [0.0, 2.0],
+            "lon_max": [1.0, 3.0],
+            "lat_min": [0.0, 2.0],
+            "lat_max": [1.0, 3.0],
+        }
+    )
+    pd.testing.assert_frame_equal(
+        tile_info.sort_values("tile_id").reset_index(drop=True),
+        expected_tile_info.sort_values("tile_id").reset_index(drop=True),
+        check_dtype=True,
+    )

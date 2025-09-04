@@ -76,10 +76,21 @@ def make_valid_bbox(
 
     """
     epsilon = 1e-3
-    if box(lon_min, lat_min, lon_max, lat_max).is_valid:
-        return lon_min, lat_min, lon_max, lat_max
+
+    # Ensure coordinates are in correct order (min <= max)
+    actual_lon_min = min(lon_min, lon_max)
+    actual_lon_max = max(lon_min, lon_max)
+    actual_lat_min = min(lat_min, lat_max)
+    actual_lat_max = max(lat_min, lat_max)
+
+    # Try to create a box with the corrected coordinates
+    bbox = box(actual_lon_min, actual_lat_min, actual_lon_max, actual_lat_max)
+
+    if bbox.is_valid and bbox.area > 0:
+        return actual_lon_min, actual_lat_min, actual_lon_max, actual_lat_max
     else:
-        return box(lon_min, lat_min, lon_max, lat_max).buffer(epsilon).bounds
+        # If the box is invalid or has zero area, add a buffer
+        return bbox.buffer(epsilon).bounds
 
 
 def slice_xr_dataset(
@@ -124,7 +135,8 @@ def slice_xr_dataset(
             x=slice(col_min, col_min + chip_size if chip_size else col_max),
             y=slice(row_min, row_min + chip_size if chip_size else row_max),
         )
-
+        if clipped.data.size == 0:
+            return None
         return clipped
     except rasterio.RasterioIOError:
         print("No data found in bounds. Skipping this geometry.")

@@ -268,7 +268,7 @@ def get_raster_tile_info(
     total_temporal_tol = temporal_tolerance + (temporal_tolerance_minutes / (24 * 60))
     tile_info_df["min_date"] -= pd.Timedelta(days=total_temporal_tol)
     tile_info_df["max_date"] += pd.Timedelta(days=total_temporal_tol)
-    tile_info_df["min_date"] = tile_info_df["min_date"].dt.strftime("%Y-%m-%d")
+    tile_info_df["min_date"] = tile_info_df["min_date"].dt.strftime("%Y-%m-%dT%H:%M:%S")
     if push_max_date_to_end_of_day:
         tile_info_df["max_date"] = tile_info_df["max_date"].dt.strftime(
             "%Y-%m-%dT23:59:59"
