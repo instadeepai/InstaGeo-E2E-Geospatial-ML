@@ -55,9 +55,7 @@ class DataProcessor:
             self.data_dir.mkdir(parents=True, exist_ok=True)
 
             # Run the bounding boxes data pipeline
-            logger.info(
-                f"Running bounding boxes data pipeline with: {bboxes=} and {parameters=}"
-            )
+            logger.info(f"Running bounding boxes data pipeline with: {bboxes=} and {parameters=}")
             pipeline_params = self._prepare_pipeline_params(bboxes, parameters)
             self._run_pipeline(pipeline_params)
 
@@ -71,9 +69,7 @@ class DataProcessor:
             results["data_source"] = parameters.get("data_source", "unknown")
             results["bboxes_processed"] = len(bboxes)
             results["target_date"] = parameters.get("date", "unknown")
-            results["temporal_tolerance"] = parameters.get(
-                "temporal_tolerance", "unknown"
-            )
+            results["temporal_tolerance"] = parameters.get("temporal_tolerance", "unknown")
             results["chip_size"] = parameters.get("chip_size", "unknown")
 
             logger.info(f"Data extraction completed for task {task_id}")
@@ -150,9 +146,7 @@ class DataProcessor:
         Returns:
             True if data is ready, False otherwise.
         """
-        return (
-            self.get_data_path() is not None and self.get_dataset_csv_path() is not None
-        )
+        return self.get_data_path() is not None and self.get_dataset_csv_path() is not None
 
     def get_data_path(self) -> Optional[str]:
         """Get the data path for a task.

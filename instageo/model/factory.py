@@ -92,8 +92,6 @@ def create_model(cfg: DictConfig) -> PrithviBaseModule:
                 load_pretrained_weights=False,
             )
         model.load_state_dict(
-            torch.load(cfg.checkpoint_path, map_location=torch.device("cpu"))[
-                "state_dict"
-            ]
+            torch.load(cfg.checkpoint_path, map_location=torch.device("cpu"))["state_dict"]
         )
     return model

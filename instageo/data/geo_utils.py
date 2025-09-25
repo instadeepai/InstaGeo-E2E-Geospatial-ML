@@ -116,9 +116,7 @@ def slice_xr_dataset(
     try:
         minx, miny, maxx, maxy = geometry.bounds
         if geometry_crs is not None:
-            transformer = Transformer.from_crs(
-                geometry_crs, dataset.rio.crs, always_xy=True
-            )
+            transformer = Transformer.from_crs(geometry_crs, dataset.rio.crs, always_xy=True)
             minx, miny = transformer.transform(minx, miny)
             maxx, maxy = transformer.transform(maxx, maxy)
 
@@ -229,8 +227,6 @@ def create_grid_polygons(
         crs=f"EPSG:{crs}",
     )
     obsv_records_gdf["geometry_4326"] = obsv_records_gdf["geometry"].to_crs("EPSG:4326")
-    obsv_records_gdf["mgrs_tile_id"] = obsv_records_gdf["geometry_4326"].map(
-        get_polygon_tile_ids
-    )
+    obsv_records_gdf["mgrs_tile_id"] = obsv_records_gdf["geometry_4326"].map(get_polygon_tile_ids)
     obsv_records_gdf = obsv_records_gdf.explode("mgrs_tile_id", ignore_index=True)
     return obsv_records_gdf

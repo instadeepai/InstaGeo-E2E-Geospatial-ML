@@ -75,9 +75,7 @@ def test_slice_xr_dataset():
     data = np.random.rand(4, 4)
     lats = np.linspace(0, 3, 4)
     lons = np.linspace(0, 3, 4)
-    ds = xr.Dataset(
-        data_vars={"data": (["y", "x"], data)}, coords={"y": lats, "x": lons}
-    )
+    ds = xr.Dataset(data_vars={"data": (["y", "x"], data)}, coords={"y": lats, "x": lons})
 
     # Set up the rio attributes
     ds.rio.set_crs("EPSG:4326", inplace=True)

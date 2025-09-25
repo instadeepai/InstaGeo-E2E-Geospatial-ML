@@ -235,22 +235,15 @@ def create_prithvi(
                 repo_id=pretrained_weights[variant]["hf_hub_id"],
                 filename=pretrained_weights[variant]["hf_hub_filename"],
             )
-            state_dict = torch.load(
-                pretrained_path, map_location="cpu", weights_only=True
-            )
-            state_dict = checkpoint_filter_fn_vit(
-                state_dict, model, pretrained_bands, model_bands
-            )
+            state_dict = torch.load(pretrained_path, map_location="cpu", weights_only=True)
+            state_dict = checkpoint_filter_fn_vit(state_dict, model, pretrained_bands, model_bands)
 
             # Only keep blocks from 0 to depth-1
             state_dict = {
                 k: v
                 for k, v in state_dict.items()
                 if not k.startswith("blocks.")
-                or (
-                    k.startswith("blocks.")
-                    and int(k.split(".")[1]) < model_args["depth"]
-                )
+                or (k.startswith("blocks.") and int(k.split(".")[1]) < model_args["depth"])
             }
             model.load_state_dict(state_dict, strict=True)
         except RuntimeError as e:
@@ -353,9 +346,7 @@ class PrithviSeg(nn.Module):
         self.model_args = model_args
         model_args["num_frames"] = temporal_step
 
-        def upscaling_block(
-            in_channels: int, out_channels: int, kernel_size: int
-        ) -> nn.Module:
+        def upscaling_block(in_channels: int, out_channels: int, kernel_size: int) -> nn.Module:
             """Upscaling block.
 
             Args:
@@ -388,20 +379,14 @@ class PrithviSeg(nn.Module):
 
         if embed_dims is None:
             embed_dims = [
-                (model_args["embed_dim"] * model_args["num_frames"]) // (2**i)
-                for i in range(5)
+                (model_args["embed_dim"] * model_args["num_frames"]) // (2**i) for i in range(5)
             ]
         kernel_sizes = seg_head_kernel_sizes[variant]
 
         self.segmentation_head = nn.Sequential(
-            *[
-                upscaling_block(embed_dims[i], embed_dims[i + 1], kernel_sizes[i])
-                for i in range(4)
-            ],
+            *[upscaling_block(embed_dims[i], embed_dims[i + 1], kernel_sizes[i]) for i in range(4)],
             nn.Dropout(0.1),
-            nn.Conv2d(
-                kernel_size=1, in_channels=embed_dims[-1], out_channels=num_classes
-            ),
+            nn.Conv2d(kernel_size=1, in_channels=embed_dims[-1], out_channels=num_classes),
         )
 
     def forward(

@@ -37,9 +37,7 @@ def mock_item():
         bbox=bbox,
         properties=properties,
         href="",
-        datetime=datetime.datetime(
-            2024, 3, 27, 13, 0, 0, tzinfo=timezone.utc  # daytime
-        ),
+        datetime=datetime.datetime(2024, 3, 27, 13, 0, 0, tzinfo=timezone.utc),  # daytime
     )
 
 
@@ -51,9 +49,7 @@ def test_is_daytime():
         bbox=[10.1658, 36.8065, 10.1658, 36.8065],  # Coordinates for Tunis,
         properties={"datetime": "2024-03-27T13:00:00Z"},
         href="",
-        datetime=datetime.datetime(
-            2024, 3, 27, 13, 0, 0, tzinfo=timezone.utc  # daytime
-        ),
+        datetime=datetime.datetime(2024, 3, 27, 13, 0, 0, tzinfo=timezone.utc),  # daytime
     )
     # Test daytime scenario for Tunis at 13:00 UTC
     assert is_daytime(tunis_daytime_item) is True
@@ -239,17 +235,10 @@ def test_is_valid_dataset_entry():
     assert is_valid_dataset_entry(valid_obsv, item_id_field="hls_granules") is True
 
     null_granule_obsv = pd.Series({"hls_granules": ["granule_1", None, "granule_3"]})
-    assert (
-        is_valid_dataset_entry(null_granule_obsv, item_id_field="hls_granules") is False
-    )
+    assert is_valid_dataset_entry(null_granule_obsv, item_id_field="hls_granules") is False
 
-    duplicate_granule_obsv = pd.Series(
-        {"hls_granules": ["granule_1", "granule_1", "granule_3"]}
-    )
-    assert (
-        is_valid_dataset_entry(duplicate_granule_obsv, item_id_field="hls_granules")
-        is False
-    )
+    duplicate_granule_obsv = pd.Series({"hls_granules": ["granule_1", "granule_1", "granule_3"]})
+    assert is_valid_dataset_entry(duplicate_granule_obsv, item_id_field="hls_granules") is False
 
 
 @patch("instageo.data.stac_utils.is_daytime", side_effect=lambda x: x.id == "item_1")
@@ -452,9 +441,7 @@ def test_find_closest_items():
                         "datetime": "2024-03-01T12:00:00Z",
                         "eo:cloud_cover": 10,
                     },
-                    datetime=datetime.datetime(
-                        2024, 3, 1, 12, 0, 0, tzinfo=timezone.utc
-                    ),
+                    datetime=datetime.datetime(2024, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
                     href="",
                 ),
                 Item(
@@ -465,9 +452,7 @@ def test_find_closest_items():
                         "datetime": "2024-03-02T12:00:00Z",
                         "eo:cloud_cover": 10,
                     },
-                    datetime=datetime.datetime(
-                        2024, 3, 2, 12, 0, 0, tzinfo=timezone.utc
-                    ),
+                    datetime=datetime.datetime(2024, 3, 2, 12, 0, 0, tzinfo=timezone.utc),
                     href="",
                 ),
             ],
@@ -492,9 +477,7 @@ def test_find_closest_items():
                     geometry=None,
                     bbox=[0, 0, 1, 1],
                     properties={"datetime": "2024-03-01T12:00:00Z"},
-                    datetime=datetime.datetime(
-                        2024, 3, 1, 12, 0, 0, tzinfo=timezone.utc
-                    ),
+                    datetime=datetime.datetime(2024, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
                     href="",
                 )
             ],

@@ -180,12 +180,9 @@ class RandomRotation:
         if random.random() < self.p:
             angle = random.uniform(-self.degrees, self.degrees)
             ims = [
-                transforms.functional.rotate(im, angle, fill=self.chip_no_data_value)
-                for im in ims
+                transforms.functional.rotate(im, angle, fill=self.chip_no_data_value) for im in ims
             ]
-            label = transforms.functional.rotate(
-                label, angle, fill=self.label_no_data_value
-            )
+            label = transforms.functional.rotate(label, angle, fill=self.label_no_data_value)
         return ims, label
 
 
@@ -341,9 +338,7 @@ class RandomGaussianBlur:
 class RandomGaussianNoise:
     """Random Gaussian noise augmentation for images."""
 
-    def __init__(
-        self, noise_std: float = 0.05, p: float = 0.5, max_pixel_value: float = 10000.0
-    ):
+    def __init__(self, noise_std: float = 0.05, p: float = 0.5, max_pixel_value: float = 10000.0):
         """Initialize the Gaussian noise augmentation.
 
         Args:
@@ -517,9 +512,7 @@ def normalize_and_convert_to_tensor(
         images and label.
     """
     norm = transforms.Normalize(mean, std)
-    ims_tensor = torch.stack(
-        [transforms.ToTensor()(im).float().squeeze() for im in ims]
-    )
+    ims_tensor = torch.stack([transforms.ToTensor()(im).float().squeeze() for im in ims])
     _, h, w = ims_tensor.shape
     ims_tensor = ims_tensor.reshape([temporal_size, -1, h, w])  # T*C,H,W -> T,C,H,W
     ims_tensor = torch.stack([norm(im) for im in ims_tensor]).permute(
@@ -591,9 +584,7 @@ def process_and_augment(
     return ims, label
 
 
-def crop_array(
-    arr: np.ndarray, left: int, top: int, right: int, bottom: int
-) -> np.ndarray:
+def crop_array(arr: np.ndarray, left: int, top: int, right: int, bottom: int) -> np.ndarray:
     """Crop Numpy Image.
 
     Crop a given array (image) using specified left, top, right, and bottom indices.

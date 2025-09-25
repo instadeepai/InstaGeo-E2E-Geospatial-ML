@@ -185,9 +185,7 @@ class PrithviRegressionModule(PrithviBaseModule):
         self.log(f"{step_type}_R2", metrics["r2_score"], logger=True)
         self.log(f"{step_type}_Pearson", metrics["pearson_corrcoef"], logger=True)
         if metrics["ee_percentage"] is not None:
-            self.log(
-                f"{step_type}_EE_Percentage", metrics["ee_percentage"], logger=True
-            )
+            self.log(f"{step_type}_EE_Percentage", metrics["ee_percentage"], logger=True)
 
         # Plot regression results for validation and test stages
         if step_type in ["val", "test"]:
@@ -199,13 +197,9 @@ class PrithviRegressionModule(PrithviBaseModule):
                     # we have a new best model
                     best_rmse = self.trainer.checkpoint_callback.best_model_score
                     if best_rmse is None or metrics["rmse"] < best_rmse:
-                        self.create_regression_plot(
-                            all_preds, all_labels, metrics, step_type
-                        )
+                        self.create_regression_plot(all_preds, all_labels, metrics, step_type)
                 else:
-                    self.create_regression_plot(
-                        all_preds, all_labels, metrics, step_type
-                    )
+                    self.create_regression_plot(all_preds, all_labels, metrics, step_type)
 
                 # Clear the lists
                 self.plot_outputs = []
@@ -235,10 +229,7 @@ class PrithviRegressionModule(PrithviBaseModule):
 
         # Filter out NaN and infinite values
         mask = ~(
-            np.isnan(predictions)
-            | np.isnan(targets)
-            | np.isinf(predictions)
-            | np.isinf(targets)
+            np.isnan(predictions) | np.isnan(targets) | np.isinf(predictions) | np.isinf(targets)
         )
         predictions = predictions[mask]
         targets = targets[mask]
@@ -262,9 +253,7 @@ class PrithviRegressionModule(PrithviBaseModule):
         # Add 1:1 reference line
         min_val = min(targets.min(), predictions.min())
         max_val = max(targets.max(), predictions.max())
-        g.ax_joint.plot(
-            [min_val, max_val], [min_val, max_val], "r--", label="1:1 reference line"
-        )
+        g.ax_joint.plot([min_val, max_val], [min_val, max_val], "r--", label="1:1 reference line")
 
         # Add expected error lines
         if self.include_ee:
@@ -287,9 +276,7 @@ class PrithviRegressionModule(PrithviBaseModule):
         # Add labels and title
         g.ax_joint.set_xlabel("Ground truth values")
         g.ax_joint.set_ylabel("Predicted values")
-        g.ax_joint.set_title(
-            f"Model Predictions vs Ground Truth ({step_type.capitalize()})"
-        )
+        g.ax_joint.set_title(f"Model Predictions vs Ground Truth ({step_type.capitalize()})")
 
         # Add metrics to plot
         metrics_text = (
@@ -337,9 +324,7 @@ class PrithviRegressionModule(PrithviBaseModule):
         return prediction
 
 
-class PrithviDistillationRegressionModule(
-    PrithviDistillationBaseModule, PrithviRegressionModule
-):
+class PrithviDistillationRegressionModule(PrithviDistillationBaseModule, PrithviRegressionModule):
     """Prithvi Distillation Regression PyTorch Lightning Module."""
 
     def __init__(
@@ -529,9 +514,7 @@ class PrithviDistillationRegressionModule(
         student_outputs = student_outputs.squeeze(1)[mask]
         teacher_outputs = teacher_outputs.squeeze(1)[mask]
         labels = labels[mask]
-        loss, loss_metrics = self._compute_loss(
-            student_outputs, teacher_outputs, labels
-        )
+        loss, loss_metrics = self._compute_loss(student_outputs, teacher_outputs, labels)
 
         # Get predictions
         preds = student_outputs.detach()

@@ -56,9 +56,7 @@ def test_confusion_metrics():
     # simulate streaming in 10 chunks
     chunk_size = len(y_true) // 10
     for start in range(0, len(y_true), chunk_size):
-        cm.update(
-            y_true[start : start + chunk_size], y_pred[start : start + chunk_size]
-        )
+        cm.update(y_true[start : start + chunk_size], y_pred[start : start + chunk_size])
 
     assert np.isclose(cm.accuracy(), accuracy_score(y_true, y_pred))
     assert np.isclose(
@@ -69,9 +67,7 @@ def test_confusion_metrics():
         cm.recall().mean(),
         recall_score(y_true, y_pred, average="macro", zero_division=0),
     )
-    assert np.isclose(
-        cm.f1().mean(), f1_score(y_true, y_pred, average="macro", zero_division=0)
-    )
+    assert np.isclose(cm.f1().mean(), f1_score(y_true, y_pred, average="macro", zero_division=0))
     assert np.isclose(
         cm.jaccard().mean(),
         jaccard_score(y_true, y_pred, average="macro", zero_division=0),
@@ -154,9 +150,7 @@ def test_regression_metrics():
     # Simulate streaming in 10 chunks
     chunk_size = len(y_true) // 10
     for start in range(0, len(y_true), chunk_size):
-        reg_metrics.update(
-            y_true[start : start + chunk_size], y_pred[start : start + chunk_size]
-        )
+        reg_metrics.update(y_true[start : start + chunk_size], y_pred[start : start + chunk_size])
 
     # Get metrics from our implementation
     metrics = reg_metrics.compute()

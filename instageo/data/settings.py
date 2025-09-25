@@ -44,9 +44,7 @@ def get_access_token() -> str:
             os.environ["EARTHDATA_USERNAME"] = os.environ[username_key]
             os.environ["EARTHDATA_PASSWORD"] = os.environ[password_key]
         else:
-            logging.warning(
-                f"EarthData credentials for user {sanitized_username} not found."
-            )
+            logging.warning(f"EarthData credentials for user {sanitized_username} not found.")
     return earthaccess.get_edl_token().get("access_token")
 
 

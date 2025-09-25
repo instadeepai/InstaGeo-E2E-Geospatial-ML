@@ -137,9 +137,7 @@ def test_open_mf_tiff_dataset_cloud_mask():
     cloud_mask = decode_fmask_value(fmask, 1)
     num_clouds = cloud_mask.where(cloud_mask == 1).band_data.count().values.item()
     assert (
-        result_with_mask.band_data.where(result_with_mask.band_data != -1)
-        .count()
-        .values.item()
+        result_with_mask.band_data.where(result_with_mask.band_data != -1).count().values.item()
         == num_points - 2 * num_clouds
     )
 
@@ -220,9 +218,7 @@ def hls_dataset():
     }
 
 
-def test_parallel_download(
-    hls_dataset, setup_and_teardown_output_dir, mock_earthaccess, mock_os
-):
+def test_parallel_download(hls_dataset, setup_and_teardown_output_dir, mock_earthaccess, mock_os):
     outdir = setup_and_teardown_output_dir
 
     parallel_download(hls_dataset, outdir, max_retries=1)
@@ -430,9 +426,7 @@ def test_is_valid_dataset_entry():
     null_granule_obsv = pd.Series({"hls_granules": ["granule_1", None, "granule_3"]})
     assert is_valid_dataset_entry(null_granule_obsv) is False
 
-    duplicate_granule_obsv = pd.Series(
-        {"hls_granules": ["granule_1", "granule_1", "granule_3"]}
-    )
+    duplicate_granule_obsv = pd.Series({"hls_granules": ["granule_1", "granule_1", "granule_3"]})
     assert is_valid_dataset_entry(duplicate_granule_obsv) is False
 
 
@@ -458,9 +452,7 @@ def mock_os_path_exists():
 def mock_os_operations():
     with patch("instageo.data.hls_utils.os.listdir") as mock_listdir, patch(
         "instageo.data.hls_utils.os.remove"
-    ) as mock_remove, patch(
-        "instageo.data.hls_utils.os.path.getsize", return_value=2000
-    ):
+    ) as mock_remove, patch("instageo.data.hls_utils.os.path.getsize", return_value=2000):
         yield mock_listdir, mock_remove
 
 

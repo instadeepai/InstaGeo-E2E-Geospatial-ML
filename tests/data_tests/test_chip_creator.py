@@ -130,9 +130,7 @@ def test_chip_creator_download_only(setup_and_teardown_output_dir):
     main(None)
 
     assert os.path.exists(os.path.join(output_directory, "hls_dataset.json"))
-    assert os.path.exists(
-        os.path.join(output_directory, "hls_granules_to_download.csv")
-    )
+    assert os.path.exists(os.path.join(output_directory, "hls_granules_to_download.csv"))
     assert not os.path.exists(os.path.join(output_directory, "chips"))
     assert not os.path.exists(os.path.join(output_directory, "seg_maps"))
 

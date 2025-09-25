@@ -139,9 +139,7 @@ def test_checkpoint_filter_fn_vit():
     ]
 
     # Filter the state dict
-    filtered_dict = checkpoint_filter_fn_vit(
-        state_dict, model, pretrained_bands, model_bands
-    )
+    filtered_dict = checkpoint_filter_fn_vit(state_dict, model, pretrained_bands, model_bands)
 
     # Test that decoder weights are removed
     assert "decoder.blocks.0.weight" not in filtered_dict

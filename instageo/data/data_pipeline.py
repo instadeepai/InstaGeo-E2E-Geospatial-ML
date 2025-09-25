@@ -152,18 +152,14 @@ def create_and_save_chips_with_seg_maps(
         tile_name_splits = tile_dict["tiles"]["B02_0"].split(".")
         tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
     elif data_source == "S2":
-        tile_name_splits = (
-            tile_dict["granules"][0].split(".")[0].split("/")[-1].split("_")
-        )
+        tile_name_splits = tile_dict["granules"][0].split(".")[0].split("/")[-1].split("_")
         tile_id = (
             f"{tile_name_splits[0]}_{tile_name_splits[1]}_"
             f"{tile_name_splits[5]}_{tile_name_splits[2]}"
         )
     elif data_source == "S1":
         tile_name_splits = tile_dict["items"][0].id.split("_")
-        tile_id = "_".join(
-            tile_name_splits[0:2] + [tile_name_splits[4]] + tile_name_splits[6:9]
-        )
+        tile_id = "_".join(tile_name_splits[0:2] + [tile_name_splits[4]] + tile_name_splits[6:9])
 
     date_id = df.iloc[0]["date"].strftime("%Y%m%d")
     chips = []
@@ -251,9 +247,7 @@ def apply_mask(
             if masking_strategy == "each":
                 # repeat across timesteps so that, each mask is applied to its
                 # corresponding timestep
-                decoded_mask = decoded_mask.values.repeat(
-                    chip.shape[0] // mask.shape[0], axis=0
-                )
+                decoded_mask = decoded_mask.values.repeat(chip.shape[0] // mask.shape[0], axis=0)
             elif masking_strategy == "any":
                 # collapse the mask to exclude a pixel if its corresponding mask value
                 # for at least one timestep is 1
@@ -288,9 +282,7 @@ def get_tile_info(
         A `tile_info` dataframe and a list of `tile_queries`
     """
     push_max_date_to_end_of_day = "time" not in data.columns
-    data = data[["mgrs_tile_id", "input_features_date", "x", "y"]].reset_index(
-        drop=True
-    )
+    data = data[["mgrs_tile_id", "input_features_date", "x", "y"]].reset_index(drop=True)
     tile_queries = []
     tile_info: Any = []
     for _, (tile_id, date, lon, lat) in data.iterrows():
@@ -337,9 +329,7 @@ def reproject_coordinates(df: pd.DataFrame, source_epsg: int = 4326) -> pd.DataF
         pd.DataFrame: DataFrame with transformed and valid coordinates.
     """
     logging.info("Reprojecting coordinates to EPSG:4326...")
-    transformer = Transformer.from_crs(
-        f"EPSG:{source_epsg}", "EPSG:4326", always_xy=True
-    )
+    transformer = Transformer.from_crs(f"EPSG:{source_epsg}", "EPSG:4326", always_xy=True)
 
     # Reproject the invalid rows using Vectorized transformation
     x, y = transformer.transform(df["x"].values, df["y"].values)
@@ -348,9 +338,7 @@ def reproject_coordinates(df: pd.DataFrame, source_epsg: int = 4326) -> pd.DataF
     return df
 
 
-def get_tiles(
-    data: pd.DataFrame, src_crs: int = 4326, min_count: int = 100
-) -> pd.DataFrame:
+def get_tiles(data: pd.DataFrame, src_crs: int = 4326, min_count: int = 100) -> pd.DataFrame:
     """Retrieve Tile IDs for Geospatial Observations from Satellite Data.
 
     This function associates each geospatial observation with a tile ID based on its
@@ -374,14 +362,10 @@ def get_tiles(
         data = reproject_coordinates(data, source_epsg=src_crs)
     if "mgrs_tile_id" not in data.columns:
         mgrs_object = mgrs.MGRS()
-        get_mgrs_tile_id = lambda row: mgrs_object.toMGRS(
-            row["y"], row["x"], MGRSPrecision=0
-        )
+        get_mgrs_tile_id = lambda row: mgrs_object.toMGRS(row["y"], row["x"], MGRSPrecision=0)
         data["mgrs_tile_id"] = data.apply(get_mgrs_tile_id, axis=1)
     tile_counts = data.groupby("mgrs_tile_id").size().sort_values(ascending=False)
-    data = pd.merge(
-        data, tile_counts.reset_index(name="counts"), how="left", on="mgrs_tile_id"
-    )
+    data = pd.merge(data, tile_counts.reset_index(name="counts"), how="left", on="mgrs_tile_id")
     sub_data = data[data["counts"] >= min_count]
     assert not sub_data.empty, "No observation records left"
     return sub_data
@@ -419,20 +403,14 @@ def create_segmentation_map(
     ).astype(int)
     offsets = np.arange(-window_size, window_size + 1)
     offset_rows, offset_cols = np.meshgrid(offsets, offsets)
-    window_rows = np.clip(
-        rows[:, np.newaxis, np.newaxis] + offset_rows, 0, chip.sizes["x"] - 1
-    )
-    window_cols = np.clip(
-        cols[:, np.newaxis, np.newaxis] + offset_cols, 0, chip.sizes["y"] - 1
-    )
+    window_rows = np.clip(rows[:, np.newaxis, np.newaxis] + offset_rows, 0, chip.sizes["x"] - 1)
+    window_cols = np.clip(cols[:, np.newaxis, np.newaxis] + offset_cols, 0, chip.sizes["y"] - 1)
     window_labels = np.repeat(df.label.values, offset_rows.ravel().shape)
     seg_map.values[window_rows.ravel(), window_cols.ravel()] = window_labels
     return seg_map
 
 
-def get_chip_coords(
-    df: gpd.GeoDataFrame, tile: xr.DataArray, chip_size: int
-) -> np.array:
+def get_chip_coords(df: gpd.GeoDataFrame, tile: xr.DataArray, chip_size: int) -> np.array:
     """Get Chip Coordinates.
 
     Given a list of x,y coordinates tuples of a point and an xarray dataarray, this
@@ -478,8 +456,7 @@ def adjust_dims(data: xr.DataArray) -> xr.DataArray:
     num_bands = data["band"].size
     data = data.stack(time_band=("time", "band"))
     new_bands_indices = [
-        f"{band}_{i // num_bands}"
-        for i, (_, band) in enumerate(data.coords["time_band"].values)
+        f"{band}_{i // num_bands}" for i, (_, band) in enumerate(data.coords["time_band"].values)
     ]
     data = data.drop_vars(["time_band", "time", "band"])
     data.coords["time_band"] = new_bands_indices
@@ -530,9 +507,7 @@ class BaseRasterDataPipeline(ABC):
         pass
 
     @abstractmethod
-    def load_data(
-        self, tile_dict: Dict[str, Any]
-    ) -> Tuple[xr.Dataset, xr.Dataset, str]:
+    def load_data(self, tile_dict: Dict[str, Any]) -> Tuple[xr.Dataset, xr.Dataset, str]:
         """Loads data for a specific tile.
 
         Arguments:
@@ -588,16 +563,11 @@ class BaseRasterDataPipeline(ABC):
             row_dict = row.to_dict()
             row_dict["geometry"] = row.geometry.__geo_interface__
             label_filename = (
-                f"{os.path.splitext(row_dict['label_filename'])[0]}_"
-                f"{row_dict['mgrs_tile_id']}"
+                f"{os.path.splitext(row_dict['label_filename'])[0]}_" f"{row_dict['mgrs_tile_id']}"
             )
-            chip_filename = label_filename.replace("mask", "merged").replace(
-                "label", "chip"
-            )
+            chip_filename = label_filename.replace("mask", "merged").replace("label", "chip")
 
-            chip_path = os.path.join(
-                self.output_directory, "chips", f"{chip_filename}.tif"
-            )
+            chip_path = os.path.join(self.output_directory, "chips", f"{chip_filename}.tif")
             if os.path.exists(chip_path):
                 logging.info(f"Skipping {chip_path} because it's already created")
                 continue
@@ -630,13 +600,9 @@ class BaseRasterDataPipeline(ABC):
                 filename=os.path.join(self.output_directory, "dask-report.html")
             ):
                 client.run(self.setup)
-                logging.info(
-                    f"View Dask Distributed Dashboard at {client.dashboard_link}."
-                )
+                logging.info(f"View Dask Distributed Dashboard at {client.dashboard_link}.")
                 os.makedirs(os.path.join(self.output_directory, "chips"), exist_ok=True)
-                os.makedirs(
-                    os.path.join(self.output_directory, "seg_maps"), exist_ok=True
-                )
+                os.makedirs(os.path.join(self.output_directory, "seg_maps"), exist_ok=True)
 
                 # Prepare flags for serialization
                 flags_dict = {
@@ -658,17 +624,13 @@ class BaseRasterDataPipeline(ABC):
                 ):
                     batch_records = obsv_records.iloc[i : i + batch_size]
                     try:
-                        results = self._process_batch(
-                            client, dataset, batch_records, flags_dict
-                        )
+                        results = self._process_batch(client, dataset, batch_records, flags_dict)
                         for chip_path, label_path in results:
                             chip_paths.append(chip_path)
                             label_paths.append(label_path)
                         time.sleep(5)  # Add delay between batches
                     except Exception as e:
-                        logging.error(
-                            f"Error processing batch {i // batch_size}: {str(e)}"
-                        )
+                        logging.error(f"Error processing batch {i // batch_size}: {str(e)}")
                         time.sleep(2 * 60)  # Wait 2 minutes before retrying
                         continue
 
@@ -737,9 +699,7 @@ class BasePointsDataPipeline(ABC):
         return chip_base_id in existing_chips
 
     @abstractmethod
-    def load_data(
-        self, tile_dict: Dict[str, Any]
-    ) -> Tuple[xr.Dataset, xr.Dataset, str]:
+    def load_data(self, tile_dict: Dict[str, Any]) -> Tuple[xr.Dataset, xr.Dataset, str]:
         """Loads data for a specific tile.
 
         Arguments:
@@ -802,9 +762,7 @@ class BasePointsDataPipeline(ABC):
         dataset = {
             stac_items_str: tile_dict
             for stac_items_str, tile_dict in dataset.items()
-            if not self._is_stac_item_processed(
-                stac_items_str, obsv_records, existing_chips
-            )
+            if not self._is_stac_item_processed(stac_items_str, obsv_records, existing_chips)
         }
 
         if not dataset:
@@ -816,9 +774,7 @@ class BasePointsDataPipeline(ABC):
                 filename=os.path.join(self.output_directory, "dask-report.html")
             ):
                 client.run(self.setup)
-                logging.info(
-                    f"View Dask Distributed Dashboard at {client.dashboard_link}."
-                )
+                logging.info(f"View Dask Distributed Dashboard at {client.dashboard_link}.")
 
                 # Prepare flags for serialization
                 flags_dict = {

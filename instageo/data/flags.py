@@ -34,12 +34,8 @@ flags.DEFINE_integer(
     fetch the data up to `temporal_step` days away from the date of observation. A tolerance might
     be applied when fetching the data for the different time steps.""",
 )
-flags.DEFINE_integer(
-    "temporal_tolerance", 5, "Tolerance used when searching for the closest tile"
-)
-flags.DEFINE_integer(
-    "temporal_tolerance_minutes", 0, """Additional tolerance in minutes"""
-)
+flags.DEFINE_integer("temporal_tolerance", 5, "Tolerance used when searching for the closest tile")
+flags.DEFINE_integer("temporal_tolerance_minutes", 0, """Additional tolerance in minutes""")
 flags.DEFINE_enum("data_source", "HLS", ["HLS", "S2", "S1"], "Data source to use.")
 flags.DEFINE_integer(
     "cloud_coverage",
@@ -79,9 +75,7 @@ flags.DEFINE_enum(
     - "any" to exclude pixels if the mask is present for at least one timestep.
     """,
 )
-flags.DEFINE_bool(
-    "daytime_only", False, "Whether to select only daytime satellite observations."
-)
+flags.DEFINE_bool("daytime_only", False, "Whether to select only daytime satellite observations.")
 
 flags.DEFINE_enum(
     "task_type",

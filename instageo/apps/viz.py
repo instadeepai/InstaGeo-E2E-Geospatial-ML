@@ -74,9 +74,7 @@ def add_raster_to_plotly_figure(
     plot_height, plot_width = numpy_data.shape
 
     # Data aggregation
-    canvas = ds.Canvas(
-        plot_width=int(plot_width * scale), plot_height=int(plot_height * scale)
-    )
+    canvas = ds.Canvas(plot_width=int(plot_width * scale), plot_height=int(plot_height * scale))
     agg = canvas.raster(xarr_dataset[column_name].squeeze(), interpolate="linear")
 
     coords_lat_min, coords_lat_max = (
@@ -155,9 +153,7 @@ def create_map_with_geotiff_tiles(tiles_to_overlay: list[str]) -> go.Figure:
             img, coordinates = add_raster_to_plotly_figure(
                 xarr_dataset, crs, "band_data", scale=0.1
             )
-            mapbox_layers.append(
-                {"sourcetype": "image", "source": img, "coordinates": coordinates}
-            )
+            mapbox_layers.append({"sourcetype": "image", "source": img, "coordinates": coordinates})
     # Overlay the resulting image
     fig.update_layout(mapbox_layers=mapbox_layers)
     return fig

@@ -106,8 +106,7 @@ def test_find_best_s1_items(pystac_client, data):
     assert isinstance(best_items, dict)
     assert isinstance(best_items[data["mgrs_tile_id"].values[0]], pd.DataFrame)
     best_item_ids = [
-        item.id
-        for item in best_items[data["mgrs_tile_id"].values[0]].s1_items.values[0]
+        item.id for item in best_items[data["mgrs_tile_id"].values[0]].s1_items.values[0]
     ]
     assert best_item_ids == [
         "S1A_IW_GRDH_1SDV_20160320T191123_20160320T191148_010457_00F83E_rtc",
@@ -131,10 +130,7 @@ def test_is_valid_dataset_entry(pystac_client, data):
     best_items = add_s1_items(pystac_client, data, src_crs, temporal_tolerance=1)
     invalid_entry = best_items[data["mgrs_tile_id"].values[0]]
     invalid_entry["s1_granules"] = [
-        [
-            item.id if isinstance(item, Item) else None
-            for item in invalid_entry.s1_items.values[0]
-        ]
+        [item.id if isinstance(item, Item) else None for item in invalid_entry.s1_items.values[0]]
     ]
     is_valid = is_valid_dataset_entry(invalid_entry.iloc[0])
 
@@ -170,9 +166,7 @@ def test_dispatch_candidate_items(pystac_client, data_2):
     # on the geometry of the tile. Essentially, for the data to be extracted
     # the point needs to be inside the tile. We thus make sure that each of
     # the two points in our toy dataset is attributed the corresponding tile.
-    data_with_items = dispatch_candidate_items(data_2, 4326, tiles_database)[
-        "s1_candidate_items"
-    ]
+    data_with_items = dispatch_candidate_items(data_2, 4326, tiles_database)["s1_candidate_items"]
     assert [item.id for item in data_with_items.iloc[0]] == [
         "S1A_IW_GRDH_1SDV_20171226T034533_20171226T034558_019868_021CE6_rtc"
     ]
@@ -199,9 +193,7 @@ def test_find_closest_items(pystac_client, data_3):
     # assign the original list of the retrieved items as candidate items
 
     data_3["s1_candidate_items"] = [tiles_database] * data_3.shape[0]
-    data_3["closest_s1_items"] = data_3.apply(
-        lambda obsv: find_closest_items(obsv, 6), axis=1
-    )
+    data_3["closest_s1_items"] = data_3.apply(lambda obsv: find_closest_items(obsv, 6), axis=1)
 
     # Date: "2017-12-31"
     assert (

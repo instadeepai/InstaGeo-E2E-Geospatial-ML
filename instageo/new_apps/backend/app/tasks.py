@@ -73,9 +73,7 @@ class Task:
         # Store timestamp for efficient Redis sorting
         # Handle timezone-aware timestamp for Redis sorting
         self.created_timestamp = (
-            datetime.fromisoformat(self.created_at[:-1])
-            .replace(tzinfo=None)
-            .timestamp()
+            datetime.fromisoformat(self.created_at[:-1]).replace(tzinfo=None).timestamp()
         )
 
         logger.debug(
@@ -151,9 +149,7 @@ class Task:
                 "status": stage_data["status"],
                 "started_at": stage_data["started_at"] or "",
                 "completed_at": stage_data["completed_at"] or "",
-                "result": (
-                    json.dumps(stage_data["result"]) if stage_data["result"] else ""
-                ),
+                "result": (json.dumps(stage_data["result"]) if stage_data["result"] else ""),
                 "error": stage_data["error"] or "",
             }
             redis_conn.hset(stage_key, mapping=updates)
@@ -219,9 +215,7 @@ class Task:
             and self.visualization_preparation_job_id
         ):
             try:
-                self.visualization_preparation_job = Job.get(
-                    self.visualization_preparation_job_id
-                )
+                self.visualization_preparation_job = Job.get(self.visualization_preparation_job_id)
             except ValueError:
                 self.visualization_preparation_job = None
 
@@ -280,9 +274,7 @@ class Task:
         """
         self.status = TaskStatus.DATA_PROCESSING
         self.stages["data_processing"]["status"] = JobStatus.RUNNING
-        self.stages["data_processing"]["started_at"] = (
-            datetime.utcnow().isoformat() + "Z"
-        )
+        self.stages["data_processing"]["started_at"] = datetime.utcnow().isoformat() + "Z"
 
         # Create and enqueue data processing job
         self.data_processing_job = Job.create_data_processing(
@@ -305,9 +297,7 @@ class Task:
         """
         self.status = TaskStatus.MODEL_PREDICTION
         self.stages["model_prediction"]["status"] = JobStatus.RUNNING
-        self.stages["model_prediction"]["started_at"] = (
-            datetime.utcnow().isoformat() + "Z"
-        )
+        self.stages["model_prediction"]["started_at"] = datetime.utcnow().isoformat() + "Z"
 
         # Create and enqueue model prediction job
         self.model_prediction_job = Job.create_model_prediction(
@@ -330,9 +320,7 @@ class Task:
         """
         self.status = TaskStatus.VISUALIZATION_PREPARATION
         self.stages["visualization_preparation"]["status"] = JobStatus.RUNNING
-        self.stages["visualization_preparation"]["started_at"] = (
-            datetime.utcnow().isoformat() + "Z"
-        )
+        self.stages["visualization_preparation"]["started_at"] = datetime.utcnow().isoformat() + "Z"
 
         # Create and enqueue visualization preparation job
         self.visualization_preparation_job = Job.create_visualization_preparation(
@@ -360,9 +348,7 @@ class Task:
         if stage not in self.stages:
             raise ValueError(f"Invalid stage: {stage}")
 
-        self.stages[stage]["status"] = (
-            JobStatus.FAILED if error else JobStatus.COMPLETED
-        )
+        self.stages[stage]["status"] = JobStatus.FAILED if error else JobStatus.COMPLETED
         self.stages[stage]["completed_at"] = datetime.utcnow().isoformat() + "Z"
         self.stages[stage]["result"] = result
         self.stages[stage]["error"] = error
@@ -380,9 +366,7 @@ class Task:
                 result=result,
                 error=error,
             )
-        elif (
-            stage == "visualization_preparation" and self.visualization_preparation_job
-        ):
+        elif stage == "visualization_preparation" and self.visualization_preparation_job:
             self.visualization_preparation_job.update_status(
                 JobStatus.FAILED if error else JobStatus.COMPLETED,
                 result=result,
@@ -408,8 +392,7 @@ class Task:
         elif job_type == TaskStatus.MODEL_PREDICTION and self.model_prediction_job:
             return self.model_prediction_job.to_dict()
         elif (
-            job_type == TaskStatus.VISUALIZATION_PREPARATION
-            and self.visualization_preparation_job
+            job_type == TaskStatus.VISUALIZATION_PREPARATION and self.visualization_preparation_job
         ):
             return self.visualization_preparation_job.to_dict()
         return None
@@ -434,12 +417,8 @@ class Task:
             "parameters": self.parameters,
             "stages": self.stages,
             "jobs": {
-                TaskStatus.DATA_PROCESSING: self.get_job_status(
-                    TaskStatus.DATA_PROCESSING
-                ),
-                TaskStatus.MODEL_PREDICTION: self.get_job_status(
-                    TaskStatus.MODEL_PREDICTION
-                ),
+                TaskStatus.DATA_PROCESSING: self.get_job_status(TaskStatus.DATA_PROCESSING),
+                TaskStatus.MODEL_PREDICTION: self.get_job_status(TaskStatus.MODEL_PREDICTION),
                 TaskStatus.VISUALIZATION_PREPARATION: self.get_job_status(
                     TaskStatus.VISUALIZATION_PREPARATION
                 ),
@@ -480,8 +459,7 @@ def process_data_extraction_with_task(
         task = Task.get(task_id)
 
         logger.info(
-            f"Processing data extraction for task {task_id} with {len(bboxes)} "
-            f"bounding boxes"
+            f"Processing data extraction for task {task_id} with {len(bboxes)} " f"bounding boxes"
         )
 
         # Extract data from bounding boxes using the DataProcessor
@@ -643,9 +621,7 @@ def process_visualization_preparation_with_task(
             compute_seg_stats=(processed_data.get("model_type") == "seg"),
         )
         logger.info(f"Chips merged cog path: {results['chips_merged_cog_path']}")
-        logger.info(
-            f"Predictions merged cog path: {results['predictions_merged_cog_path']}"
-        )
+        logger.info(f"Predictions merged cog path: {results['predictions_merged_cog_path']}")
         logger.info(f"Segmentation stats: {results['segmentation_stats']}")
 
         safe_results = {

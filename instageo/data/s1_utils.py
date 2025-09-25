@@ -62,9 +62,7 @@ def retrieve_s1_metadata(
           representing granules that contain all the polarizations needed.
     """
     items_dict: Any = {}
-    contains_polarizations = lambda item: all(
-        pol in item.assets for pol in POLARIZATIONS
-    )
+    contains_polarizations = lambda item: all(pol in item.assets for pol in POLARIZATIONS)
 
     for _, (
         tile_id,
@@ -130,13 +128,7 @@ def dispatch_candidate_items(
     )
     tile_observations["s1_candidate_items"] = (
         matches.groupby(matches.index)
-        .agg(
-            {
-                "index_right": (
-                    lambda indices: [tile_candidate_items[id] for id in indices]
-                )
-            }
-        )
+        .agg({"index_right": (lambda indices: [tile_candidate_items[id] for id in indices])})
         .reindex(tile_observations.index, fill_value=[])
     )
     return tile_observations.drop(columns=["geometry"])
@@ -185,15 +177,11 @@ def find_best_s1_items(
             lambda obsv: find_closest_items(obsv, temporal_tolerance), axis=1
         )
 
-        best_s1_items[tile_id] = tile_obsvs_with_s1_items.drop(
-            columns=["s1_candidate_items"]
-        )
+        best_s1_items[tile_id] = tile_obsvs_with_s1_items.drop(columns=["s1_candidate_items"])
     return best_s1_items
 
 
-def find_closest_items(
-    obsv: pd.Series, temporal_tolerance: int = 12
-) -> List[Item | None]:
+def find_closest_items(obsv: pd.Series, temporal_tolerance: int = 12) -> List[Item | None]:
     """Finds temporally closest Sentinel-1 PySTAC items for a given observation.
 
     Args:
@@ -280,9 +268,7 @@ def add_s1_items(
     return best_items
 
 
-def create_s1_dataset(
-    best_items: dict[str, pd.DataFrame]
-) -> tuple[dict[str, Any], dict[str, Any]]:
+def create_s1_dataset(best_items: dict[str, pd.DataFrame]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Creates the Sentinel-1 dataset from granules found.
 
     Args:
@@ -302,9 +288,7 @@ def create_s1_dataset(
         tile_obsv_ids_counter: Any = Counter()
         obsvs = best_items[tile_id]
         obsvs["s1_granules"] = obsvs.apply(
-            lambda obsv: [
-                item.id if isinstance(item, Item) else None for item in obsv["s1_items"]
-            ],
+            lambda obsv: [item.id if isinstance(item, Item) else None for item in obsv["s1_items"]],
             axis=1,
         )
         obsvs = obsvs.drop_duplicates(subset=["s1_granules"])
@@ -315,9 +299,9 @@ def create_s1_dataset(
             s1_dataset[f"{tile_obsv_id}_{tile_obsv_ids_counter[tile_obsv_id]}"] = {
                 "granules": [item.to_dict() for item in obsv["s1_items"]]
             }
-            s1_dataset_with_items[
-                f"{tile_obsv_id}_{tile_obsv_ids_counter[tile_obsv_id]}"
-            ] = {"items": obsv["s1_items"]}
+            s1_dataset_with_items[f"{tile_obsv_id}_{tile_obsv_ids_counter[tile_obsv_id]}"] = {
+                "items": obsv["s1_items"]
+            }
             tile_obsv_ids_counter[tile_obsv_id] += 1
     return s1_dataset, s1_dataset_with_items
 
@@ -353,9 +337,7 @@ def load_pystac_items_from_dataset(s1_dataset: dict[str, Any]) -> dict[str, Any]
     s1_dataset_with_items = {}
     for entry in s1_dataset:
         s1_dataset_with_items[entry] = {
-            "items": [
-                Item.from_dict(item_dict) for item_dict in s1_dataset[entry]["granules"]
-            ]
+            "items": [Item.from_dict(item_dict) for item_dict in s1_dataset[entry]["granules"]]
         }
     return s1_dataset_with_items
 

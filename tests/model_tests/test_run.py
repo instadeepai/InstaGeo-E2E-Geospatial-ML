@@ -39,9 +39,7 @@ class MockDataset(Dataset):
         if is_reg_task:
             self.labels = torch.rand(size, 224, 224)  # Random regression values
         else:
-            self.labels = torch.randint(
-                0, num_classes, (size, 224, 224)
-            )  # Random labels
+            self.labels = torch.randint(0, num_classes, (size, 224, 224))  # Random labels
 
     def __len__(self):
         return self.size
@@ -136,9 +134,7 @@ def test_compute_class_weights():
     counts = {0: 100, 1: 50}
     weights = compute_class_weights(counts)
     assert len(weights) == 2
-    assert (
-        weights[0] < weights[1]
-    )  # Class 1 should have higher weight due to fewer samples
+    assert weights[0] < weights[1]  # Class 1 should have higher weight due to fewer samples
 
 
 def test_compute_stats(mock_dataloader):
@@ -166,9 +162,7 @@ def test_model_forward(model):
     """Test forward pass of segmentation model outputs correct
     shape with class probabilities ."""
     # Add temporal dimension to input and use 6 channels for spectral bands
-    x = torch.randn(
-        2, 6, 1, 224, 224
-    )  # batch_size, spectral_bands, temporal, height, width
+    x = torch.randn(2, 6, 1, 224, 224)  # batch_size, spectral_bands, temporal, height, width
     output = model(x)
     assert output.shape == (2, 2, 224, 224)  # batch_size, num_classes, height, width
 
@@ -176,9 +170,7 @@ def test_model_forward(model):
 def test_reg_model_forward(reg_model):
     """Test forward pass of regression model outputs correct shape."""
     # Add temporal dimension to input and use 6 channels for spectral bands
-    x = torch.randn(
-        2, 6, 1, 224, 224
-    )  # batch_size, spectral_bands, temporal, height, width
+    x = torch.randn(2, 6, 1, 224, 224)  # batch_size, spectral_bands, temporal, height, width
     output = reg_model(x)
     assert output.shape == (2, 1, 224, 224)  # batch_size, 1, height, width
 
@@ -259,9 +251,7 @@ def test_reg_test_step(reg_model, mock_reg_dataloader):
 def test_predict_step(model):
     """Test that `predict_step` returns class probabilities with correct shape for segmentation model."""
     # Add temporal dimension to input and use 6 channels for spectral bands
-    x = torch.randn(
-        2, 6, 1, 224, 224
-    )  # batch_size, spectral_bands, temporal, height, width
+    x = torch.randn(2, 6, 1, 224, 224)  # batch_size, spectral_bands, temporal, height, width
     probabilities = model.predict_step(x)
     assert probabilities.shape == (2, 224, 224)
     assert torch.all(probabilities >= 0) and torch.all(probabilities <= 1)
@@ -270,9 +260,7 @@ def test_predict_step(model):
 def test_reg_predict_step(reg_model):
     """Test that `predict_step` returns predictions with correct shape for regression model."""
     # Add temporal dimension to input and use 6 channels for spectral bands
-    x = torch.randn(
-        2, 6, 1, 224, 224
-    )  # batch_size, spectral_bands, temporal, height, width
+    x = torch.randn(2, 6, 1, 224, 224)  # batch_size, spectral_bands, temporal, height, width
     predictions = reg_model.predict_step(x)
     assert predictions.shape == (2, 224, 224)
 
@@ -282,9 +270,7 @@ def test_configure_optimizers(model):
     assert len(optimizers) == 1
     assert len(schedulers) == 1
     assert isinstance(optimizers[0], torch.optim.AdamW)
-    assert isinstance(
-        schedulers[0], torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
-    )
+    assert isinstance(schedulers[0], torch.optim.lr_scheduler.CosineAnnealingWarmRestarts)
 
 
 def test_on_train_epoch_end(model, mock_dataloader):

@@ -58,9 +58,7 @@ S2_BANDS = S2Bands().VALUES
 
 flags.DEFINE_string("dataframe_path", None, "Path to the DataFrame file.")
 
-flags.DEFINE_integer(
-    "min_count", 100, "Minimum observation counts per tile", lower_bound=1
-)
+flags.DEFINE_integer("min_count", 100, "Minimum observation counts per tile", lower_bound=1)
 flags.DEFINE_boolean(
     "shift_to_month_start",
     True,
@@ -132,9 +130,7 @@ def parse_tuple_list(flag_value: str) -> List[Tuple]:
     try:
         return [tuple(item.strip("()").split("?")) for item in flag_value.split(";")]
     except Exception as e:
-        raise ValueError(
-            f"Error parsing string {flag_value} to extract filters list: {e}"
-        )
+        raise ValueError(f"Error parsing string {flag_value} to extract filters list: {e}")
 
 
 def parse_filters(flag_value: str) -> List[Tuple[str, str, Any]]:
@@ -159,9 +155,7 @@ def parse_filters(flag_value: str) -> List[Tuple[str, str, Any]]:
                 op = ast.literal_eval(op)
                 val = ast.literal_eval(val)
             except Exception as e:
-                raise flags.ValidationError(
-                    f"Could not properly parse filter {filter}: {e}"
-                )
+                raise flags.ValidationError(f"Could not properly parse filter {filter}: {e}")
             if not isinstance(col, str):
                 raise flags.ValidationError("Provide the filter column as a string")
             if op not in ops:
@@ -240,9 +234,7 @@ def main(argv: Any) -> None:
         logging.info("Using Harmonized Landsat Sentinel-2 pipeline")
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))
-            and os.path.exists(
-                os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")
-            )
+            and os.path.exists(os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg"))
         ):
             logging.info("Creating HLS dataset JSON.")
             logging.info("Retrieving HLS tile ID for each observation.")
@@ -251,9 +243,7 @@ def main(argv: Any) -> None:
             # Convert to GeoPandas DataFrame
             # Once all pipelines have been migrated, move this section outside this if-block
             geometry = [Point(xy) for xy in zip(sub_data["x"], sub_data["y"])]
-            sub_data = gpd.GeoDataFrame(
-                sub_data, geometry=geometry, crs=f"EPSG:{FLAGS.src_crs}"
-            )
+            sub_data = gpd.GeoDataFrame(sub_data, geometry=geometry, crs=f"EPSG:{FLAGS.src_crs}")
             sub_data["geometry_4326"] = sub_data["geometry"].to_crs("EPSG:4326")
 
             client = Client.open(hls_utils.API.URL)
@@ -270,12 +260,8 @@ def main(argv: Any) -> None:
             (
                 filtered_obsv_records,
                 hls_dataset,
-            ) = create_records_with_items(
-                sub_data_with_hls_items, "hls_granules", "hls_items"
-            )
-            with open(
-                os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w"
-            ) as json_file:
+            ) = create_records_with_items(sub_data_with_hls_items, "hls_granules", "hls_items")
+            with open(os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w") as json_file:
                 json.dump(hls_dataset, json_file, indent=4)
             filtered_obsv_records.to_file(
                 os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg"),
@@ -283,9 +269,7 @@ def main(argv: Any) -> None:
             )
         else:
             logging.info("HLS dataset JSON already created")
-            with open(
-                os.path.join(FLAGS.output_directory, "hls_dataset.json")
-            ) as json_file:
+            with open(os.path.join(FLAGS.output_directory, "hls_dataset.json")) as json_file:
                 hls_dataset = json.load(json_file)
             filtered_obsv_records = gpd.read_file(
                 os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")
@@ -293,9 +277,7 @@ def main(argv: Any) -> None:
 
         if FLAGS.processing_method in ["download", "download-only"]:
             logging.info("Downloading HLS Tiles")
-            os.makedirs(
-                os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True
-            )
+            os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
             hls_utils.parallel_download(
                 hls_dataset,
                 outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
@@ -321,9 +303,7 @@ def main(argv: Any) -> None:
         logging.info("Using Sentinel-2 pipeline")
         if not (
             os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
-            and os.path.exists(
-                os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv")
-            )
+            and os.path.exists(os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv"))
         ):
             logging.info("Creating S2 dataset JSON.")
             logging.info("Retrieving S2 tile ID for each observation.")
@@ -340,18 +320,14 @@ def main(argv: Any) -> None:
             s2_dataset, s2_granules_to_download = s2_utils.create_s2_dataset(
                 sub_data_with_tiles, outdir=FLAGS.output_directory
             )
-            with open(
-                os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w"
-            ) as json_file:
+            with open(os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w") as json_file:
                 json.dump(s2_dataset, json_file, indent=4)
             s2_granules_to_download.to_csv(
                 os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv")
             )
         else:
             logging.info("S2 dataset JSON already created")
-            with open(
-                os.path.join(FLAGS.output_directory, "s2_dataset.json")
-            ) as json_file:
+            with open(os.path.join(FLAGS.output_directory, "s2_dataset.json")) as json_file:
                 s2_dataset = json.load(json_file)
             s2_granules_to_download = pd.read_csv(
                 os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv")
@@ -380,9 +356,7 @@ def main(argv: Any) -> None:
         os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
         s2_pystac_client = get_pystac_client()
         with dask.distributed.Client() as client:
-            for key, tile_dict in tqdm(
-                s2_dataset.items(), desc="Processing Sentinel-2 Dataset"
-            ):
+            for key, tile_dict in tqdm(s2_dataset.items(), desc="Processing Sentinel-2 Dataset"):
                 obsv_date_str, tile_id = key.split("_")
                 obsv_data = sub_data[
                     (sub_data["date"] == pd.to_datetime(obsv_date_str))
@@ -417,9 +391,7 @@ def main(argv: Any) -> None:
                     all_chips.extend(chips)
                     all_seg_maps.extend(seg_maps)
                 except rasterio.errors.RasterioIOError as e:
-                    logging.error(
-                        f"Error {e} when reading dataset containing: {tile_dict}"
-                    )
+                    logging.error(f"Error {e} when reading dataset containing: {tile_dict}")
                 except IndexError as e:
                     logging.error(f"Error {e} when processing {key}")
 
@@ -432,9 +404,7 @@ def main(argv: Any) -> None:
         logging.info("Using Sentinel-1 pipeline")
         s1_pystac_client = get_pystac_client()
         s1_dataset_with_items: Any = {}
-        if not (
-            os.path.exists(os.path.join(FLAGS.output_directory, "s1_dataset.json"))
-        ):
+        if not (os.path.exists(os.path.join(FLAGS.output_directory, "s1_dataset.json"))):
             logging.info("Creating S1 dataset JSON.")
             logging.info("Retrieving S1 tile ID for each observation.")
 
@@ -448,23 +418,15 @@ def main(argv: Any) -> None:
             )
 
             logging.info("Retrieving S1 tiles that will be loaded.")
-            s1_dataset, s1_dataset_with_items = s1_utils.create_s1_dataset(
-                sub_data_with_tiles
-            )
-            with open(
-                os.path.join(FLAGS.output_directory, "s1_dataset.json"), "w"
-            ) as json_file:
+            s1_dataset, s1_dataset_with_items = s1_utils.create_s1_dataset(sub_data_with_tiles)
+            with open(os.path.join(FLAGS.output_directory, "s1_dataset.json"), "w") as json_file:
                 json.dump(s1_dataset, json_file, indent=4)
         else:
             logging.info("S1 dataset JSON already created")
-            with open(
-                os.path.join(FLAGS.output_directory, "s1_dataset.json")
-            ) as json_file:
+            with open(os.path.join(FLAGS.output_directory, "s1_dataset.json")) as json_file:
                 s1_dataset = json.load(json_file)
                 logging.info("Loading PySTAC items from dataset")
-                s1_dataset_with_items = s1_utils.load_pystac_items_from_dataset(
-                    s1_dataset
-                )
+                s1_dataset_with_items = s1_utils.load_pystac_items_from_dataset(s1_dataset)
         logging.info("Creating Chips and Segmentation Maps")
         all_chips = []
         all_seg_maps = []
@@ -501,9 +463,7 @@ def main(argv: Any) -> None:
                     all_chips.extend(chips)
                     all_seg_maps.extend(seg_maps)
                 except rasterio.errors.RasterioIOError as e:
-                    logging.error(
-                        f"Error {e} when reading dataset containing: {tile_dict}"
-                    )
+                    logging.error(f"Error {e} when reading dataset containing: {tile_dict}")
                 except IndexError as e:
                     logging.error(f"Error {e} when processing {key}")
 

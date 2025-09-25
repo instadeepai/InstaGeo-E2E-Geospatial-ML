@@ -350,12 +350,12 @@ class PrithviDistillationSegmentationModule(
         ce_loss = self.criterion(student_logits, labels.long())
 
         valid_pixels = labels.ne(self.ignore_index).reshape(-1)
-        student_logits = student_logits.permute(0, 2, 3, 1).reshape(
-            -1, self._num_classes
-        )[valid_pixels]
-        teacher_logits = teacher_logits.permute(0, 2, 3, 1).reshape(
-            -1, self._num_classes
-        )[valid_pixels]
+        student_logits = student_logits.permute(0, 2, 3, 1).reshape(-1, self._num_classes)[
+            valid_pixels
+        ]
+        teacher_logits = teacher_logits.permute(0, 2, 3, 1).reshape(-1, self._num_classes)[
+            valid_pixels
+        ]
         labels = labels.reshape(-1)[valid_pixels]
         ce_loss = ce_loss.reshape(-1)[valid_pixels].mean()
         # Compute distillation loss
@@ -419,9 +419,7 @@ class PrithviDistillationSegmentationModule(
             # Only compute AUC metrics during testing
             if step_type == "test":
                 auc_metrics = getattr(self, f"{step_type}_auc")
-                auc_metrics.update(
-                    labels.cpu().numpy().astype(np.int64), probs.cpu().numpy()
-                )
+                auc_metrics.update(labels.cpu().numpy().astype(np.int64), probs.cpu().numpy())
 
         for loss_name, loss_value in loss_metrics.items():
             self.log(

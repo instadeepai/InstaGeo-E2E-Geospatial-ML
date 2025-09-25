@@ -134,9 +134,7 @@ def test_segmentation_map_masking_fail():
     )
     seg_no_data_value = -1
     chip_no_data_value = -9
-    seg_map = mask_segmentation_map(
-        chip, seg_map, chip_no_data_value=chip_no_data_value
-    )
+    seg_map = mask_segmentation_map(chip, seg_map, chip_no_data_value=chip_no_data_value)
     assert seg_map.where(seg_map != seg_no_data_value).count().values == 0
     np.testing.assert_array_equal(np.array([[-1, -1, -1, -1]]), seg_map.values)
 
@@ -181,9 +179,7 @@ def test_seg_map_validity(setup_and_teardown_output_dir, window_size):
         seg_map_path = os.path.join(output_directory, "seg_maps", seg_map_name)
 
         assert os.path.exists(chip_path), f"Chip file missing: {chip_path}"
-        assert os.path.exists(
-            seg_map_path
-        ), f"Segmentation map file missing: {seg_map_path}"
+        assert os.path.exists(seg_map_path), f"Segmentation map file missing: {seg_map_path}"
 
         chip = xr.open_dataset(chip_path)
         seg_map = xr.open_dataset(seg_map_path)
