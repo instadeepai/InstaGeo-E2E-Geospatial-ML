@@ -138,6 +138,7 @@ class DataProcessor:
         if chips_dir.exists():
             chip_files = list(chips_dir.glob("*.tif"))
             results["chips_created"] = len(chip_files)
+            self.chips_created = True if results["chips_created"] > 0 else False
         return results
 
     def check_data_ready_for_model(self) -> bool:
@@ -146,7 +147,7 @@ class DataProcessor:
         Returns:
             True if data is ready, False otherwise.
         """
-        return self.get_data_path() is not None and self.get_dataset_csv_path() is not None
+        return self.chips_created
 
     def get_data_path(self) -> Optional[str]:
         """Get the data path for a task.

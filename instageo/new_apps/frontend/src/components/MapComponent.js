@@ -1,11 +1,13 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet-draw';
+import { CONFIG } from '../config';
 
-const MapComponent = ({ onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange, featureGroupRef }) => {
+const MapComponent = ({ onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange, onShowMessage, featureGroupRef }) => {
     const map = useMap();
     const drawControlRef = useRef(null);
+    const [drawingEnabled, setDrawingEnabled] = useState(true);
 
     const calculateArea = (bounds) => {
         const sw = bounds.getSouthWest();
@@ -45,7 +47,7 @@ const MapComponent = ({ onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange
                 circlemarker: false,
                 marker: false,
                 polyline: false,
-                rectangle: {
+                rectangle: drawingEnabled ? {
                     shapeOptions: {
                         color: '#1E88E5',
                         fillColor: '#1E88E5',
@@ -55,7 +57,7 @@ const MapComponent = ({ onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange
                     showArea: false,
                     metric: true,
                     repeatMode: false
-                }
+                } : false
             },
             edit: {
                 featureGroup: featureGroupRef.current,
@@ -69,7 +71,7 @@ const MapComponent = ({ onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange
             }
         });
         map.addControl(drawControlRef.current);
-    }, [map, featureGroupRef]);
+    }, [map, featureGroupRef, drawingEnabled]);
 
     useEffect(() => {
         if (!map) return;
@@ -82,30 +84,64 @@ const MapComponent = ({ onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange
         // Initialize draw control
         initializeDrawControl();
 
+        const addClickListenersToExistingBoxes = () => {
+            if (featureGroupRef.current) {
+                featureGroupRef.current.eachLayer((layer) => {
+                    // Remove existing right-click listener to avoid duplicates
+                    layer.off('contextmenu');
+                    // Add right-click listener to show bbox info
+                    layer.on('contextmenu', (e) => {
+                        // Prevent default context menu
+                        e.originalEvent.preventDefault();
+                        const area = calculateArea(layer.getBounds());
+                        onAreaChange(area);
+                    });
+                });
+            }
+        };
+
+        // Add click listeners to existing boxes
+        addClickListenersToExistingBoxes();
+
         const handleDrawCreated = (e) => {
             const layer = e.layer;
             const bounds = layer.getBounds();
 
+            // Clear any existing bounding boxes first
+            featureGroupRef.current.eachLayer((existingLayer) => {
+                featureGroupRef.current.removeLayer(existingLayer);
+                map.removeLayer(existingLayer);
+            });
+
             // Get the area from the drawn rectangle
             const area = calculateArea(bounds);
 
-            // Calculate area including existing layers
-            let totalArea = calculateTotalArea() + area;
-
-            // Validate total box size
-            if (totalArea >= 1 && totalArea <= 100000) {
+            // Validate single box size
+            if (area >= CONFIG.MIN_AREA_KM2 && area <= CONFIG.MAX_AREA_KM2) {
                 featureGroupRef.current.addLayer(layer);
                 map.addLayer(layer);
                 onDrawCreated(layer);
-                onAreaChange(totalArea);
+                onAreaChange(area);
+                // Disable adding new drawing after successful creation
+                // Editing and deleting existing drawings are still allowed
+                setDrawingEnabled(false);
+
             } else {
-                // Show the attempted total area briefly
-                onAreaChange(totalArea);
-                // After 2 seconds, revert to showing the current valid total
+                onAreaChange(area);
+
+                // Show warning message
+                const message = area < CONFIG.MIN_AREA_KM2
+                    ? `Area too small (${area.toFixed(4)} km²)! Minimum required: ${CONFIG.MIN_AREA_KM2} km². Your bounding box will not be considered.`
+                    : `Area too large (${area.toFixed(4)} km²)! Maximum allowed: ${CONFIG.MAX_AREA_KM2} km². Your bounding box will not be considered.`;
+
+                if (onShowMessage) {
+                    onShowMessage(message);
+                }
+
+                // After 3 seconds, revert to showing 0
                 setTimeout(() => {
-                    const currentTotalArea = totalArea - area;
-                    onAreaChange(currentTotalArea);
-                }, 2000);
+                    onAreaChange(0);
+                }, 3000);
             }
         };
 
@@ -113,47 +149,49 @@ const MapComponent = ({ onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange
             const layers = e.layers;
             const totalArea = calculateTotalArea();
 
-            // Check if total area is valid
-            if (totalArea >= 1 && totalArea <= 100000) {
+            // Check if single box area is valid
+            if (totalArea >= CONFIG.MIN_AREA_KM2 && totalArea <= CONFIG.MAX_AREA_KM2) {
                 onDrawEdited(layers);
                 onAreaChange(totalArea);
             } else {
                 onAreaChange(totalArea);
+
+                // Show warning message
+                const message = totalArea < CONFIG.MIN_AREA_KM2
+                    ? `Area too small (${totalArea.toFixed(4)} km²)! Minimum required: ${CONFIG.MIN_AREA_KM2} km². Your bounding box will not be considered.`
+                    : `Area too large (${totalArea.toFixed(4)} km²)! Maximum allowed: ${CONFIG.MAX_AREA_KM2} km². Your bounding box will not be considered.`;
+
+                if (onShowMessage) {
+                    onShowMessage(message);
+                }
+
                 setTimeout(() => {
                     layers.eachLayer((layer) => {
                         featureGroupRef.current.removeLayer(layer);
                         map.removeLayer(layer);
                     });
-                    const currentTotalArea = calculateTotalArea();
-                    onAreaChange(currentTotalArea);
                     onDrawDeleted();
-                }, 2000);
-
+                    onAreaChange(0);
+                    // Re-enable drawing after removing invalid layer
+                    setDrawingEnabled(true);
+                }, 3000);
             }
         };
 
         const handleDrawDeleted = (e) => {
+            let hasLayers = false;
             e.layers.eachLayer((layer) => {
+                hasLayers = true;
                 featureGroupRef.current.removeLayer(layer);
                 map.removeLayer(layer);
             });
-            onDrawDeleted();
-            const currentTotalArea = calculateTotalArea();
-            if (currentTotalArea < 1) {
-                onAreaChange(currentTotalArea);
-                setTimeout(() => {
-                    onAreaChange(0);
-                    onDrawDeleted();
-                    // Remove all layers from map and feature group
-                    featureGroupRef.current.eachLayer((layer) => {
-                        map.removeLayer(layer);
-                    });
-                    featureGroupRef.current.clearLayers();
 
-                }, 2000);
-
-            } else {
-                onAreaChange(currentTotalArea);
+            // Only proceed if layers were actually deleted
+            if (hasLayers) {
+                onDrawDeleted();
+                onAreaChange(0);
+                // Re-enable drawing after deletion
+                setDrawingEnabled(true);
             }
         };
 
@@ -174,7 +212,7 @@ const MapComponent = ({ onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange
                 featureGroupRef.current.remove();
             }
         };
-    }, [map, onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange, initializeDrawControl, featureGroupRef, calculateTotalArea]);
+    }, [map, onDrawCreated, onDrawEdited, onDrawDeleted, onAreaChange, onShowMessage, initializeDrawControl, featureGroupRef, calculateTotalArea]);
 
     return null;
 };

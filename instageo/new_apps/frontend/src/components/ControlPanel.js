@@ -1,12 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Drawer, Box, Typography, Select, MenuItem, FormControl, InputLabel, Slider, Button, TextField, CircularProgress, Tooltip, IconButton, Collapse, Divider, Paper, Chip, InputAdornment } from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import dayjs from 'dayjs';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { DEFAULT_TASK_PARAMS, PARAMS_HELP } from '../constants';
+import { DEFAULT_TASK_PARAMS, PARAMS_HELP, LOGO_PATHS } from '../constants';
+import { logger } from '../utils/logger';
 import { INSTAGEO_BACKEND_API_ENDPOINTS } from '../config';
 import { fetchModelsWithTTL, clearModelsCache } from '../utils/modelsCache';
 
-const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing }) => {
+const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing, appTheme }) => {
 
   const [params, setParams] = useState(DEFAULT_TASK_PARAMS);
   const [models, setModels] = useState([]);
@@ -33,7 +38,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
         if (!mounted) return;
         setModels(data || []);
       } catch (e) {
-        console.warn('Failed to load models:', e);
+        logger.warn('Failed to load models:', e);
       } finally {
         if (mounted) setLoadingModels(false);
       }
@@ -51,10 +56,16 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
       const data = await fetchModelsWithTTL(INSTAGEO_BACKEND_API_ENDPOINTS.GET_MODELS);
       setModels(data || []);
     } catch (e) {
-      console.warn('Failed to reload models:', e);
+      logger.warn('Failed to reload models:', e);
     } finally {
       setLoadingModels(false);
     }
+  };
+
+  const resetFormToDefaults = () => {
+    setParams(DEFAULT_TASK_PARAMS);
+    setSelectedModelKey('');
+    setSelectedSize('');
   };
 
   const modelsByKey = useMemo(() => {
@@ -74,16 +85,15 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
     setParams(newParams);
   };
 
-  const handleDateChange = (event) => {
-    handleParamChange('date', event.target.value);
-  };
 
 
   const renderSlider = (label, param, min, max, step = 1, infoKey = null) => (
     <Box sx={{ mb: 2 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography gutterBottom>{label}</Typography>
+          <Typography gutterBottom>
+            {label}
+          </Typography>
           {infoKey && (
             <Tooltip title="More info">
               <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, [infoKey]: !prev[infoKey] }))}>
@@ -106,7 +116,9 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
       />
       {infoKey && (
         <Collapse in={helpOpen[infoKey] === true}>
-          <Typography variant="caption" color="text.secondary">{PARAMS_HELP[infoKey]}</Typography>
+          <Typography variant="caption" color="text.secondary">
+            {PARAMS_HELP[infoKey]}
+          </Typography>
         </Collapse>
       )}
     </Box>
@@ -121,8 +133,6 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
         sx: {
           width: 350,
           padding: 2,
-          backgroundColor: 'white',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
           zIndex: 1200
         }
       }}
@@ -130,7 +140,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
       <Box sx={{ p: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
           <img
-            src="https://raw.githubusercontent.com/instadeepai/InstaGeo-E2E-Geospatial-ML/0910341cef9a858137f4dffc1467de7b3240ec0f/assets/logo.png"
+            src={appTheme === 'dark' ? LOGO_PATHS.DARK_BG : LOGO_PATHS.DEFAULT}
             alt="InstaGeo Logo"
             style={{
               maxWidth: '200px',
@@ -138,20 +148,29 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
               display: 'block'
             }}
             onError={(e) => {
-              console.error('Error loading logo:', e);
+              logger.error('Error loading logo:', e);
               e.target.style.display = 'none';
             }}
           />
         </Box>
 
-        <Typography variant="h6" sx={{ mb: 2, color: '#1E88E5', textAlign: 'center' }}>
+        <Typography variant="h6" sx={{
+          mb: 2,
+          textAlign: 'center'
+        }}>
           Parameters
         </Typography>
 
         {!hasBoundingBox && (
-          <Box sx={{ mb: 3, p: 2, bgcolor: '#fff3e0', borderRadius: 1 }}>
+          <Box sx={{
+            mb: 3,
+            p: 2,
+            borderRadius: 1,
+            border: '1px solid',
+            borderColor: 'warning.main'
+          }}>
             <Typography color="warning.main">
-              Please draw a bounding box on the map first
+              Please draw a bounding box on the map first to select your area of interest.
             </Typography>
           </Box>
         )}
@@ -168,14 +187,14 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
             mb: 2,
             position: 'relative',
             '& .MuiSelect-icon': { zIndex: 3 },
-            '& .MuiInputBase-input': { pr: 7 },
+            '& .MuiInputBase-input': { pr: 7 }
           }}
           slotProps={{
             input: {
               endAdornment: (
                 <InputAdornment position="end" sx={{ position: 'absolute', right: 30, zIndex: 2 }}>
                 <Tooltip title="Reload models">
-                  <IconButton size="small" onClick={handleReloadModels} disabled={loadingModels} edge="start">
+                  <IconButton size="small" onClick={handleReloadModels} disabled={!hasBoundingBox || loadingModels} edge="start">
                     <RefreshIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
@@ -211,9 +230,19 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
           const info = (modelsByKey[selectedModelKey] || []).find(m => m.model_size === selectedSize);
           if (!info) return null;
           return (
-            <Paper elevation={0} sx={{ mb: 3, p: 2, border: '1px solid #e3f2fd', backgroundColor: '#f9fbff', borderLeft: '4px solid #1E88E5' }}>
+            <Paper elevation={0} sx={{
+              mb: 3,
+              p: 2,
+              border: '1px solid',
+              borderColor: 'primary.light',
+              borderLeft: '4px solid',
+              borderLeftColor: 'primary.main'
+            }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#1E88E5' }}>
+                <Typography variant="subtitle1" sx={{
+                  color: 'text.primary',
+                  fontSize: '0.875rem'
+                }}>
                   Model Info
                 </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -237,8 +266,10 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
               {/* Number of Parameters */}
               <Box sx={{ mb: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Typography variant="subtitle2">Number of Parameters</Typography>
-                  <Typography variant="body2">
+                  <Typography variant="subtitle2">
+                    Number of Parameters
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
                     {typeof info.num_params === 'number' ? `${Number(info.num_params.toFixed(2))} M` : info.num_params}
                   </Typography>
                 </Box>
@@ -248,17 +279,23 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
               <Box sx={{ mb: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="subtitle2">Chip Size</Typography>
+                    <Typography variant="subtitle2">
+                      Chip Size
+                    </Typography>
                     <Tooltip title="More info">
                       <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, chip_size: !prev.chip_size }))}>
                         <InfoOutlinedIcon fontSize="inherit" />
                       </IconButton>
                     </Tooltip>
                   </Box>
-                  <Typography variant="body2">{info.chip_size} x {info.chip_size} pixels</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {info.chip_size} x {info.chip_size} pixels
+                  </Typography>
                 </Box>
                 <Collapse in={helpOpen.chip_size}>
-                  <Typography variant="caption" color="text.secondary">{PARAMS_HELP.chip_size}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {PARAMS_HELP.chip_size}
+                  </Typography>
                 </Collapse>
               </Box>
 
@@ -266,17 +303,23 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
               <Box sx={{ mb: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="subtitle2">Number of Steps</Typography>
+                    <Typography variant="subtitle2">
+                      Number of Steps
+                    </Typography>
                     <Tooltip title="More info">
                       <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, num_steps: !prev.num_steps }))}>
                         <InfoOutlinedIcon fontSize="inherit" />
                       </IconButton>
                     </Tooltip>
                   </Box>
-                  <Typography variant="body2">{info.num_steps}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {info.num_steps}
+                  </Typography>
                 </Box>
                 <Collapse in={helpOpen.num_steps}>
-                  <Typography variant="caption" color="text.secondary">{PARAMS_HELP.num_steps}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {PARAMS_HELP.num_steps}
+                  </Typography>
                 </Collapse>
               </Box>
 
@@ -284,17 +327,23 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
               <Box sx={{ mb: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="subtitle2">Temporal Step</Typography>
+                    <Typography variant="subtitle2">
+                      Temporal Step
+                    </Typography>
                     <Tooltip title="More info">
                       <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, temporal_step: !prev.temporal_step }))}>
                         <InfoOutlinedIcon fontSize="inherit" />
                       </IconButton>
                     </Tooltip>
                   </Box>
-                  <Typography variant="body2">{info.temporal_step}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {info.temporal_step}
+                  </Typography>
                 </Box>
                 <Collapse in={helpOpen.temporal_step}>
-                  <Typography variant="caption" color="text.secondary">{PARAMS_HELP.temporal_step}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {PARAMS_HELP.temporal_step}
+                  </Typography>
                 </Collapse>
               </Box>
 
@@ -302,17 +351,23 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="subtitle2">Data Source</Typography>
+                    <Typography variant="subtitle2">
+                      Data Source
+                    </Typography>
                     <Tooltip title="More info">
                       <IconButton size="small" onClick={() => setHelpOpen(prev => ({ ...prev, data_source: !prev.data_source }))}>
                         <InfoOutlinedIcon fontSize="inherit" />
                       </IconButton>
                     </Tooltip>
                   </Box>
-                  <Typography variant="body2">{info.data_source}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {info.data_source}
+                  </Typography>
                 </Box>
                 <Collapse in={helpOpen.data_source}>
-                  <Typography variant="caption" color="text.secondary">{PARAMS_HELP.data_source}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {PARAMS_HELP.data_source}
+                  </Typography>
                 </Collapse>
               </Box>
             </Paper>
@@ -320,20 +375,34 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
         })()}
 
         {/* Date Picker */}
-        <TextField
-          label="Date"
-          type="date"
-          value={params.date}
-          onChange={handleDateChange}
-          fullWidth
-          sx={{ mb: 3 }}
-          InputLabelProps={{
-            shrink: true,
-          }}
-          inputProps={{
-            max: new Date().toISOString().split('T')[0]
-          }}
-        />
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <DatePicker
+            label="Date"
+            value={dayjs(params.date)}
+            onChange={(newValue) => {
+              if (newValue) {
+                handleParamChange('date', newValue.format('YYYY-MM-DD'));
+              }
+            }}
+            minDate={dayjs('2016-01-01')}
+            maxDate={dayjs()}
+            slotProps={{
+              textField: {
+                fullWidth: true,
+                sx: { mb: 3 },
+                onKeyDown: (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                },
+                onKeyDownCapture: (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                },
+                inputProps: {readOnly: true}
+              }
+            }}
+          />
+        </LocalizationProvider>
 
         {renderSlider('Temporal Tolerance (days)', 'temporal_tolerance', 1, 30, 1, 'temporal_tolerance')}
 
@@ -353,8 +422,9 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
                 model_key: info.model_key,
                 model_size: info.model_size,
               };
-              console.log('Merged params:', merged);
+              logger.log('Merged params:', merged);
               onRunModel(merged);
+              resetFormToDefaults();
               return;
             }
           }}
@@ -363,11 +433,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
             mt: 2,
             mb: 3,
             py: 1.5,
-            position: 'relative',
-            '&.Mui-disabled': {
-              backgroundColor: isProcessing ? 'primary.main' : undefined,
-              opacity: isProcessing ? 0.8 : undefined,
-            }
+            position: 'relative'
           }}
         >
           {isProcessing ? (
@@ -375,7 +441,6 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing 
               <CircularProgress
                 size={20}
                 sx={{
-                  color: 'white',
                   animation: 'pulse 1.5s ease-in-out infinite',
                   '@keyframes pulse': {
                     '0%': { opacity: 0.6 },

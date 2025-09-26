@@ -292,6 +292,22 @@ def test_parallel_download_removes_small_files(
 
 
 @pytest.fixture
+def mock_item():
+    """Creates a mock PySTAC Item with a fixed time and location for testing."""
+    properties = {"datetime": "2024-03-27T13:00:00Z"}
+
+    bbox = [10.1658, 36.8065, 10.1658, 36.8065]  # Coordinates for Tunis
+    return Item(
+        id="test_item",
+        geometry=None,
+        bbox=bbox,
+        properties=properties,
+        href="",
+        datetime=datetime.datetime(2024, 3, 27, 13, 0, 0, tzinfo=timezone.utc),  # daytime
+    )
+
+
+@pytest.fixture
 def sample_data():
     """Creates a sample GeoDataFrame for testing."""
     data = {

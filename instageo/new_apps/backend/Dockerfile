@@ -30,6 +30,7 @@ WORKDIR /app
 ARG DATA_FOLDER
 ARG EARTHDATA_USERNAME
 ARG EARTHDATA_PASSWORD
+ARG MODELS_PATH
 
 # Add data folder arg as an environment variable
 ENV DATA_FOLDER=${DATA_FOLDER}
@@ -38,6 +39,10 @@ ENV DATA_FOLDER=${DATA_FOLDER}
 ENV EARTHDATA_USERNAME=${EARTHDATA_USERNAME}
 ENV EARTHDATA_PASSWORD=${EARTHDATA_PASSWORD}
 
+# Add models path as an environment variable
+ENV MODELS_PATH=${MODELS_PATH}
+
+
 # Create and activate a virtual environment
 ENV VENV_PATH="/opt/instageo-venv"
 RUN python3 -m venv $VENV_PATH
@@ -45,10 +50,19 @@ RUN python3 -m venv $VENV_PATH
 # Use the virtualenv for all future commands
 ENV PATH="$VENV_PATH/bin:$PATH"
 
+# Copy requirements files first for better caching
+# COPY requirements.txt ./
+# COPY instageo/new_apps/backend/requirements.txt ./backend-requirements.txt
+
+# Install main requirements
+RUN pip install --upgrade pip
+# RUN pip install -r requirements.txt
+
+# # Install backend-specific requirements
+# RUN pip install -r backend-requirements.txt
+
 COPY setup.py setup.cfg pyproject.toml ./
 COPY instageo ./instageo
-
-RUN pip install --upgrade pip
 RUN pip install -e .[all]
 
 RUN chown -R ubuntu:ubuntu /app

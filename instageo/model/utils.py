@@ -388,14 +388,39 @@ def log_model_complexity(
         neptune_logger: Neptune logger object.
         device (int): GPU device index. Default is 0.
     """
+    complexity = get_model_complexity(model, cfg, device)
+
+    if neptune_logger is not None:
+        run = neptune_logger.experiment
+        for key, value in complexity.items():
+            run[f"model/{key}"] = value
+
+
+def get_model_complexity(model: nn.Module, cfg: Any, device: int = 0) -> dict:
+    """Logs model computational complexity (MACs, GFLOPs, Params) to Neptune.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model.
+        cfg (object): Configuration object with dataloader attributes.
+        neptune_logger: Neptune logger object.
+        device (int): GPU device index. Default is 0.
+    """
     input_shape = (
         len(cfg.dataloader.bands) // cfg.dataloader.temporal_dim,
         cfg.dataloader.temporal_dim,
         cfg.dataloader.img_size,
         cfg.dataloader.img_size,
     )
-
-    with torch.cuda.device(device):
+    if torch.cuda.is_available():
+        with torch.cuda.device(device):
+            macs, params = get_model_complexity_info(
+                model,
+                input_shape,
+                as_strings=True,
+                print_per_layer_stat=True,
+                verbose=True,
+            )
+    else:
         macs, params = get_model_complexity_info(
             model,
             input_shape,
@@ -403,11 +428,11 @@ def log_model_complexity(
             print_per_layer_stat=True,
             verbose=True,
         )
-
-    if neptune_logger is not None:
-        neptune_logger.experiment["model/Computational complexity"] = macs
-        neptune_logger.experiment["model/GFLOPs"] = float(macs.split()[0]) * 2
-        neptune_logger.experiment["model/params"] = params
+    return {
+        "Computational complexity": macs,
+        "GFLOPs": float(macs.split()[0]) * 2,
+        "Params": params,
+    }
 
 
 def log_carbon_info(neptune_run: Optional[Run], emissions_data: EmissionsData) -> None:
@@ -419,22 +444,33 @@ def log_carbon_info(neptune_run: Optional[Run], emissions_data: EmissionsData) -
     """
     if neptune_run is not None:
         run = neptune_run.experiment
+        for key, value in emissions_data.items():
+            run[f"{key}"] = value
 
-        run["carbon/emissions (g CO₂)"] = 1000 * emissions_data.emissions
-        run["carbon/duration (s)"] = emissions_data.duration
-        run["carbon/emissions_rate (g CO₂/s)"] = 1000 * emissions_data.emissions_rate
-        run["carbon/cpu_power (W)"] = emissions_data.cpu_power
-        run["carbon/gpu_power (W)"] = emissions_data.gpu_power
-        run["carbon/ram_power (W)"] = emissions_data.ram_power
-        run["carbon/cpu_energy (kWh)"] = emissions_data.cpu_energy
-        run["carbon/gpu_energy (kWh)"] = emissions_data.gpu_energy
-        run["carbon/ram_energy (kWh)"] = emissions_data.ram_energy
-        run["carbon/energy_consumed (kWh)"] = emissions_data.energy_consumed
-        run["carbon/cpu_count"] = emissions_data.cpu_count
-        run["carbon/cpu_model"] = emissions_data.cpu_model
-        run["carbon/gpu_count"] = emissions_data.gpu_count
-        run["carbon/gpu_model"] = emissions_data.gpu_model
-        run["carbon/ram_total_size"] = emissions_data.ram_total_size
-        run["carbon/tracking_mode"] = emissions_data.tracking_mode
-        run["carbon/on_cloud"] = emissions_data.on_cloud
-        run["carbon/pue"] = emissions_data.pue
+
+def get_carbon_info(emissions_data: EmissionsData) -> dict:
+    """Get carbon tracking information.
+
+    Args:
+        emissions_data: EmissionsData object containing carbon log data.
+    """
+    return {
+        "carbon/emissions (g CO₂)": 1000 * emissions_data.emissions,
+        "carbon/duration (s)": emissions_data.duration,
+        "carbon/emissions_rate (g CO₂/s)": 1000 * emissions_data.emissions_rate,
+        "carbon/cpu_power (W)": emissions_data.cpu_power,
+        "carbon/gpu_power (W)": emissions_data.gpu_power,
+        "carbon/ram_power (W)": emissions_data.ram_power,
+        "carbon/cpu_energy (kWh)": emissions_data.cpu_energy,
+        "carbon/gpu_energy (kWh)": emissions_data.gpu_energy,
+        "carbon/ram_energy (kWh)": emissions_data.ram_energy,
+        "carbon/energy_consumed (kWh)": emissions_data.energy_consumed,
+        "carbon/cpu_count": emissions_data.cpu_count,
+        "carbon/cpu_model": emissions_data.cpu_model,
+        "carbon/gpu_count": emissions_data.gpu_count,
+        "carbon/gpu_model": emissions_data.gpu_model,
+        "carbon/ram_total_size": emissions_data.ram_total_size,
+        "carbon/tracking_mode": emissions_data.tracking_mode,
+        "carbon/on_cloud": emissions_data.on_cloud,
+        "carbon/pue": emissions_data.pue,
+    }

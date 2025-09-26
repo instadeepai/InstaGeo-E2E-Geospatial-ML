@@ -635,9 +635,11 @@ class BaseRasterDataPipeline(ABC):
                         continue
 
         logging.info("Saving dataframe of chips and segmentation maps.")
-        pd.DataFrame({"Input": chip_paths, "Label": label_paths}).to_csv(
-            os.path.join(self.output_directory, "hls_raster_dataset.csv")
-        )
+        if self.is_bbox_feature:
+            chips_df = pd.DataFrame({"Input": chip_paths})
+        else:
+            chips_df = pd.DataFrame({"Input": chip_paths, "Label": label_paths})
+        chips_df.to_csv(os.path.join(self.output_directory, "hls_raster_dataset.csv"))
 
 
 class BasePointsDataPipeline(ABC):

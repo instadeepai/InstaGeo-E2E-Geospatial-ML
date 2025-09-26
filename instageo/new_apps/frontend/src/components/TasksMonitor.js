@@ -15,7 +15,9 @@ import {
     LinearProgress,
     TextField,
     MenuItem,
-    Pagination
+    Pagination,
+    Link,
+    Tooltip as MuiTooltip
 } from '@mui/material';
 import {
     Close as CloseIcon,
@@ -26,10 +28,14 @@ import {
     Schedule as ScheduleIcon,
     Pause as PauseIcon,
     Visibility as VisibilityIcon,
-    FilterList as FilterListIcon
+    FilterList as FilterListIcon,
+    Info as InfoIcon
 } from '@mui/icons-material';
 import VisualizationDialog from './VisualizationDialog';
+import BoundingBoxSnapshot from './BoundingBoxSnapshot';
 import { INSTAGEO_BACKEND_API_ENDPOINTS } from '../config';
+import { logger } from '../utils/logger';
+import { fetchModelsWithTTL } from '../utils/modelsCache';
 
 const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
     const [tasks, setTasks] = useState([]);
@@ -39,19 +45,13 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
     const [expandedTask, setExpandedTask] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
+    const [modelFilter, setModelFilter] = useState('all');
     const [currentPage, setCurrentPage] = useState(1);
     const [visualizationDialogOpen, setVisualizationDialogOpen] = useState(false);
     const [selectedTaskForVisualization, setSelectedTaskForVisualization] = useState(null);
+    const [availableModels, setAvailableModels] = useState([]);
     const tasksPerPage = 5;
     const pollingInterval = useRef(null);
-
-    // Filter states
-    // const [searchTerm, setSearchTerm] = useState('');
-    // const [statusFilter, setStatusFilter] = useState('all');
-
-    // Pagination states
-    // const [currentPage, setCurrentPage] = useState(1);
-    // const tasksPerPage = 5;
 
     const fetchTasks = async () => {
         try {
@@ -64,14 +64,14 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
             const data = await response.json();
             setTasks(data);
         } catch (err) {
-            console.error('Error fetching tasks:', err);
+            logger.error('Error fetching tasks:', err);
             setError(err.message);
         } finally {
             setLoading(false);
         }
     };
 
-    // Filter tasks based on search term and status filter
+    // Filter tasks based on search term, status filter, and model filter
     useEffect(() => {
         let filtered = tasks;
 
@@ -87,13 +87,18 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
             filtered = filtered.filter(task => task.status === statusFilter);
         }
 
+        // Filter by model
+        if (modelFilter !== 'all') {
+            filtered = filtered.filter(task => task.model_name === modelFilter);
+        }
+
         setFilteredTasks(filtered); // Update filteredTasks state
-    }, [tasks, searchTerm, statusFilter]);
+    }, [tasks, searchTerm, statusFilter, modelFilter]);
 
     // Reset to first page when filters change (but not when tasks data updates)
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, statusFilter]);
+    }, [searchTerm, statusFilter, modelFilter]);
 
     // Calculate pagination
     const totalPages = Math.ceil(filteredTasks.length / tasksPerPage); // Use filteredTasks.length
@@ -104,8 +109,8 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
     useEffect(() => {
         if (open) {
             fetchTasks();
-            // Start polling every 30 seconds
-            pollingInterval.current = setInterval(fetchTasks, 30000);
+            // Start polling every 60 seconds
+            pollingInterval.current = setInterval(fetchTasks, 60000);
         } else {
             // Clear polling when dialog is closed
             if (pollingInterval.current) {
@@ -196,9 +201,7 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
 
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A';
-
         const date = new Date(dateString);
-
         return date.toLocaleString(undefined, {
             year: 'numeric',
             month: 'short',
@@ -211,9 +214,7 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
 
     const formatDateOnly = (dateString) => {
         if (!dateString) return 'N/A';
-
         const date = new Date(dateString);
-
         return date.toLocaleDateString(undefined, {
             year: 'numeric',
             month: 'short',
@@ -264,7 +265,7 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
             setVisualizationDialogOpen(true);
 
         } catch (error) {
-            console.error('Error getting visualization data:', error);
+            logger.error('Error getting visualization data:', error);
             setError(`Failed to load visualization data: ${error.message}`);
         }
     };
@@ -277,14 +278,45 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
         setStatusFilter(event.target.value);
     };
 
+    const handleModelFilterChange = (event) => {
+        setModelFilter(event.target.value);
+    };
+
     const clearFilters = () => {
         setSearchTerm('');
         setStatusFilter('all');
+        setModelFilter('all');
     };
 
     const handlePageChange = (event, newPage) => {
         setCurrentPage(newPage);
     };
+
+    // Fetch models from cache
+    const fetchModels = async () => {
+        try {
+            const models = await fetchModelsWithTTL(INSTAGEO_BACKEND_API_ENDPOINTS.GET_MODELS);
+            setAvailableModels(models || []);
+        } catch (error) {
+            logger.warn('Failed to fetch models for filter:', error);
+            setAvailableModels([]);
+        }
+    };
+
+    // Get unique model names from available models
+    const getUniqueModelNames = () => {
+        return availableModels
+            .map(model => model.model_name)
+            .filter((name, index, self) => name && self.indexOf(name) === index)
+            .sort();
+    };
+
+    // Fetch models when component mounts
+    useEffect(() => {
+        if (open) {
+            fetchModels();
+        }
+    }, [open]);
 
     return (
         <>
@@ -301,10 +333,31 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
                 <Box display="flex" justifyContent="space-between" alignItems="center">
                     <Typography variant="h6">Tasks Monitor</Typography>
                     <Box>
-                        <IconButton onClick={handleRefresh} disabled={loading}>
+                        <IconButton
+                            onClick={handleRefresh}
+                            disabled={loading}
+                            sx={{
+                                '&:hover': {
+                                    backgroundColor: (theme) =>
+                                        theme.palette.mode === 'dark'
+                                            ? 'rgba(255, 255, 255, 0.08)'
+                                            : 'rgba(0, 0, 0, 0.04)'
+                                }
+                            }}
+                        >
                             <RefreshIcon />
                         </IconButton>
-                        <IconButton onClick={onClose}>
+                        <IconButton
+                            onClick={onClose}
+                            sx={{
+                                '&:hover': {
+                                    backgroundColor: (theme) =>
+                                        theme.palette.mode === 'dark'
+                                            ? 'rgba(255, 255, 255, 0.08)'
+                                            : 'rgba(0, 0, 0, 0.04)'
+                                }
+                            }}
+                        >
                             <CloseIcon />
                         </IconButton>
                     </Box>
@@ -345,11 +398,31 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
                         <MenuItem value="failed">Failed</MenuItem>
                     </TextField>
 
+                    <TextField
+                        label="Model Filter"
+                        variant="outlined"
+                        size="small"
+                        value={modelFilter}
+                        onChange={handleModelFilterChange}
+                        InputProps={{
+                            startAdornment: <FilterListIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                        }}
+                        sx={{ minWidth: 200 }}
+                        select
+                    >
+                        <MenuItem value="all">All Models</MenuItem>
+                        {getUniqueModelNames().map((modelName) => (
+                            <MenuItem key={modelName} value={modelName}>
+                                {modelName}
+                            </MenuItem>
+                        ))}
+                    </TextField>
+
                     <Button
                         variant="outlined"
                         size="small"
                         onClick={clearFilters}
-                        disabled={searchTerm === '' && statusFilter === 'all'}
+                        disabled={searchTerm === '' && statusFilter === 'all' && modelFilter === 'all'}
                     >
                         Clear Filters
                     </Button>
@@ -383,57 +456,146 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
                 )}
 
                 {currentTasks.map((task) => (
-                    <Card key={task.task_id} sx={{ mb: 2 }}>
-                        <CardContent>
-                            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(6, 1fr)' }, alignItems: 'center' }}>
-                                <Box>
-                                    <Typography variant="subtitle2" color="textSecondary">
-                                        Task ID
-                                    </Typography>
-                                    <Typography variant="body2" fontFamily="monospace">
-                                        {task.task_id.slice(0, 8)}...
-                                    </Typography>
-                                </Box>
-                                <Box>
-                                    <Typography variant="subtitle2" color="textSecondary">
-                                        Status
-                                    </Typography>
-                                    <Chip
-                                        icon={getStatusIcon(task.status)}
-                                        label={task.status.replace('_', ' ')}
-                                        color={getStatusColor(task.status)}
-                                        size="small"
+                    <Card key={task.task_id} sx={{
+                        mb: 2,
+                        border: 'none',
+                        boxShadow: (theme) =>
+                            theme.palette.mode === 'dark'
+                                ? '0 4px 12px rgba(0, 0, 0, 0.4)'
+                                : '0 2px 8px rgba(0, 0, 0, 0.15)',
+                        '&:hover': {
+                            boxShadow: (theme) =>
+                                theme.palette.mode === 'dark'
+                                    ? '0 8px 24px rgba(0, 0, 0, 0.5)'
+                                    : '0 4px 16px rgba(0, 0, 0, 0.25)'
+                        }
+                    }}>
+                        <CardContent sx={{ p: 0 }}>
+                            {/* Header with Area Snapshot and Basic Info */}
+                            <Box sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                p: 2,
+                                borderBottom: 1,
+                                borderColor: 'divider',
+                                bgcolor: 'grey.50',
+                                background: (theme) =>
+                                    theme.palette.mode === 'dark'
+                                        ? 'linear-gradient(135deg, #718096 0%, #718096 100%)'
+                                        : 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)'
+                            }}>
+                                {/* Area Snapshot - Left Side */}
+                                <Box sx={{
+                                    width: 120,
+                                    height: 120,
+                                    mr: 2,
+                                    borderRadius: 1,
+                                    overflow: 'hidden',
+                                    border: 1,
+                                    borderColor: 'divider',
+                                    bgcolor: 'background.paper',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}>
+                                    <BoundingBoxSnapshot
+                                        bbox={task.bboxes?.[0] || null}
+                                        taskId={task.task_id}
                                     />
                                 </Box>
-                                <Box>
-                                    <Typography variant="subtitle2" color="textSecondary">
-                                        Model Type
-                                    </Typography>
-                                    <Typography variant="body2">
-                                        {task.model_type}
-                                    </Typography>
-                                </Box>
-                                <Box>
-                                    <Typography variant="subtitle2" color="textSecondary">
-                                        Bounding Boxes
-                                    </Typography>
-                                    <Typography variant="body2">
-                                        {task.bboxes_count}
-                                    </Typography>
-                                </Box>
-                                <Box>
-                                    <Typography variant="subtitle2" color="textSecondary">
-                                        Created
-                                    </Typography>
-                                    <Typography variant="body2">
-                                        {formatDate(task.created_at)}
-                                    </Typography>
-                                </Box>
-                                <Box>
+
+                                {/* Task Info - Right Side */}
+                                <Box sx={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <Box>
+                                        <Typography variant="h6" sx={{
+                                            mb: 1,
+                                            fontFamily: 'monospace',
+                                            fontWeight: 400,
+                                            fontSize: '1rem',
+                                            letterSpacing: '0.5px',
+                                            color: (theme) =>
+                                                theme.palette.mode === 'dark'
+                                                    ? 'white'
+                                                    : 'text.primary',
+                                            background: (theme) =>
+                                                theme.palette.mode === 'dark'
+                                                    ? 'none'
+                                                    : 'linear-gradient(45deg, #1976d2, #42a5f5)',
+                                            backgroundClip: (theme) =>
+                                                theme.palette.mode === 'dark'
+                                                    ? 'unset'
+                                                    : 'text',
+                                            WebkitBackgroundClip: (theme) =>
+                                                theme.palette.mode === 'dark'
+                                                    ? 'unset'
+                                                    : 'text',
+                                            WebkitTextFillColor: (theme) =>
+                                                theme.palette.mode === 'dark'
+                                                    ? 'white'
+                                                    : 'transparent'
+                                        }}>
+                                            {task.task_id}
+                                        </Typography>
+                                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                                                <Typography variant="body2" color="textPrimary" sx={{ fontWeight: 500, width: 60, textAlign: 'right' }}>
+                                                    Status:
+                                                </Typography>
+                                                <Chip
+                                                    icon={getStatusIcon(task.status)}
+                                                    label={task.status.replace('_', ' ')}
+                                                    color={getStatusColor(task.status)}
+                                                    size="small"
+                                                />
+                                            </Box>
+
+                                            {/* Model Details as Chip */}
+                                            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                                                <Typography variant="body2" color="textPrimary" sx={{ fontWeight: 500, width: 60, textAlign: 'right' }}>
+                                                    Model:
+                                                </Typography>
+                                                <Chip
+                                                    label={`${task.model_short_name}${task.model_size ? ` • ${task.model_size}` : ''}`}
+                                                    variant="outlined"
+                                                    size="small"
+                                                    sx={{
+                                                        fontFamily: 'monospace',
+                                                        fontSize: '0.75rem',
+                                                        backgroundColor: 'white',
+                                                        '& .MuiChip-label': {
+                                                            color: 'black'
+                                                        }
+                                                    }}
+                                                />
+                                            </Box>
+
+                                            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                                                <Typography variant="body2" color="textPrimary" sx={{ fontWeight: 500, width: 60, textAlign: 'right' }}>
+                                                    Created:
+                                                </Typography>
+                                                <Chip
+                                                    label={formatDate(task.created_at)}
+                                                    variant="outlined"
+                                                    size="small"
+                                                    sx={{
+                                                        fontFamily: 'monospace',
+                                                        fontSize: '0.75rem',
+                                                        backgroundColor: 'white',
+                                                        '& .MuiChip-label': {
+                                                            color: 'black'
+                                                        }
+                                                    }}
+                                                />
+                                            </Box>
+                                        </Box>
+                                    </Box>
+
+                                    {/* Action Buttons */}
                                     <Box display="flex" gap={1}>
                                         <Button
                                             size="small"
                                             onClick={() => handleTaskExpand(task.task_id)}
+                                            sx={{ color: (theme) => theme.palette.mode === 'dark' ? 'white' : undefined }}
                                         >
                                             {expandedTask === task.task_id ? 'Hide' : 'Details'}
                                         </Button>
@@ -443,7 +605,23 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
                                                 variant="contained"
                                                 startIcon={<VisibilityIcon />}
                                                 onClick={() => handleVisualize(task)}
-                                                sx={{ minWidth: 'auto' }}
+                                                sx={{
+                                                    minWidth: 'auto',
+                                                    backgroundColor: (theme) =>
+                                                        theme.palette.mode === 'dark'
+                                                            ? theme.palette.primary.main
+                                                            : undefined,
+                                                    '&:hover': {
+                                                        backgroundColor: (theme) =>
+                                                            theme.palette.mode === 'dark'
+                                                                ? theme.palette.primary.dark
+                                                                : undefined,
+                                                        boxShadow: (theme) =>
+                                                            theme.palette.mode === 'dark'
+                                                                ? '0 4px 8px rgba(0, 0, 0, 0.3)'
+                                                                : undefined
+                                                    }
+                                                }}
                                             >
                                                 Visualize
                                             </Button>
@@ -452,48 +630,74 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
                                 </Box>
                             </Box>
 
-                            {/* Progress Bar */}
-                            <Box mt={2}>
-                                <Typography variant="subtitle2" color="textSecondary" gutterBottom>
-                                    Progress
-                                </Typography>
-                                <LinearProgress
-                                    variant="determinate"
-                                    value={getTaskProgress(task)}
-                                    sx={{ height: 8, borderRadius: 4 }}
-                                />
-                                <Typography variant="caption" color="textSecondary">
-                                    {Math.round(getTaskProgress(task))}% Complete
-                                </Typography>
-                            </Box>
+                        {/* Progress Bar */}
+                        <Box sx={{ mt: 1, px: 2, py: 0.125 }}>
+                            <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 0.25, fontSize: '0.75rem' }}>
+                                Progress
+                            </Typography>
+                            <LinearProgress
+                                variant="determinate"
+                                value={getTaskProgress(task)}
+                                sx={{ height: 4, borderRadius: 2, mb: 0.25 }}
+                            />
+                            <Typography variant="caption" color="textSecondary" sx={{ fontSize: '0.7rem' }}>
+                                {Math.round(getTaskProgress(task))}% Complete
+                            </Typography>
+                        </Box>
 
-                            {/* Expanded Details */}
-                            {expandedTask === task.task_id && (
-                                <Box mt={2}>
-                                    <Typography variant="h6" gutterBottom>
-                                        Stage Details
-                                    </Typography>
-                                    <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' } }}>
-                                        {Object.entries(task.stages).map(([stageName, stageData]) => (
-                                            <Box key={stageName}>
-                                                <Card variant="outlined">
-                                                    <CardContent>
-                                                        <Box display="flex" alignItems="center" mb={1}>
-                                                            <Chip
-                                                                icon={getStageStatusIcon(stageData.status)}
-                                                                label={stageData.status}
-                                                                color={getStageStatusColor(stageData.status)}
-                                                                size="small"
-                                                                sx={{ mr: 1 }}
-                                                            />
-                                                            <Typography variant="subtitle2">
-                                                                {getStageDisplayName(stageName)}
-                                                            </Typography>
-                                                        </Box>
+                        {/* Expanded Details */}
+                        {expandedTask === task.task_id && (
+                            <Box sx={{ mt: 3, px: 2, py: 2 }}>
+                                <Typography variant="h6" sx={{
+                                    mb: 1,
+                                    fontFamily: 'monospace',
+                                    fontWeight: 400,
+                                    fontSize: '1rem',
+                                    letterSpacing: '0.5px',
+                                    color: (theme) =>
+                                        theme.palette.mode === 'dark'
+                                            ? 'white'
+                                            : 'text.primary',
+                                    background: (theme) =>
+                                        theme.palette.mode === 'dark'
+                                            ? 'none'
+                                            : 'linear-gradient(45deg, #1976d2, #42a5f5)',
+                                    backgroundClip: (theme) =>
+                                        theme.palette.mode === 'dark'
+                                            ? 'unset'
+                                            : 'text',
+                                    WebkitBackgroundClip: (theme) =>
+                                        theme.palette.mode === 'dark'
+                                            ? 'unset'
+                                            : 'text',
+                                    WebkitTextFillColor: (theme) =>
+                                        theme.palette.mode === 'dark'
+                                            ? 'white'
+                                            : 'transparent'
+                                }}>
+                                    Stage Details
+                                </Typography>
+                                <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' } }}>
+                                    {Object.entries(task.stages).map(([stageName, stageData]) => (
+                                        <Box key={stageName}>
+                                            <Card variant="outlined" sx={{ height: '100%' }}>
+                                                <CardContent sx={{ p: 2 }}>
+                                                    <Box display="flex" alignItems="center" mb={1}>
+                                                        <Chip
+                                                            icon={getStageStatusIcon(stageData.status)}
+                                                            label={stageData.status}
+                                                            color={getStageStatusColor(stageData.status)}
+                                                            size="small"
+                                                            sx={{ mr: 1 }}
+                                                        />
+                                                        <Typography variant="subtitle2">
+                                                            {getStageDisplayName(stageName)}
+                                                        </Typography>
+                                                    </Box>
 
                                                         {stageData.started_at && (
                                                             <Typography variant="caption" display="block">
-                                                                Started: {formatDate(stageData.started_at)}
+                                                                Initiated: {formatDate(stageData.started_at)}
                                                             </Typography>
                                                         )}
 
@@ -552,6 +756,49 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
                                                                     </>
                                                                 )}
 
+                                                                {stageName === 'model_prediction' && (
+                                                                    <>
+                                                                        {stageData.result["model/GFLOPs"] !== undefined && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                🧮 GFLOPs: {Number(stageData.result["model/GFLOPs"]).toFixed(4)}
+                                                                            </Typography>
+                                                                        )}
+                                                                        {stageData.result.CO2_emissions !== undefined && (
+                                                                            <Box display="flex" alignItems="center" gap={0.5}>
+                                                                                <Typography variant="caption" display="block">
+                                                                                    🌿 CO2 emissions: {Number(stageData.result.CO2_emissions).toFixed(6)} (g CO₂)
+                                                                                </Typography>
+                                                                                <MuiTooltip title={
+                                                                                    <Typography variant="caption">
+                                                                                        CO₂ emissions calculated using CodeCarbon - an open-source tool for tracking compute-based carbon emissions.
+                                                                                        <br/>
+                                                                                        <Link
+                                                                                            href="http://codecarbon.io"
+                                                                                            target="_blank"
+                                                                                            rel="noopener noreferrer"
+                                                                                            sx={{ color: 'inherit', textDecoration: 'underline' }}
+                                                                                        >
+                                                                                            Learn more
+                                                                                        </Link>
+                                                                                    </Typography>
+                                                                                }>
+                                                                                    <InfoIcon sx={{ fontSize: 16, color: 'text.secondary', cursor: 'help' }} />
+                                                                                </MuiTooltip>
+                                                                            </Box>
+                                                                        )}
+                                                                        {stageData.result.energy_consumed !== undefined && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                ⚡ Energy consumed: {Number(stageData.result.energy_consumed).toFixed(10)} (kWh)
+                                                                            </Typography>
+                                                                        )}
+                                                                        {stageData.result.inference_time !== undefined && (
+                                                                            <Typography variant="caption" display="block">
+                                                                                ⏱️ Inference time: {Number(stageData.result.inference_time).toFixed(4)} s
+                                                                            </Typography>
+                                                                        )}
+                                                                    </>
+                                                                )}
+
                                                                 {stageName === 'visualization_preparation' && stageData.result && (
                                                                     <>
                                                                         <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'success.main' }}>
@@ -569,7 +816,7 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
 
                                                                 {/* Fallback for other results */}
                                                                 {!(stageName === 'data_processing' && (stageData.result.chips_created || stageData.result.processing_date)) &&
-                                                                 !(stageName === 'model_prediction' && stageData.result.aod_values) &&
+                                                                 !(stageName === 'model_prediction' && (stageData.result["model/GFLOPs"] !== undefined || stageData.result.CO2_emissions !== undefined || stageData.result.energy_consumed !== undefined || stageData.result.inference_time !== undefined)) &&
                                                                  !(stageName === 'visualization_preparation' && stageData.result.processing_duration) && (
 
                                                                     <Typography variant="caption" display="block">

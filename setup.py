@@ -38,6 +38,9 @@ model_dependencies = [
     "hydra-core",
     "omegaconf",
     "huggingface_hub",
+    "ray[serve]",
+    "neptune",
+    "codecarbon==3.0.2",
 ]
 apps_dependencies = [
     # Add dependencies specific to the apps component
@@ -57,6 +60,7 @@ apps_dependencies = [
     "rq-dashboard==0.8.3.2",
     "types-redis>=4.6.0",
     "titiler.core==0.22.4",
+    "ptflops",
 ]
 setup(
     name="instageo",

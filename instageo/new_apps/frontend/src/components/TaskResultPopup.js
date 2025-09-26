@@ -146,6 +146,23 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
         }
     };
 
+    const getStatusMessage = (status) => {
+        switch (status) {
+            case 'completed':
+                return 'Task completed successfully! All data has been processed and is ready for visualization.';
+            case 'data_processing':
+                return 'Data processing is currently being run. Extracting and preprocessing satellite data for the selected area.';
+            case 'model_prediction':
+                return 'Model prediction is currently being run. Processing data through the machine learning model.';
+            case 'visualization_preparation':
+                return 'Visualization preparation is currently being run. Converting data to web-optimized format.';
+            case 'pending':
+                return 'Task submitted successfully. Data processing will start automatically.';
+            default:
+                return 'Your task has been submitted successfully!';
+        }
+    };
+
     if (error) {
         return (
             <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -211,11 +228,26 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
 
             <DialogContent>
                 <Box sx={{ mb: 3 }}>
-                    <Alert severity={result.status === 'failed' ? 'error' : 'success'} sx={{ mb: 2 }}>
+                    <Alert
+                        severity={result.status === 'failed' ? 'error' : 'info'}
+                        sx={{
+                            mb: 2,
+                            backgroundColor: result.status === 'failed'
+                                ? undefined
+                                : (theme) => theme.palette.mode === 'dark'
+                                    ? 'rgba(33, 150, 243, 0.1)'
+                                    : 'rgba(33, 150, 243, 0.05)',
+                            color: result.status === 'failed'
+                                ? undefined
+                                : (theme) => theme.palette.mode === 'dark'
+                                    ? 'rgba(255, 255, 255, 0.9)'
+                                    : 'rgba(0, 0, 0, 0.8)'
+                        }}
+                    >
                         <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
                             {result.status === 'failed'
                                 ? (result.message || 'Task failed. Please check the details in the tasks monitor panel or try again.')
-                                : (result.message || 'Your task has been submitted successfully!')}
+                                : getStatusMessage(result.status)}
                         </Typography>
                     </Alert>
                 </Box>
@@ -229,10 +261,9 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
                         alignItems: 'center',
                         gap: 1,
                         p: 1,
-                        bgcolor: 'grey.50',
                         borderRadius: 1,
                         border: '1px solid',
-                        borderColor: 'grey.300'
+                        borderColor: 'divider'
                     }}>
                         <Typography
                             variant="body2"
@@ -279,11 +310,11 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
                             </StepLabel>
                             <StepContent>
                                 <Typography variant="body2" color="text.secondary">
-                                    Downloading and preprocessing satellite data for the selected areas.
+                                    Extracting and preprocessing satellite data for the selected areas.
                                 </Typography>
                                 {result.stages?.data_processing?.started_at && (
                                     <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-                                        Started: {new Date(result.stages.data_processing.started_at).toLocaleString()}
+                                        Initiated: {new Date(result.stages.data_processing.started_at).toLocaleString()}
                                     </Typography>
                                 )}
                                 {result.stages?.data_processing?.completed_at && (

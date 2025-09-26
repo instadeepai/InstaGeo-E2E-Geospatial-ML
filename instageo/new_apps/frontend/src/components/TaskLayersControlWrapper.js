@@ -18,19 +18,20 @@ import {
     Layers as LayersIcon
 } from '@mui/icons-material';
 import { createPortal } from 'react-dom';
+import { logger } from '../utils/logger';
 
 const TaskLayersControlWrapper = ({ taskLayers = [], onTaskLayerChange }) => {
     const map = useMap();
     const controlRef = useRef(null);
     const [expanded, setExpanded] = useState(true);
 
-    console.log('TaskLayersControlWrapper render:', { taskLayersCount: taskLayers.length });
+    logger.log('TaskLayersControlWrapper render:', { taskLayersCount: taskLayers.length });
 
     // Create layer control
     useEffect(() => {
         if (!map) return;
 
-        console.log('Creating unified layer control');
+        logger.log('Creating unified layer control');
 
         // Create control container
         const TaskLayersControlWrapperClass = L.Control.extend({
@@ -45,17 +46,17 @@ const TaskLayersControlWrapper = ({ taskLayers = [], onTaskLayerChange }) => {
                 L.DomEvent.disableScrollPropagation(div);
 
                 controlRef.current = div;
-                console.log('Unified control div created');
+                logger.log('Unified control div created');
                 return div;
             }
         });
 
         const control = new TaskLayersControlWrapperClass({ position: 'bottomleft' });
         control.addTo(map);
-        console.log('Unified control added to map');
+        logger.log('Unified control added to map');
 
         return () => {
-            console.log('Removing unified control');
+            logger.log('Removing unified control');
             if (control) {
                 map.removeControl(control);
             }
@@ -78,7 +79,7 @@ const TaskLayersControlWrapper = ({ taskLayers = [], onTaskLayerChange }) => {
 
     // Render control content
     const renderControl = () => {
-        console.log('renderControl called:', {
+        logger.log('renderControl called:', {
             hasControlRef: !!controlRef.current,
             taskLayersCount: taskLayers.length
         });

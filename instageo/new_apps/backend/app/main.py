@@ -11,19 +11,22 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .jobs import (
+from instageo.model.configs.config_dataclasses import ModelInfo
+from instageo.model.registry.model_registry import ModelRegistry
+from instageo.new_apps.backend.app.jobs import (
     data_processing_queue,
     get_queues_status,
     model_prediction_queue,
     visualization_preparation_queue,
 )
-from .tasks import Task
-from .tiler_service import InstaGeoTilerService
+from instageo.new_apps.backend.app.tasks import Task
+from instageo.new_apps.backend.app.tiler_service import InstaGeoTilerService
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="InstaGeo API")
+# TODO: Handle API Key authentication
 
 # Configure CORS
 app.add_middleware(
@@ -173,23 +176,6 @@ class TaskStatusResponse(BaseModel):
     stages: Dict[str, Any]
 
 
-class ModelInfo(BaseModel):
-    """Model info."""
-
-    model_key: str
-    model_type: str
-    model_short_name: str
-    model_name: str
-    model_description: Optional[str] = None
-    model_size: str
-    num_params: float
-    chip_size: int
-    num_steps: int
-    data_source: str
-    temporal_step: int
-    classes_mapping: Dict[int, str]
-
-
 @app.get("/")
 async def root() -> Dict[str, str]:
     """Root endpoint."""
@@ -201,47 +187,57 @@ async def create_task(task_request: TaskCreationRequest) -> TaskCreationResponse
     """Submit a task for data processing and model prediction."""
     try:
         logger.info(f"Received task creation request: {task_request}")
+        logger.info(f"Model key from request: {task_request.model_key}")
+        logger.info(f"Model size from request: {task_request.model_size}")
         # Generate task ID
         task_id = str(uuid.uuid4())
 
-        # To avoid dealing with tempered/malicious model parameters from the frontend
-        #  to run the data extraction for instance, let's get model parameters
-        # (chip_size, num_steps, etc) directly from our registry
-        DUMMY_REGISTRY = {
-            "aod-estimator": {
-                "chip_size": 224,
-                "num_steps": 1,
-                "data_source": "HLS",
-                "temporal_step": 0,
-                "model_type": "reg",
-                "model_short_name": "aod-estim",
-                "model_name": "Aerosol Optical Depth Estimation",
-                "model_description": "Estimates aerosol optical depth values"
-                "from satellite imagery for air quality monitoring",
-                "model_size": "tiny",
-                "num_params": 4114000,
-                "classes_mapping": {},
-            }
-        }
-        model_info = DUMMY_REGISTRY[task_request.model_key]
+        # Use the model parameters from the frontend request
+        model_key = task_request.model_key
+        model_size = task_request.model_size
+
+        # Validate that model_key and model_size are provided
+        if not model_key or not model_size:
+            raise HTTPException(
+                status_code=400,
+                detail="Both model_key and model_size must be provided",
+            )
+
+        model_registry = ModelRegistry()
+        model_info = model_registry.get_model_metadata_for_size(model_key, model_size)
+        logger.info(f"Model info: {model_info}")
+
+        if model_info is None:
+            # Get available models for better error message
+            available_models = model_registry.get_available_models()
+            available_keys = list({m.model_key for m in available_models})
+            available_sizes = list({m.model_size for m in available_models})
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model {model_key}/{model_size} not found in registry. "
+                f"Available model keys: {available_keys}, "
+                f"Available sizes: {available_sizes}",
+            )
 
         parameters = {
-            # Parameters from the request
-            "model_key": task_request.model_key,
-            "model_size": task_request.model_size,
+            # Parameters from the frontend request
+            "model_key": model_key,
+            "model_size": model_size,
             "date": task_request.date,
             "cloud_coverage": task_request.cloud_coverage,
-            "temporal_tolerance": task_request.temporal_tolerance,
+            "temporal_tolerance": task_request.temporal_tolerance or model_info.temporal_step,
             # True model parameters from registry
-            "chip_size": model_info["chip_size"],
-            "num_steps": model_info["num_steps"],
-            "data_source": model_info["data_source"],
-            "temporal_step": model_info["temporal_step"],
-            "model_type": model_info["model_type"],
-            "model_short_name": model_info["model_short_name"],
-            "model_name": model_info["model_name"],
-            "classes_mapping": model_info["classes_mapping"],
+            "chip_size": model_info.chip_size,
+            "num_steps": model_info.num_steps,
+            "data_source": model_info.data_source,
+            "temporal_step": model_info.temporal_step,
+            "model_type": model_info.model_type,
+            "model_short_name": model_info.model_short_name,
+            "model_name": model_info.model_name,
+            "classes_mapping": model_info.classes_mapping,
         }
+
         # Create task instance (this automatically starts data processing)
         task = Task(
             task_id=task_id,
@@ -312,15 +308,12 @@ async def get_all_tasks() -> List[Dict[str, Any]]:
                         "task_id": task.task_id,
                         "status": task.status,
                         "created_at": task.created_at,
-                        "bboxes_count": len(task.bboxes),
-                        "model_type": (
-                            (
-                                task.parameters.get("model_type")
-                                or task.parameters.get("model_key", "unknown")
-                            )
-                            if task.parameters
-                            else "unknown"
-                        ),
+                        "bboxes": task.bboxes,
+                        "model_short_name": task.parameters.get("model_short_name"),
+                        "model_type": task.parameters.get("model_type"),
+                        "model_name": task.parameters.get("model_name"),
+                        "model_size": task.parameters.get("model_size"),
+                        "classes_mapping": task.parameters.get("classes_mapping"),
                         "stages": task.stages,
                     }
                 )
@@ -341,6 +334,47 @@ async def get_queues_status_endpoint() -> Dict[str, Any]:
     try:
         return get_queues_status()
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/models/{model_name}")
+async def get_model_details(model_name: str) -> Dict[str, Any]:
+    """Get detailed information about a specific model."""
+    try:
+        model_registry = ModelRegistry()
+        available_models = model_registry.get_available_models()
+
+        # Check if model exists in available models
+        model_exists = any(model.model_key == model_name for model in available_models)
+        if not model_exists:
+            available_model_keys = [m.model_key for m in available_models]
+            raise HTTPException(
+                status_code=404,
+                detail=f"Model '{model_name}' not found. Available models: {available_model_keys}",
+            )
+
+        model_data = model_registry._all_models_metadata["models"][model_name]
+
+        return {
+            "status": "success",
+            "model": {
+                "name": model_name,
+                "description": model_data.get("description", ""),
+                "task_type": model_data.get("task_type", "unknown"),
+                "data_source": model_data.get("data_source", "unknown"),
+                "sizes": model_data.get("sizes", {}),
+                "metadata": {
+                    k: v
+                    for k, v in model_data.items()
+                    if k not in ["description", "task_type", "data_source", "sizes"]
+                },
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting model details for {model_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -418,31 +452,15 @@ async def health_check() -> Dict[str, Any]:
 
 @app.get("/api/models", response_model=List[ModelInfo])
 async def get_models() -> List[ModelInfo]:
-    """Dummy models endpoint for frontend integration (cached client-side)."""
-    # Minimal set covering AOD reg with three sizes
-    dummy: List[ModelInfo] = [
-        ModelInfo(
-            model_key="aod-estimator",
-            model_type="reg",
-            model_short_name="aod-estim",
-            model_name="Aerosol Optical Depth Estimation",
-            model_description="Estimates aerosol optical depth values"
-            "from satellite imagery for air quality monitoring",
-            model_size=size,
-            num_params=num_params,
-            chip_size=224,
-            num_steps=1,
-            data_source="HLS",
-            temporal_step=0,
-            classes_mapping={},
-        )
-        for size, num_params in (
-            ("tiny", 4114000),
-            ("medium", 16500000),
-            ("large", 66000000),
-        )
-    ]
-    return dummy
+    """Get all available models from the model registry."""
+    try:
+        model_registry = ModelRegistry()
+        models = model_registry.get_available_models()
+        logger.info(f"list of available models: {models}")
+        return models
+    except Exception as e:
+        logger.error(f"Error getting available models: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

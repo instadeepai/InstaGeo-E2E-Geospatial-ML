@@ -1,0 +1,9 @@
+tunnel: $CLOUDFLARE_TUNNEL_NAME
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: $DOMAIN_NAME
+    service: http://instageo-nginx:80
+  - hostname: www.$DOMAIN_NAME
+    service: http://instageo-nginx:80
+  - service: http_status:404

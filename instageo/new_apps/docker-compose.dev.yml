@@ -1,18 +1,20 @@
 # Define a reusable block for backend services
 x-instageo-backend-service-defaults: &backend-defaults
   environment:
-    - REDIS_HOST=instageo-redis
-    - REDIS_PORT=6379
-    - REDIS_DB=0
+    - REDIS_HOST=${REDIS_HOST}
+    - REDIS_PORT=${REDIS_PORT}
+    - REDIS_DB=${REDIS_DB}
+    - TEST_FILEPATH=${TEST_FILEPATH}
   volumes:
     - ../../instageo:/app/instageo
-    - shared-data:${DATA_FOLDER:-/app/instageo-data}
+    - shared-data:${DATA_FOLDER}
+    - ${HOST_MODELS_PATH}:${APP_MODELS_PATH}:ro
 
 services:
   instageo-redis:
     image: redis:8-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:${REDIS_PORT}"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -26,6 +28,7 @@ services:
         DATA_FOLDER: ${DATA_FOLDER}
         EARTHDATA_USERNAME: ${EARTHDATA_USERNAME}
         EARTHDATA_PASSWORD: ${EARTHDATA_PASSWORD}
+        MODELS_PATH: ${APP_MODELS_PATH}
     image: instageo-backend:dev
     depends_on:
       - instageo-redis
@@ -73,10 +76,13 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
+      args:
+      - REACT_APP_INSTAGEO_BACKEND_API_BASE_URL=http://localhost
+      - REACT_APP_MIN_AREA_KM2=${REACT_APP_MIN_AREA_KM2}
+      - REACT_APP_MAX_AREA_KM2=${REACT_APP_MAX_AREA_KM2}
+      - REACT_APP_ENV=dev
     expose:
       - "3000"
-    environment:
-      - REACT_APP_INSTAGEO_BACKEND_API_BASE_URL=http://localhost
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -90,7 +96,7 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.dev.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - instageo-frontend
       - instageo-backend-api

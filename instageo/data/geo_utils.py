@@ -163,6 +163,38 @@ def get_extent(  # type: ignore[no-untyped-call]
     return lon_min, lat_min, lon_max, lat_max
 
 
+def get_complete_chips_coords(
+    coord_min: float,
+    coord_max: float,
+    spatial_resolution: float,
+    chip_size: int,
+    max_bound: float,
+) -> np.ndarray:
+    """Calculate the number of complete chips that fit within coordinate bounds.
+
+    This function determines how many complete chips of size `chip_size` can fit between
+    `coord_min` and `coord_max`, considering a maximum boundary constraint (`max_bound`).
+    If extending the region to fit complete chips would exceed `max_bound`, it reduces
+    by one chip to stay within bounds.
+
+    Args:
+        coord_min: Starting coordinate (e.g., minimum longitude or latitude)
+        coord_max: Ending coordinate (e.g., maximum longitude or latitude)
+        spatial_resolution: Size of one pixel in coordinate units
+        chip_size: Number of pixels per chip (e.g., 224 for 224x224 chips)
+        max_bound: Maximum allowed coordinate value (e.g., 180 for longitude, 90 for latitude)
+
+    Returns:
+        Array of coordinates at spatial_resolution intervals
+    """
+    n_chips = int(np.ceil((coord_max - coord_min) / (spatial_resolution * chip_size)))
+    n_pixels = n_chips * chip_size
+    if coord_min + n_pixels * spatial_resolution > max_bound:
+        n_pixels = (n_chips - 1) * chip_size
+    coords = np.arange(coord_min, coord_min + n_pixels * spatial_resolution, spatial_resolution)
+    return coords
+
+
 def create_grid_polygons(
     bbox_list: list[list[float]],
     date: str,
@@ -186,8 +218,9 @@ def create_grid_polygons(
     for bbox in bbox_list:
         lon_min, lat_min, lon_max, lat_max = bbox
 
-        lons = np.arange(lon_min, lon_max, spatial_resolution)
-        lats = np.arange(lat_min, lat_max, spatial_resolution)
+        # Calculate dimensions ensuring complete chips within bounds
+        lons = get_complete_chips_coords(lon_min, lon_max, spatial_resolution, chip_size, 180)
+        lats = get_complete_chips_coords(lat_min, lat_max, spatial_resolution, chip_size, 90)
 
         # Create xarray Dataset with empty/minimal data
         ds = xr.Dataset(

@@ -13,7 +13,6 @@ flake8
 isort
 jupyter
 mypy
-neptune-client
 numpy==1.26.4
 pre-commit==3.7.1
 pytest==8.3.2
@@ -32,3 +31,4 @@ codecarbon==3.0.2
 ptflops
 oauthlib==3.2.2
 pynvml==11.0.0
+datashader

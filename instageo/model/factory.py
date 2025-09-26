@@ -75,7 +75,7 @@ def create_model(cfg: DictConfig) -> PrithviBaseModule:
                     num_classes=cfg.model.num_classes,
                     class_weights=cfg.train.class_weights,
                 )
-    if cfg.mode == "eval":
+    else:
         if cfg.is_reg_task:
             model = PrithviRegressionModule(
                 **common_params,
@@ -91,6 +91,7 @@ def create_model(cfg: DictConfig) -> PrithviBaseModule:
                 class_weights=cfg.train.class_weights,
                 load_pretrained_weights=False,
             )
+
         model.load_state_dict(
             torch.load(cfg.checkpoint_path, map_location=torch.device("cpu"))["state_dict"]
         )

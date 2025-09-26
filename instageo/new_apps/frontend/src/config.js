@@ -13,12 +13,8 @@ export const INSTAGEO_BACKEND_API_ENDPOINTS = {
 
 // Environment configuration
 export const CONFIG = {
-    API_BASE_URL: INSTAGEO_BACKEND_API_BASE_URL,
-    IS_DEVELOPMENT: process.env.NODE_ENV === 'development',
-    IS_PRODUCTION: process.env.NODE_ENV === 'production',
+    IS_DEV_STAGE: process.env.REACT_APP_ENV === 'dev',
+    // Area validation limits (in km²)
+    MIN_AREA_KM2: parseFloat(process.env.REACT_APP_MIN_AREA_KM2) || 50,
+    MAX_AREA_KM2: parseFloat(process.env.REACT_APP_MAX_AREA_KM2) || 500,
 };
-
-// TODO: Add these to the environment variables
-// REACT_APP_MAP_TILE_URL=https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
-// REACT_APP_MAX_AREA_KM2=100000
-// REACT_APP_MIN_AREA_KM2=1

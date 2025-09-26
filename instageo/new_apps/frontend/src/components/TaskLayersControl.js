@@ -24,6 +24,7 @@ import {
 import { createPortal } from 'react-dom';
 import { generateSegmentationColors } from '../utils/segmentationColors';
 import { generateTaskPdf } from '../utils/pdfReport';
+import { logger } from '../utils/logger';
 
 const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
     const map = useMap();
@@ -32,13 +33,13 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
     const [expanded, setExpanded] = useState(true);
     const [taskCollapsed, setTaskCollapsed] = useState({}); // Track collapsed state per task
 
-    console.log('TaskLayersControl render:', { taskLayersCount: taskLayers.length });
+    logger.log('TaskLayersControl render:', { taskLayersCount: taskLayers.length });
 
     // Create layer control container (always present)
     useEffect(() => {
         if (!map || controlInstanceRef.current) return;
 
-        console.log('Creating unified task layers control container');
+        logger.log('Creating unified task layers control container');
 
         // Create control container
         const TaskLayersControlClass = L.Control.extend({
@@ -53,7 +54,7 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                 L.DomEvent.disableScrollPropagation(div);
 
                 controlRef.current = div;
-                console.log('Task layers control div created');
+                logger.log('Task layers control div created');
                 return div;
             }
         });
@@ -61,10 +62,10 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
         const control = new TaskLayersControlClass({ position: 'bottomleft' });
         control.addTo(map);
         controlInstanceRef.current = control;
-        console.log('Task layers control added to map');
+        logger.log('Task layers control added to map');
 
         return () => {
-            console.log('Removing task layers control');
+            logger.log('Removing task layers control');
             if (controlInstanceRef.current) {
                 map.removeControl(controlInstanceRef.current);
                 controlInstanceRef.current = null;
@@ -114,34 +115,45 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
     const handleZoomToTask = (taskLayer) => {
         if (map && taskLayer.bounds && Array.isArray(taskLayer.bounds) && taskLayer.bounds.length === 2) {
             try {
-                // First fit to bounds to center the area
-                map.fitBounds(taskLayer.bounds, { padding: [20, 20] });
+                // Calculate center of the bounds
+                const bounds = taskLayer.bounds;
+                const centerLat = (bounds[0][0] + bounds[1][0]) / 2;
+                const centerLng = (bounds[0][1] + bounds[1][1]) / 2;
+                const center = [centerLat, centerLng];
 
-                // Then zoom to the maximum available zoom level for this layer
+                // Set zoom level first
+                let targetZoom;
                 if (taskLayer.maxZoom && taskLayer.maxZoom > 0) {
-                    // Use the layer's maximum zoom level
-                    map.setZoom(taskLayer.maxZoom);
-                    console.log('Zoomed to task maximum zoom level:', taskLayer.maxZoom);
+                    targetZoom = taskLayer.maxZoom;
                 } else {
-                    // Fallback: zoom to a reasonable level if maxZoom is not available
-                    const currentZoom = map.getZoom();
-                    const targetZoom = Math.min(currentZoom + 2, 18); // Zoom in a bit more, max 18
-                    map.setZoom(targetZoom);
-                    console.log('Zoomed to fallback level:', targetZoom);
+                    // Fallback: calculate appropriate zoom based on bounds size
+                    const latDiff = Math.abs(bounds[1][0] - bounds[0][0]);
+                    const lngDiff = Math.abs(bounds[1][1] - bounds[0][1]);
+                    const maxDiff = Math.max(latDiff, lngDiff);
+
+                    // Calculate zoom level based on bounds size
+                    if (maxDiff > 1) targetZoom = 8;
+                    else if (maxDiff > 0.5) targetZoom = 10;
+                    else if (maxDiff > 0.1) targetZoom = 12;
+                    else if (maxDiff > 0.05) targetZoom = 14;
+                    else targetZoom = 16;
                 }
 
-                console.log('Zoomed to task bounds and max zoom:', taskLayer.bounds, taskLayer.maxZoom);
+                // Center the map and set zoom
+                map.setView(center, targetZoom);
+
+                logger.log('Centered map on task bounds:', center, 'zoom:', targetZoom);
             } catch (error) {
-                console.error('Error zooming to task bounds:', error);
+                logger.error('Error zooming to task bounds:', error);
             }
         } else {
-            console.warn('No valid bounds available for task:', taskLayer.taskName);
+            logger.warn('No valid bounds available for task:', taskLayer.taskName);
         }
     };
 
     // Render control content
     const renderControl = () => {
-        console.log('renderControl called:', {
+        logger.log('renderControl called:', {
             hasControlRef: !!controlRef.current,
             taskLayersCount: taskLayers.length
         });
@@ -154,9 +166,10 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                 sx={{
                     minWidth: expanded ? 280 : 'auto',
                     maxWidth: 320,
-                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                    backgroundColor: 'background.paper',
                     backdropFilter: 'blur(8px)',
-                    border: '1px solid rgba(0, 0, 0, 0.1)',
+                    border: '1px solid',
+                    borderColor: 'divider',
                     overflowX: 'hidden' // Prevent horizontal scrolling
                 }}
             >
@@ -180,7 +193,7 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                         {taskLayers.length > 0 && (
-                            <Tooltip title="Remove All Task Layers">
+                            <Tooltip title="Remove All Tasks Layers">
                                 <IconButton
                                     size="small"
                                     onClick={handleRemoveAll}
@@ -194,16 +207,16 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                             </Tooltip>
                         )}
                         <Tooltip title={expanded ? "Collapse Panel" : "Expand Panel"}>
-                            <IconButton
-                                size="small"
-                                onClick={() => setExpanded(!expanded)}
-                                sx={{
-                                    color: 'white',
-                                    '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)' }
-                                }}
-                            >
-                                {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-                            </IconButton>
+                    <IconButton
+                        size="small"
+                        onClick={() => setExpanded(!expanded)}
+                        sx={{
+                            color: 'white',
+                            '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)' }
+                        }}
+                    >
+                        {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                    </IconButton>
                         </Tooltip>
                     </Box>
                 </Box>
@@ -218,22 +231,18 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                             overflowY: 'auto', // Add vertical scrolling when needed
                             overflowX: 'hidden', // Prevent horizontal scrolling
                             '&::-webkit-scrollbar': {
-                                width: '6px',
+                                width: '0px',
+                                height: '0px',
                             },
                             '&::-webkit-scrollbar-track': {
-                                backgroundColor: 'rgba(0,0,0,0.1)',
-                                borderRadius: '3px',
+                                backgroundColor: 'transparent',
                             },
                             '&::-webkit-scrollbar-thumb': {
-                                backgroundColor: 'rgba(0,0,0,0.2)',
-                                borderRadius: '3px',
-                                '&:hover': {
-                                    backgroundColor: 'rgba(0,0,0,0.3)',
-                                },
+                                backgroundColor: 'transparent',
                             },
                         }}
                     >
-                        {taskLayers.map((taskLayer, index) => (
+                        {taskLayers.slice().reverse().map((taskLayer, index) => (
                             <Box key={taskLayer.id} mb={index < taskLayers.length - 1 ? 3 : 0}>
                                 {/* Task Header */}
                                 <Box sx={{
@@ -258,10 +267,10 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                 {taskCollapsed[taskLayer.id] ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
                                             </IconButton>
                                         </Tooltip>
-                                        <Typography
-                                            variant="subtitle2"
-                                            sx={{
-                                                fontWeight: 600,
+                                <Typography
+                                    variant="subtitle2"
+                                    sx={{
+                                        fontWeight: 600,
                                                 color: 'primary.main'
                                             }}
                                         >
@@ -293,7 +302,7 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                 size="small"
                                                 onClick={() => handleZoomToTask(taskLayer)}
                                                 sx={{
-                                                    color: 'primary.main',
+                                        color: 'primary.main',
                                                     '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.04)' }
                                                 }}
                                             >
@@ -330,13 +339,13 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                 {/* Layer Controls - Collapsible */}
                                 <Collapse in={!taskCollapsed[taskLayer.id]}>
                                     <Box>
-                                        {/* Prediction Layer - Higher z-index, shown first */}
+                                        {/* Prediction Layer - shown first */}
                                         {taskLayer.predictionTilesUrl && (
-                                            <Box mb={2}>
+                                    <Box mb={2}>
                                                 <Box display="flex" alignItems="center" gap={1} mb={1}>
                                                     <Tooltip title={`${taskLayer.predictionVisible !== false ? 'Hide' : 'Show'} Model Prediction`}>
                                                         <IconButton
-                                                            size="small"
+                                                    size="small"
                                                             onClick={() => handleTaskLayerVisibilityChange(taskLayer.id, 'prediction', !(taskLayer.predictionVisible !== false))}
                                                             sx={{
                                                                 color: taskLayer.predictionVisible !== false ? 'primary.main' : 'text.disabled',
@@ -350,7 +359,8 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                         width={24}
                                                         height={24}
                                                         borderRadius="4px"
-                                                        border="1px solid rgba(0,0,0,0.2)"
+                                                        border="1px solid"
+                                                        borderColor="divider"
                                                         overflow="hidden"
                                                         sx={{
                                                             backgroundImage: `url(${taskLayer.predictionPreviewUrl || ''})`,
@@ -364,20 +374,20 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                         Model Prediction
                                                     </Typography>
                                                 </Box>
-                                                <Box ml={0.5}>
-                                                    <Typography variant="caption" color="text.secondary" gutterBottom>
+                                        <Box ml={0.5}>
+                                            <Typography variant="caption" color="text.secondary" gutterBottom>
                                                         Opacity: {Math.round((taskLayer.predictionOpacity || 0.8) * 100)}%
-                                                    </Typography>
-                                                    <Slider
+                                            </Typography>
+                                            <Slider
                                                         value={taskLayer.predictionOpacity || 0.8}
                                                         onChange={(e, value) => handleTaskLayerOpacityChange(taskLayer.id, 'prediction', value)}
-                                                        min={0}
-                                                        max={1}
-                                                        step={0.1}
-                                                        size="small"
-                                                        sx={{ mt: 0.5 }}
-                                                    />
-                                                </Box>
+                                                min={0}
+                                                max={1}
+                                                step={0.1}
+                                                size="small"
+                                                sx={{ mt: 0.5 }}
+                                            />
+                                        </Box>
                                                 {/* Regression Scale Bar */}
                                                 {taskLayer.predictionStats?.type === 'reg' && (
                                                     <Box mt={1} ml={0.5} width="100%">
@@ -392,7 +402,8 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                                 background: 'linear-gradient(to right, #440154, #482777, #3f4a8a, #31678e, #26838f, #1f9d8a, #6cce5a, #b6de2b, #fee825)',
                                                                 height: '16px',
                                                                 borderRadius: '8px',
-                                                                border: '1px solid rgba(0,0,0,0.12)',
+                                                                border: '1px solid',
+                                                                borderColor: 'divider',
                                                                 boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                                                                 width: '100%'
                                                             }}
@@ -423,7 +434,7 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                                     const className = taskLayer.predictionStats.classes_mapping?.[idx] || `Class ${idx}`;
                                                                     return (
                                                                         <Box key={idx} display="flex" alignItems="center" gap={1} mb={0.5}>
-                                                                            <Box width={12} height={12} borderRadius="2px" border="1px solid rgba(0,0,0,0.2)" sx={{ backgroundColor: color }} />
+                                                                            <Box width={12} height={12} borderRadius="2px" border="1px solid" borderColor="divider" sx={{ backgroundColor: color }} />
                                                                             <Typography variant="caption">{className}</Typography>
                                                                         </Box>
                                                                     );
@@ -432,16 +443,16 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                         </Box>
                                                     </Box>
                                                 )}
-                                            </Box>
-                                        )}
+                                    </Box>
+                                )}
 
-                                        {/* Satellite Layer - Lower z-index, shown second */}
+                                        {/* Satellite Layer */}
                                         {taskLayer.satelliteTilesUrl && (
-                                            <Box>
+                                    <Box>
                                                 <Box display="flex" alignItems="center" gap={1} mb={1}>
                                                     <Tooltip title={`${taskLayer.satelliteVisible !== false ? 'Hide' : 'Show'} Satellite Data`}>
                                                         <IconButton
-                                                            size="small"
+                                                    size="small"
                                                             onClick={() => handleTaskLayerVisibilityChange(taskLayer.id, 'satellite', !(taskLayer.satelliteVisible !== false))}
                                                             sx={{
                                                                 color: taskLayer.satelliteVisible !== false ? 'primary.main' : 'text.disabled',
@@ -455,7 +466,8 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                         width={24}
                                                         height={24}
                                                         borderRadius="4px"
-                                                        border="1px solid rgba(0,0,0,0.2)"
+                                                        border="1px solid"
+                                                        borderColor="divider"
                                                         overflow="hidden"
                                                         sx={{
                                                             backgroundImage: `url(${taskLayer.satellitePreviewUrl || ''})`,
@@ -469,22 +481,22 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                                         Satellite Data
                                                     </Typography>
                                                 </Box>
-                                                <Box ml={0.5}>
-                                                    <Typography variant="caption" color="text.secondary" gutterBottom>
+                                        <Box ml={0.5}>
+                                            <Typography variant="caption" color="text.secondary" gutterBottom>
                                                         Opacity: {Math.round((taskLayer.satelliteOpacity || 0.8) * 100)}%
-                                                    </Typography>
-                                                    <Slider
+                                            </Typography>
+                                            <Slider
                                                         value={taskLayer.satelliteOpacity || 0.8}
                                                         onChange={(e, value) => handleTaskLayerOpacityChange(taskLayer.id, 'satellite', value)}
-                                                        min={0}
-                                                        max={1}
-                                                        step={0.1}
-                                                        size="small"
-                                                        sx={{ mt: 0.5 }}
-                                                    />
-                                                </Box>
-                                            </Box>
-                                        )}
+                                                min={0}
+                                                max={1}
+                                                step={0.1}
+                                                size="small"
+                                                sx={{ mt: 0.5 }}
+                                            />
+                                        </Box>
+                                    </Box>
+                                )}
                                     </Box>
                                 </Collapse>
 

@@ -1,20 +1,25 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import L from 'leaflet';
-import { IconButton, Tooltip } from '@mui/material';
+import { IconButton, Tooltip, ThemeProvider, CssBaseline, Snackbar, Alert } from '@mui/material';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import ListAltIcon from '@mui/icons-material/ListAlt';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
+import { lightTheme, darkTheme } from './theme';
 import MapComponent from './components/MapComponent';
 import TaskLayers from './components/TaskLayers';
 import ControlPanel from './components/ControlPanel';
 import BoundingBoxInfo from './components/BoundingBoxInfo';
 import TaskResultPopup from './components/TaskResultPopup';
 import TasksMonitor from './components/TasksMonitor';
-import { INSTAGEO_BACKEND_API_ENDPOINTS } from './config';
+import { INSTAGEO_BACKEND_API_ENDPOINTS, CONFIG } from './config';
+import { APP_THEMES, BASE_MAP_CONFIG, DARK_MODE_MAP_FILTER } from './constants';
 import TaskLayersControl from './components/TaskLayersControl';
+import { logger } from './utils/logger';
 
 // Configure default Leaflet marker icons
 L.Icon.Default.mergeOptions({
@@ -34,6 +39,9 @@ const App = () => {
     const [showTaskPopup, setShowTaskPopup] = useState(false);
     const [showTasksMonitor, setShowTasksMonitor] = useState(false);
     const [taskLayers, setTaskLayers] = useState([]);
+    const [appTheme, setAppTheme] = useState(APP_THEMES.DARK);
+    const [snackbarOpen, setSnackbarOpen] = useState(false);
+    const [snackbarMessage, setSnackbarMessage] = useState('');
     const featureGroupRef = React.useRef(null);
     const statusPollingRef = useRef(null);
 
@@ -56,7 +64,7 @@ const App = () => {
                         }
                     }
                 } catch (error) {
-                    console.error('Error polling task status:', error);
+                    logger.error('Error polling task status:', error);
                 }
             };
 
@@ -74,7 +82,7 @@ const App = () => {
     }, [taskResult?.task_id, taskResult?.status]);
 
     const handleAddTaskLayer = (taskLayerData) => {
-        console.log('handleAddTaskLayer called with:', taskLayerData);
+        logger.log('handleAddTaskLayer called with:', taskLayerData);
 
         // Add new task layer to the list
         const newTaskLayer = {
@@ -82,24 +90,24 @@ const App = () => {
             id: Date.now(), // Simple ID for React key
             visible: true,
             opacity: 0.8,
-            satelliteVisible: true,
+            satelliteVisible: false,
             predictionVisible: true,
             satelliteOpacity: 0.8,
             predictionOpacity: 0.8
         };
 
-        console.log('Creating task layer:', newTaskLayer);
+        logger.log('Creating task layer:', newTaskLayer);
 
         setTaskLayers(prev => {
             const filtered = prev.filter(taskLayer => taskLayer.taskId !== taskLayerData.taskId);
             const newTaskLayers = [...filtered, newTaskLayer];
-            console.log('Updated task layers:', newTaskLayers);
+            logger.log('Updated task layers:', newTaskLayers);
             return newTaskLayers;
         });
     };
 
     const handleTaskLayerChange = (taskLayerId, layerType, changeType, value) => {
-        console.log('handleTaskLayerChange:', { taskLayerId, layerType, changeType, value });
+        logger.log('handleTaskLayerChange:', { taskLayerId, layerType, changeType, value });
 
         setTaskLayers(prev => {
             if (changeType === 'remove') {
@@ -148,10 +156,20 @@ const App = () => {
         setShowInfo(hasLayers);
     };
 
+    const showSnackbar = useCallback((message) => {
+        setSnackbarMessage(message);
+        setSnackbarOpen(true);
+    }, []);
+
+    const handleSnackbarClose = () => {
+        setSnackbarOpen(false);
+    };
+
     const handleAreaChange = (area) => {
         setTotalArea(area);
-        // Show info if area is invalid, regardless of previous state
-        if (area < 1 || area > 100000) {
+        // Show info for valid areas (when clicking on existing bounding box)
+        // Invalid areas are handled by Snackbar in MapComponent
+        if (area >= CONFIG.MIN_AREA_KM2 && area <= CONFIG.MAX_AREA_KM2) {
             setShowInfo(true);
         }
     };
@@ -164,9 +182,9 @@ const App = () => {
         setTaskError(null);
 
         try {
-            // Get all bounding box coordinates from the feature group
             const boundingBoxes = featureGroupRef.current.getLayers().map(layer => {
                 const bounds = layer.getBounds();
+                // return [29.95, -2.05, 30.15, -1.85];
                 return [
                     bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()
                 ];
@@ -176,7 +194,7 @@ const App = () => {
                 bboxes: boundingBoxes,
                 ...(modelParams),
             };
-            console.log('Payload being sent:', payload);
+            logger.log('Payload being sent:', payload);
             const response = await fetch(INSTAGEO_BACKEND_API_ENDPOINTS.RUN_MODEL, {
                 method: 'POST',
                 headers: {
@@ -191,14 +209,14 @@ const App = () => {
             }
 
             const result = await response.json();
-            console.log('Task result:', result);
+            logger.log('Task result:', result);
 
             // Set the task result and show popup
             setTaskResult(result);
             setShowTaskPopup(true);
 
         } catch (error) {
-            console.error('Error running model:', error);
+            logger.error('Error running model:', error);
             setTaskError({
                 message: error.message || 'Failed to submit task. Please try again.'
             });
@@ -220,8 +238,19 @@ const App = () => {
         }
     };
 
+    const toggleAppTheme = () => {
+        setAppTheme(prevTheme => {
+            const newTheme = prevTheme === APP_THEMES.LIGHT ? APP_THEMES.DARK : APP_THEMES.LIGHT;
+            logger.log('Toggling app theme from', prevTheme, 'to', newTheme);
+            return newTheme;
+        });
+    };
+
+    const currentTheme = appTheme === APP_THEMES.DARK ? darkTheme : lightTheme;
+
     return (
-        <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
+        <ThemeProvider theme={currentTheme}>
+            <CssBaseline />
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
                 <MapContainer
                     center={[0, 0]}
@@ -232,9 +261,10 @@ const App = () => {
                     style={{ width: '100%', height: '100%' }}
                 >
                     <TileLayer
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                        url={BASE_MAP_CONFIG.url}
+                        attribution={BASE_MAP_CONFIG.attribution}
                     />
+                    <BaseMapThemeController appTheme={appTheme} />
 
                     {/* Locate (GPS) button */}
                     <LocateControl />
@@ -268,6 +298,7 @@ const App = () => {
                         onDrawEdited={handleDrawEdited}
                         onDrawDeleted={handleDrawDeleted}
                         onAreaChange={handleAreaChange}
+                        onShowMessage={showSnackbar}
                         featureGroupRef={featureGroupRef}
                     />
                     {showInfo && (
@@ -281,21 +312,23 @@ const App = () => {
             </div>
 
             <div style={{ position: 'absolute', top: 20, right: 20, zIndex: 2 }}>
-                <IconButton
-                    onClick={() => setControlPanelOpen(true)}
-                    sx={{
-                        backgroundColor: 'white',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                        '&:hover': {
-                            backgroundColor: '#f5f5f5'
-                        },
-                        '& .MuiSvgIcon-root': {
-                            color: '#1E88E5'
-                        }
-                    }}
-                >
-                    <AnalyticsIcon />
-                </IconButton>
+                <Tooltip title="Open Control Panel">
+                    <IconButton
+                        onClick={() => setControlPanelOpen(true)}
+                        sx={{
+                            backgroundColor: 'white',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                            '&:hover': {
+                                backgroundColor: '#f5f5f5'
+                            },
+                            '& .MuiSvgIcon-root': {
+                                color: '#1E88E5'
+                            }
+                        }}
+                    >
+                        <AnalyticsIcon />
+                    </IconButton>
+                </Tooltip>
                 <Tooltip title="View Task History">
                     <IconButton
                         onClick={() => setShowTasksMonitor(true)}
@@ -314,6 +347,24 @@ const App = () => {
                         <ListAltIcon />
                     </IconButton>
                 </Tooltip>
+                <Tooltip title={`Switch to ${appTheme === APP_THEMES.LIGHT ? 'Dark' : 'Light'} Mode`}>
+                    <IconButton
+                        onClick={toggleAppTheme}
+                        sx={{
+                            backgroundColor: 'white',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                            marginLeft: 1,
+                            '&:hover': {
+                                backgroundColor: '#f5f5f5'
+                            },
+                            '& .MuiSvgIcon-root': {
+                                color: '#2196F3'
+                            }
+                        }}
+                    >
+                        {appTheme === APP_THEMES.LIGHT ? <DarkModeIcon /> : <LightModeIcon />}
+                    </IconButton>
+                </Tooltip>
             </div>
 
             <ControlPanel
@@ -322,6 +373,7 @@ const App = () => {
                 hasBoundingBox={hasBoundingBox}
                 onRunModel={handleRunModel}
                 isProcessing={isProcessing}
+                appTheme={appTheme}
             />
 
             <TaskResultPopup
@@ -340,9 +392,57 @@ const App = () => {
                 onClose={() => setShowTasksMonitor(false)}
                 onAddTaskLayer={handleAddTaskLayer}
             />
-        </div>
+
+            {/* Snackbar for area validation messages */}
+            <Snackbar
+                open={snackbarOpen}
+                autoHideDuration={4000}
+                onClose={handleSnackbarClose}
+                anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+            >
+                <Alert
+                    onClose={handleSnackbarClose}
+                    severity="warning"
+                    sx={{
+                        width: '100%',
+                        backgroundColor: 'background.paper',
+                        color: 'text.primary',
+                        '& .MuiAlert-icon': {
+                            color: 'warning.main'
+                        }
+                    }}
+                >
+                    {snackbarMessage}
+                </Alert>
+            </Snackbar>
+        </ThemeProvider>
     );
 };
+
+function BaseMapThemeController({ appTheme }) {
+    const map = useMap();
+
+    React.useEffect(() => {
+        const tilePane = map.getPane('tilePane');
+        if (!tilePane) return;
+
+        // Find the first tile layer (base map)
+        const firstTileLayer = tilePane.querySelector('div');
+        if (!firstTileLayer) return;
+
+        if (appTheme === APP_THEMES.DARK) {
+            // Apply dark theme filter to first tile layer only
+            firstTileLayer.style.filter = DARK_MODE_MAP_FILTER;
+            logger.log('Applied dark theme filter to base map tiles');
+        } else {
+            // Remove filter for light theme
+            firstTileLayer.style.filter = '';
+            logger.log('Removed filter from base map tiles');
+        }
+    }, [map, appTheme]);
+
+    return null;
+}
 
 function LocateControl() {
     const map = useMap();
@@ -379,13 +479,17 @@ function LocateControl() {
                     bottom: 20,
                     transform: 'translateX(-50%)',
                     zIndex: 1000,
-                    backgroundColor: 'white',
+                    backgroundColor: 'background.paper',
+                    color: 'text.primary',
                     boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                    '&:hover': { backgroundColor: '#f5f5f5' }
+                    '&:hover': {
+                        backgroundColor: 'action.hover',
+                        color: 'text.primary'
+                    }
                 }}
                 size="small"
             >
-                <MyLocationIcon fontSize="small" color={locating ? 'disabled' : 'action'} />
+                <MyLocationIcon fontSize="small" color={locating ? 'disabled' : 'inherit'} />
             </IconButton>
         </Tooltip>
     );

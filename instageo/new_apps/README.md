@@ -87,50 +87,73 @@ The application will be available at:
 
 ### Environment Variables
 
-Create `backend/config.env` from `backend/config.env.example`:
+Create `config.env` from `config.env.example`:
 
-```env
-# Redis Configuration
-REDIS_HOST=instageo-redis
-REDIS_PORT=6379
-REDIS_DB=0
+### Cloudflare Tunnel Setup
 
-# EarthData credentials
-EARTHDATA_USERNAME=xxxxxxx
-EARTHDATA_PASSWORD=xxxxxxx
+For production deployments, you can expose your application to the internet using Cloudflare Tunnels. This provides secure, encrypted connections without exposing ports or managing SSL certificates.
 
-# Storage folder
-DATA_FOLDER=/app/instageo-data
+#### Prerequisites
 
-# Worker Configuration
-DATA_PROCESSING_WORKER_REPLICAS=2
-MODEL_PREDICTION_WORKER_REPLICAS=2
-VISUALIZATION_PREPARATION_WORKER_REPLICAS=1
+Before running the deployment script, you must configure Cloudflare Tunnels:
+
+1. **Install Cloudflare Tunnel CLI**:
+   ```bash
+   # macOS
+   brew install cloudflare/cloudflare/cloudflared
+
+   # Linux
+   wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+   sudo dpkg -i cloudflared.deb
+   ```
+
+2. **Authenticate with Cloudflare**:
+   After creating your Cloudflare account, run this command:
+   ```bash
+   cloudflared login
+   ```
+   This will open your browser to authenticate with Cloudflare.
+
+3. **Create a Tunnel**:
+   ```bash
+   cloudflared tunnel create instageo-tunnel
+   ```
+   This creates a tunnel and generates a credentials file at `~/.cloudflared/<tunnel_id>.json`.
+
+4. **Configure DNS (DOMAIN_NAME should be defined in config.env)**:
+   ```bash
+   cloudflared tunnel route dns $CLOUDFLARE_TUNNEL_NAME $DOMAIN_NAME
+   ```
+
+5. **Get Tunnel Credentials**:
+   ```bash
+   # Find the tunnel ID
+   cloudflared tunnel list
+
+   # Copy the contents of the credentials file
+   cat ~/.cloudflared/<tunnel_id>.json
+   ```
+   Copy the entire JSON content as value for the variable in your `config.env` file. You should have:
+   ```bash
+   CLOUDFLARE_TUNNEL_CREDS='{"AccountTag":"your-account-tag","TunnelSecret":"your-tunnel-secret","TunnelID":"your-tunnel-id"}'
+   ```
 
 
-# Model Configuration
-MODEL_CHECKPOINT_PATH=/path/to/model/checkpoint.ckpt
-DATA_STORAGE_PATH=/path/to/data/storage
+#### Important Notes
 
-# API Configuration
-API_HOST=0.0.0.0
-API_PORT=8000
-```
+- **Tunnel Credentials**: The JSON credentials file contains sensitive information (AccountTag, TunnelSecret, TunnelID). Keep it secure.
+- **Credentials Format**: The `CLOUDFLARE_TUNNEL_CREDS` environment varioaablshould contain the entire JSON content from the `<tunnel_id>.json` file.
+- **Domain Configuration**: Ensure your domain is properly configured in Cloudflare DNS.
+- **Monitoring**: Monitor tunnel status in the Cloudflare dashboard.
 
-### Frontend Configuration
-
-Create `frontend/.env` from `frontend/env.example`:
-
-```env
-REACT_APP_INSTAGEO_BACKEND_API_BASE_URL=http://localhost
-```
-
-## Development
-### Docker Development
+## Deployment
 Navigate at the root directory of the project and run
 ```bash
-# Start all services
-./start_app_stack.sh
+# Deploy with Cloudflare tunnel
+./deploy.sh
+
+# Deploy without Cloudflare tunnel
+./deploy.sh --skip-cloudflare
 ```
 
 ## Monitoring

@@ -4,13 +4,17 @@ import json
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import redis  # type: ignore
 
-from .cog_converter import COGConverter
-from .data_processor import DataProcessor
-from .jobs import Job, JobStatus
+from instageo.model.configs.config_dataclasses import dict_to_chip_inference_config
+from instageo.model.inference_pipeline import RayEvaluationPipeline
+from instageo.model.registry.model_registry import ModelRegistry
+from instageo.new_apps.backend.app.cog_converter import COGConverter
+from instageo.new_apps.backend.app.data_processor import DataProcessor
+from instageo.new_apps.backend.app.jobs import Job, JobStatus
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -29,6 +33,7 @@ data_processor = DataProcessor(base_output_dir=DATA_FOLDER)
 
 # Initialize cog converter
 cog_converter = COGConverter()
+MODELS_PATH = os.getenv("MODELS_PATH", "/app/models")
 
 
 class TaskStatus:
@@ -61,35 +66,20 @@ class Task:
             created_at: Task creation timestamp.
             is_new: If True, start jobs and save; if False, just initialize for loading.
         """
-        logger.debug(
-            f"Creating Task {task_id} with bboxes: {bboxes}, "
-            f"parameters: {parameters}, is_new={is_new}"
-        )
-
         self.task_id = task_id
         self.bboxes = bboxes
         self.parameters = parameters or {}
         self.created_at = created_at or datetime.utcnow().isoformat() + "Z"
-        # Store timestamp for efficient Redis sorting
-        # Handle timezone-aware timestamp for Redis sorting
         self.created_timestamp = (
             datetime.fromisoformat(self.created_at[:-1]).replace(tzinfo=None).timestamp()
         )
 
-        logger.debug(
-            f"Task {task_id} initialized with self.bboxes: {self.bboxes}, "
-            f"self.parameters: {self.parameters}"
-        )
-
-        # Job instances
         self.data_processing_job: Optional[Job] = None
         self.model_prediction_job: Optional[Job] = None
         self.visualization_preparation_job: Optional[Job] = None
 
-        # Task status - starts with data processing since it's created and immediately started
         self.status = TaskStatus.DATA_PROCESSING
 
-        # Stages information
         self.stages: Dict[str, Dict[str, Union[str, None, Dict[str, Any]]]] = {
             stage: {
                 "status": JobStatus.PENDING,
@@ -493,15 +483,15 @@ def process_data_extraction_with_task(
             "bboxes_processed": processed_data.get("bboxes_processed"),
         }
 
-        # Mark data processing as completed
-        task.complete_stage("data_processing", result=safe_results)
-
         # Check if data is ready for model prediction
         if data_processor.check_data_ready_for_model():
+            # Mark data processing as completed
+            task.complete_stage("data_processing", result=safe_results)
             # Start model prediction stage
             model_job_id = task.start_model_prediction(processed_data)
             processed_data["model_job_id"] = model_job_id
         else:
+            task.complete_stage("data_processing", error="Failed to extract data")
             logger.warning(f"Data not ready for model prediction for task {task_id}")
             processed_data["model_job_id"] = None
 
@@ -534,7 +524,7 @@ def process_data_extraction_with_task(
 def process_model_prediction_with_task(
     task_id: str,
     processed_data: Dict[str, Any],
-    parameters: Optional[Dict[str, Any]] = None,
+    parameters: Dict[str, Any],
 ) -> None:
     """Process model prediction with task tracking.
 
@@ -551,33 +541,71 @@ def process_model_prediction_with_task(
 
         logger.debug(f"Running model prediction for task {task_id}")
 
-        # TODO: Implement actual model prediction logic
-        import time
+        model_type = parameters.get("model_type", "reg")
+        model_key = parameters.get("model_key", "aod-estimator")
+        model_size = parameters.get("model_size", "tiny")
+
+        logger.info(f"Using model: {model_key}, type: {model_type}, size: {model_size}")
+
+        model_registry: ModelRegistry = ModelRegistry()  # type: ignore
+        model_metadata = model_registry.get_model_metadata_for_size(model_key, model_size)
+
+        if model_metadata is None:
+            raise ValueError(f"Model metadata not found for {model_key}/{model_size}")
+
+        inference_configs = model_registry.get_model_config(model_key, model_size)
+        model_path = os.path.join(MODELS_PATH, str(model_key), str(model_size))
+
+        if inference_configs is None:
+            raise ValueError(f"No configuration found for model {model_key}/{model_size}")
+
+        inference_configs.update(
+            {
+                "root_dir": Path(str(processed_data.get("data_path"))),
+                "test_filepath": Path(str(processed_data.get("dataset_csv_path"))),
+                "mode": "chip_inference",
+                "checkpoint_path": os.path.join(model_path, "instageo_best_checkpoint.ckpt"),
+            }
+        )
+        configs = dict_to_chip_inference_config(inference_configs)
 
         logger.info(f"Running model prediction for task {task_id}")
         logger.info(f"Processed data: {processed_data}")
-        time.sleep(10)
 
-        # Example prediction results
-        prediction_results = {
-            "data_path": processed_data["data_path"],
-            "dataset_csv_path": processed_data["dataset_csv_path"],
-            "aod_values": [0.15, 0.22, 0.18, 0.31],
-            "confidence_scores": [0.85, 0.78, 0.92, 0.71],
-            "bboxes": processed_data["bboxes"],
-            "prediction_date": datetime.utcnow().isoformat() + "Z",
-            "chip_size": processed_data["chip_size"],
+        pipeline = RayEvaluationPipeline(configs, processed_data, parameters, task_id)
+        pipeline.start_evaluation_pipeline()
+
+        try:
+            raw_results = pipeline.evaluate()
+        except Exception as pipeline_error:
+            logger.error(f"Pipeline evaluation failed: {pipeline_error}")
+            raise ValueError(f"Model prediction pipeline failed: {pipeline_error}")
+
+        # Ensure results is a dictionary
+        results_dict: Dict[str, Any] = (
+            {} if raw_results is None or not isinstance(raw_results, dict) else raw_results
+        )
+
+        safe_results = {
+            "classes_mapping": model_metadata.classes_mapping,
+            "model/GFLOPs": results_dict.get("model/GFLOPs"),  # type: ignore[union-attr]
+            "CO2_emissions": results_dict.get("CO2_emissions"),  # type: ignore[union-attr]
+            "energy_consumed": results_dict.get("energy_consumed"),  # type: ignore[union-attr]
+            "inference_time": results_dict.get("inference_time"),  # type: ignore[union-attr]
         }
 
-        # Mark model prediction as completed
-        task.complete_stage("model_prediction", result=prediction_results)
-        task.start_visualization_preparation(prediction_results)
+        logger.info(f"Prediction results: {results_dict}")
+        task.complete_stage("model_prediction", result=safe_results)
+
+        # Start visualization preparation stage
+        viz_job_id = task.start_visualization_preparation(processed_data)
+        logger.info(f"Started visualization preparation job: {viz_job_id}")
 
         logger.info(
             {
                 "status": "success",
                 "message": "Model prediction completed successfully.",
-                "results": prediction_results,
+                "results": safe_results,
                 "completed_at": datetime.utcnow().isoformat() + "Z",
             }
         )
@@ -618,7 +646,7 @@ def process_visualization_preparation_with_task(
         results = cog_converter.merge_task_files_to_cog(
             data_path=processed_data["data_path"],
             chip_size=processed_data["chip_size"],
-            compute_seg_stats=(processed_data.get("model_type") == "seg"),
+            compute_seg_stats=(processed_data["parameters"].get("model_type") == "seg"),
         )
         logger.info(f"Chips merged cog path: {results['chips_merged_cog_path']}")
         logger.info(f"Predictions merged cog path: {results['predictions_merged_cog_path']}")

@@ -6,12 +6,8 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
 
 from instageo.model.factory import create_model
-from instageo.model.run import (
-    check_required_flags,
-    compute_class_weights,
-    compute_stats,
-    get_device,
-)
+from instageo.model.pipeline_utils import compute_class_weights
+from instageo.model.run import check_required_flags, compute_stats, get_device
 
 
 class MockPrithviSeg(torch.nn.Module):
@@ -151,10 +147,19 @@ def test_check_required_flags():
 
 
 def test_get_device():
-    with patch("torch.cuda.is_available", return_value=True):
+    with patch("torch.cuda.is_available", return_value=True), patch(
+        "torch.backends.mps.is_available", return_value=False
+    ):
         assert get_device() == "gpu"
 
-    with patch("torch.cuda.is_available", return_value=False):
+    with patch("torch.cuda.is_available", return_value=False), patch(
+        "torch.backends.mps.is_available", return_value=True
+    ):
+        assert get_device() == "mps"
+
+    with patch("torch.cuda.is_available", return_value=False), patch(
+        "torch.backends.mps.is_available", return_value=False
+    ):
         assert get_device() == "cpu"
 
 

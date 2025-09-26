@@ -61,12 +61,14 @@ class COGConverter:
                     chip_files,
                     str(output_path / "chips_merged.tif"),
                     chip_size,
+                    True,  # Enable band selection for chips (keep only B, G, R)
                 )
                 predictions_future = executor.submit(
                     self.merge_files_to_cog,
                     prediction_files,
                     str(output_path / "predictions_merged.tif"),
                     chip_size,
+                    False,  # No band selection for predictions
                 )
 
                 # Wait for both to complete and get results
@@ -98,6 +100,7 @@ class COGConverter:
         tif_files: List[Path],
         output_path: str,
         chip_size: int = 256,
+        select_bands: bool = False,
     ) -> str:
         """Merge TIF files from a list of files into a single COG using GDAL.
 
@@ -105,6 +108,7 @@ class COGConverter:
             tif_files: List of TIF file paths to merge.
             output_path: Path for output COG file.
             chip_size: Size of chips (used as block size).
+            select_bands: If True, keep only first 3 bands (B, G, R) for RGB data.
 
         Returns:
             Path to the created COG file.
@@ -139,19 +143,31 @@ class COGConverter:
                 str(output_path),
                 "-of",
                 "COG",
-                "-co",
-                f"BLOCKSIZE={chip_size}",
-                "-co",
-                "COMPRESS=LZW",
-                "-co",
-                "BIGTIFF=IF_SAFER",
-                "-co",
-                "OVERVIEW_RESAMPLING=BILINEAR",
-                "-co",
-                "OVERVIEW_COUNT=6",
-                "-co",
-                "NUM_THREADS=ALL_CPUS",
             ]
+
+            # Add band selection for RGB data (chips only)
+            if select_bands:
+                cog_cmd.extend(
+                    ["-b", "1", "-b", "2", "-b", "3"]
+                )  # Keep only first 3 bands (B, G, R)
+                logger.info("Selecting only first 3 bands (B, G, R) for RGB data")
+
+            cog_cmd.extend(
+                [
+                    "-co",
+                    f"BLOCKSIZE={chip_size}",
+                    "-co",
+                    "COMPRESS=LZW",
+                    "-co",
+                    "BIGTIFF=IF_SAFER",
+                    "-co",
+                    "OVERVIEW_RESAMPLING=BILINEAR",
+                    "-co",
+                    "OVERVIEW_COUNT=6",
+                    "-co",
+                    "NUM_THREADS=ALL_CPUS",
+                ]
+            )
 
             logger.info(f"Step 2 - Converting to COG: {output_path}")
 
@@ -183,10 +199,11 @@ class COGConverter:
             Dictionary containing the segmentation stats.
         """
         try:
+            logger.info(f"Computing segmentation stats for {pred_cog_path}")
             pred_cog = Path(pred_cog_path)
             with rasterio.open(pred_cog) as src:
                 band = src.read(1, masked=True)
-                valid_vals = band.compressed().astype(np.int64)
+                valid_vals = band.compressed().astype(np.uint8)  # Ensure uint8 for class indices
                 total_valid = int(valid_vals.size)
                 class_counts: Dict[str, int] = {}
                 if total_valid > 0:

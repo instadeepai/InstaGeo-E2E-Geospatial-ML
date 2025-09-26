@@ -31,6 +31,11 @@ logging.basicConfig(level=logging.INFO)
 
 def get_access_token() -> str:
     """Configures EarthData credentials based on AIChor environment variables."""
+    # Check if we're in test mode
+    if os.getenv("TESTING", "false").lower() == "true":
+        logging.info("Running in test mode, skipping EarthData authentication")
+        return ""
+
     author_email = os.getenv("VCS_AUTHOR_EMAIL")
     if author_email:
         author_username, _ = author_email.split("@")
@@ -45,7 +50,16 @@ def get_access_token() -> str:
             os.environ["EARTHDATA_PASSWORD"] = os.environ[password_key]
         else:
             logging.warning(f"EarthData credentials for user {sanitized_username} not found.")
-    return earthaccess.get_edl_token().get("access_token")
+
+    try:
+        edl_token = earthaccess.get_edl_token()
+        if edl_token is None:
+            logging.warning("EarthData EDL token is None, using empty string")
+            return ""
+        return edl_token.get("access_token", "")
+    except Exception as e:
+        logging.warning(f"Failed to get EarthData access token: {e}")
+        return ""
 
 
 class GDALOptions(BaseSettings):

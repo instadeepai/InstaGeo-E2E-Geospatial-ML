@@ -7,9 +7,25 @@ from fastapi.testclient import TestClient
 # Set a temporary directory for tests before importing the app
 os.environ["DATA_FOLDER"] = tempfile.gettempdir()
 
+from instageo.model.configs.config_dataclasses import ModelInfo
 from instageo.new_apps.backend.app.main import app
 
 client = TestClient(app)
+
+
+def create_mock_model_info():
+    """Create a mock ModelInfo object for testing."""
+    return ModelInfo(
+        model_key="aod-estimator",
+        model_size="tiny",
+        model_name="Aerosol Optical Depth Estimation",
+        model_short_name="aod-estim",
+        model_type="reg",
+        data_source="HLS",
+        temporal_step=30,
+        num_params=4.14,
+        chip_size=224,
+    )
 
 
 def test_root():
@@ -24,7 +40,9 @@ def test_run_model_and_task_status():
         "instageo.new_apps.backend.app.tasks.process_data_extraction_with_task"
     ) as mock_data_process, patch(
         "instageo.new_apps.backend.app.tasks.process_model_prediction_with_task"
-    ) as mock_model_process:
+    ) as mock_model_process, patch(
+        "instageo.new_apps.backend.app.main.ModelRegistry"
+    ) as mock_model_registry:
         # Configure mocks to return successful results
         mock_data_process.return_value = {
             "status": "completed",
@@ -36,6 +54,12 @@ def test_run_model_and_task_status():
             "predictions": "test_predictions",
             "model_output": "/tmp/test_model_output",
         }
+
+        # Mock ModelRegistry to return valid model info
+        mock_registry_instance = mock_model_registry.return_value
+        mock_model_info = create_mock_model_info()
+        mock_registry_instance.get_model_metadata_for_size.return_value = mock_model_info
+        mock_registry_instance.get_available_models.return_value = [mock_model_info]
 
         # Prepare a valid request matching TaskCreationRequest format
         payload = {
@@ -88,7 +112,9 @@ def test_get_all_tasks():
         "instageo.new_apps.backend.app.tasks.process_model_prediction_with_task"
     ) as mock_model_process, patch(
         "instageo.new_apps.backend.app.tasks.process_visualization_preparation_with_task"
-    ) as mock_visualization_process:
+    ) as mock_visualization_process, patch(
+        "instageo.new_apps.backend.app.main.ModelRegistry"
+    ) as mock_model_registry:
         mock_data_process.return_value = {
             "status": "completed",
             "data": "test_processed_data",
@@ -101,6 +127,12 @@ def test_get_all_tasks():
             "status": "completed",
             "visualization": "test_visualization",
         }
+
+        # Mock ModelRegistry to return valid model info
+        mock_registry_instance = mock_model_registry.return_value
+        mock_model_info = create_mock_model_info()
+        mock_registry_instance.get_model_metadata_for_size.return_value = mock_model_info
+        mock_registry_instance.get_available_models.return_value = [mock_model_info]
 
         # First create a task with correct format
         payload = {
@@ -131,7 +163,7 @@ def test_get_all_tasks():
         assert "task_id" in task
         assert "status" in task
         assert "created_at" in task
-        assert "bboxes_count" in task
+        assert "bboxes" in task
         assert "model_type" in task
         assert "stages" in task
 

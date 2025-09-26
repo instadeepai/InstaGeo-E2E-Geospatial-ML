@@ -7,3 +7,5 @@ omegaconf
 hydra-core
 torchvision
 huggingface_hub
+ray[serve]
+neptune

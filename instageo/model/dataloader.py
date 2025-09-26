@@ -56,7 +56,7 @@ def open_mf_tiff_dataset(band_files: dict[str, Any]) -> xr.Dataset:
 
 
 def crop_image_and_label(
-    ims: List[Image.Image], label: Image.Image, im_size: int
+    ims: List[Image.Image], label: Image.Image | None, im_size: int
 ) -> Tuple[List[Image.Image], Image.Image]:
     """Crop `ims` and `label` to `im_size`.
 
@@ -72,7 +72,8 @@ def crop_image_and_label(
     # Crop to im_size
     i, j, h, w = transforms.RandomCrop.get_params(ims[0], (im_size, im_size))
     ims = [transforms.functional.crop(im, i, j, h, w) for im in ims]
-    label = transforms.functional.crop(label, i, j, h, w)
+    if label is not None:
+        label = transforms.functional.crop(label, i, j, h, w)
     return ims, label
 
 
@@ -805,7 +806,6 @@ def get_valid_filepaths(
     for _, row in data.iterrows():
         im_path = os.path.join(input_root, row["Input"])
         mask_path = os.path.join(input_root, row["Label"]) if label_present else None
-
         if os.path.exists(im_path):
             try:
                 with rasterio.open(im_path) as src:

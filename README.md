@@ -53,7 +53,117 @@ Perform efficient and optimized inference on geospatial image "chips" using a pr
 
 ### Apps Component
 
-- **Operationalize Models**: Once data has been created and model trained, deploy model for use using the Apps components. Tile predictions can be overlaid and visualized on interactive maps.
+- **Operationalize Models**: Select an area of interest and a model to use for inference, and the data extraction process will be run automatically accordingly to the specifications of the data accepted by the model (appropriate satellite source, chip size, temporal dimension and number of steps) so that the selected model can perform inference seamlessly. Model predictions can be overlaid and visualized on an interactive map and analytics can be generated in a PDF format.
+
+### Model Registry Synchronization
+
+InstaGeo provides a model registry system that allows you to download pre-trained models from Google Cloud Storage. To use this feature, you'll need to set up Google Cloud credentials and run the synchronization script.
+
+#### Setting up Google Cloud Credentials
+
+1. **Install Google Cloud SDK** (if not already installed):
+   ```bash
+   # For macOS
+   brew install google-cloud-sdk
+
+   # For Ubuntu/Debian
+   curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+   echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+   sudo apt-get update && sudo apt-get install google-cloud-sdk
+   ```
+
+2. **Authenticate with Google Cloud**:
+   ```bash
+   gcloud auth login
+   ```
+
+3. **Set up Application Default Credentials**:
+   ```bash
+   gcloud auth application-default login
+   ```
+
+4. **Verify your setup**:
+   ```bash
+   gcloud auth list
+   gsutil ls gs://example/path/
+   ```
+
+#### Running the Model Registry Sync Script
+
+The `model_registry_sync.sh` script downloads pre-trained models and their configuration files from Google Cloud Storage to your local machine.
+
+**Usage**:
+```bash
+./instageo/model/registry/model_registry_sync.sh <gs://path/to/registry_file.yaml> <CHECKPOINT_DIR>
+```
+
+**Example**:
+```bash
+# Navigate to the root directory of the project
+cd InstaGeo
+
+# Create a directory for models configurations and checkpoints
+# This should correspond to the HOST_MODELS_PATH variable (check instageo/new_apps/backend/config.env.example)
+mkdir -p /path/to/models/folder
+
+# Run the sync script
+cd instageo/model/registry && chmod +x model_registry_sync.sh
+./model_registry_sync.sh "gs://path/to/registry/file.yaml" /path/to/models/folder
+```
+
+The models_registry.yaml should look like this
+```
+# Configuration file for available models and their metadata
+# yaml-language-server: $schema=null
+
+version: "1.0"
+last_updated: "2025-08-05"
+
+models:
+  model1:
+    model_type: reg
+    model_short_name: "mod"
+    model_name: "model for estimation"
+    description: "Estimates for quality monitoring"
+    classes_mapping: null
+    data_source: "HLS"
+    temporal_step: 30
+    sizes:
+      tiny:
+        gcs_folder: "gs://model1/model"
+        num_params: 3.0
+
+  model2:
+    model_type: seg
+    model_short_name: "mod2"
+    model_name: "model2"
+    description: "description"
+    classes_mapping:
+      0: "0"
+      1: "1"
+    data_source: "HLS"
+    temporal_step: 30
+    sizes:
+      teacher:
+        gcs_folder: "gs://model2/model/"
+        num_params: 90.0
+```
+
+This will:
+- Download the best checkpoint file (`instageo_best_checkpoint.ckpt`) for each model
+- Download the Hydra configuration directory (`.hydra`) for each model
+- Organize the files in the structure: `<HOST_MODELS_PATH>/<model_key>/<size>/`
+(Update the config.env with the HOST_MODELS_PATH variable)
+
+
+**Available Models**:
+- **AOD Estimator**: Aerosol optical depth estimation from satellite imagery
+- **Sen1Floods**: Flood area segmentation from Sentinel-1 imagery
+- **Biomass Estimator**: Biomass estimation for environmental monitoring
+- **Locust Prediction**: Locust breeding ground prediction
+- **Crop Classification**: Crop type classification over agricultural regions
+
+Each model may have multiple sizes (e.g., `tiny`, `student`, `teacher`, `normal`) with different parameter counts and performance characteristics.
 
 ### Putting It All Together - Locust Breeding Ground Prediction
 See [InstGeo_Demo](notebooks/InstaGeo_Demo.ipynb) notebook for an end-to-end demo.

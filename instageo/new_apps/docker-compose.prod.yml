@@ -1,0 +1,122 @@
+# Define a reusable block for backend services
+x-instageo-backend-service-defaults: &backend-defaults
+  environment:
+    - REDIS_HOST=${REDIS_HOST}
+    - REDIS_PORT=${REDIS_PORT}
+    - REDIS_DB=${REDIS_DB}
+    - TEST_FILEPATH=${TEST_FILEPATH}
+  volumes:
+    - ../../instageo:/app/instageo
+    - shared-data:${DATA_FOLDER}
+    - ${HOST_MODELS_PATH}:${APP_MODELS_PATH}:ro
+
+services:
+  instageo-redis:
+    image: redis:8-alpine
+    ports:
+      - "${REDIS_PORT}:${REDIS_PORT}"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  instageo-backend-api:
+    <<: *backend-defaults
+    build:
+      context: ../..         # Project root
+      dockerfile: instageo/new_apps/backend/Dockerfile
+      args:
+        DATA_FOLDER: ${DATA_FOLDER}
+        EARTHDATA_USERNAME: ${EARTHDATA_USERNAME}
+        EARTHDATA_PASSWORD: ${EARTHDATA_PASSWORD}
+        MODELS_PATH: ${APP_MODELS_PATH}
+    image: instageo-backend:prod
+    depends_on:
+      - instageo-redis
+    expose:
+      - "8000"
+    command: uvicorn instageo.new_apps.backend.app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    restart: unless-stopped
+
+  instageo-backend-data-processing-worker:
+    <<: *backend-defaults
+    image: instageo-backend:prod
+    depends_on:
+      - instageo-backend-api
+    deploy:
+      replicas: ${DATA_PROCESSING_WORKER_REPLICAS:-2}
+    command: rq worker data-processing
+    restart: unless-stopped
+
+  instageo-backend-model-prediction-worker:
+    <<: *backend-defaults
+    image: instageo-backend:prod
+    depends_on:
+      - instageo-backend-api
+    deploy:
+      replicas: ${MODEL_PREDICTION_WORKER_REPLICAS:-2}
+    command: rq worker model-prediction
+    restart: unless-stopped
+
+  instageo-backend-visualization-preparation-worker:
+    <<: *backend-defaults
+    image: instageo-backend:prod
+    depends_on:
+      - instageo-backend-api
+    deploy:
+      replicas: ${VISUALIZATION_PREPARATION_WORKER_REPLICAS:-1}
+    command: rq worker visualization-preparation
+    restart: unless-stopped
+
+  instageo-frontend-builder:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        - REACT_APP_INSTAGEO_BACKEND_API_BASE_URL=https://${DOMAIN_NAME}
+        - REACT_APP_MIN_AREA_KM2=${REACT_APP_MIN_AREA_KM2}
+        - REACT_APP_MAX_AREA_KM2=${REACT_APP_MAX_AREA_KM2}
+        - REACT_APP_ENV=prod
+    volumes:
+      - frontend_build:/usr/share/nginx/html
+
+  instageo-nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./.htpasswd:/etc/nginx/.htpasswd:ro
+      - frontend_build:/usr/share/nginx/html:ro
+    depends_on:
+      - instageo-frontend-builder
+      - instageo-backend-api
+    restart: unless-stopped
+
+
+  instageo-backend-rq-dashboard:
+    <<: *backend-defaults
+    image: instageo-backend:prod
+    expose:
+      - "9181"
+    depends_on:
+      - instageo-backend-api
+    command: sh -c "rq-dashboard --redis-url redis://$$REDIS_HOST:$$REDIS_PORT/$$REDIS_DB --port 9181 --url-prefix /rq"
+    restart: unless-stopped
+
+  instageo-cloudflare-tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    depends_on:
+      - instageo-nginx
+    volumes:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
+    profiles:
+      - cloudflare
+
+volumes:
+  redis_data:
+  shared-data:
+  frontend_build:

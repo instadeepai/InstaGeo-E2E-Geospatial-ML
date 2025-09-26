@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { logger } from '../utils/logger';
 
 const TaskLayers = ({
     satelliteTilesUrl,
     predictionTilesUrl,
-    satelliteVisible = true,
+    satelliteVisible = false,
     predictionVisible = true,
     satelliteOpacity = 0.8,
     predictionOpacity = 0.8,
@@ -19,100 +20,103 @@ const TaskLayers = ({
     const satelliteLayerRef = useRef(null);
     const predictionLayerRef = useRef(null);
 
-    console.log('TaskLayers render:', { taskName, satelliteVisible, predictionVisible });
+    logger.log('TaskLayers render:', { taskName, satelliteVisible, predictionVisible });
 
-    // Create layers
+    // Handle bounds fitting when component mounts or bounds change
     useEffect(() => {
-        if (!map || (!satelliteTilesUrl && !predictionTilesUrl)) return;
-
-        console.log('TaskLayers: Creating layers', {
-            satelliteTilesUrl,
-            predictionTilesUrl,
-            bounds,
-            minZoom,
-            maxZoom
-        });
-
-        // Create satellite layer
-        if (satelliteTilesUrl && !satelliteLayerRef.current) {
-            satelliteLayerRef.current = L.tileLayer(satelliteTilesUrl, {
-                opacity: satelliteOpacity,
-                zIndex: 1000,
-                bounds,
-                // Allow tile stretching/scaling for better UX outside optimal zoom range
-                maxNativeZoom: maxZoom, // Use native zoom for best quality when available
-                maxZoom: 22, // Allow zooming beyond native data for closer inspection
-                // Error tile url is a transparent image to avoid showing a white square when a tile is not available
-                errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
-            });
-            console.log('Satellite layer created with flexible zoom');
-        }
-
-        // Create prediction layer
-        if (predictionTilesUrl && !predictionLayerRef.current) {
-            predictionLayerRef.current = L.tileLayer(predictionTilesUrl, {
-                opacity: predictionOpacity,
-                zIndex: 1001, // Prediction layer on top
-                bounds,
-                // Allow tile stretching/scaling for better UX outside optimal zoom range
-                maxNativeZoom: maxZoom, // Use native zoom for best quality when available
-                maxZoom: 22, // Allow zooming beyond native data for closer inspection
-                // Error tile url is a transparent image to avoid showing a white square when a tile is not available
-                errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
-            });
-            console.log('Prediction layer created with flexible zoom');
-        }
-
-        // Fit bounds if provided
-        if (bounds && Array.isArray(bounds) && bounds.length === 2) {
+        if (map && bounds && Array.isArray(bounds) && bounds.length === 2) {
             try {
                 map.fitBounds(bounds);
-                console.log('Map fitted to bounds:', bounds);
+                logger.log('Map fitted to bounds:', bounds);
             } catch (error) {
-                console.error('Error fitting bounds:', error);
+                logger.error('Error fitting bounds:', error);
             }
         }
+    }, [map, bounds]);
 
-        // Cleanup
+    // Cleanup on unmount
+    useEffect(() => {
         return () => {
-            if (satelliteLayerRef.current && map.hasLayer(satelliteLayerRef.current)) {
+            if (satelliteLayerRef.current && map && map.hasLayer(satelliteLayerRef.current)) {
                 map.removeLayer(satelliteLayerRef.current);
             }
-            if (predictionLayerRef.current && map.hasLayer(predictionLayerRef.current)) {
+            if (predictionLayerRef.current && map && map.hasLayer(predictionLayerRef.current)) {
                 map.removeLayer(predictionLayerRef.current);
             }
         };
-    }, [map, satelliteTilesUrl, predictionTilesUrl, bounds, minZoom, maxZoom]);
+    }, [map]);
 
     // Handle satellite layer visibility
     useEffect(() => {
-        if (satelliteLayerRef.current) {
-            if (visible && satelliteVisible) {
-                if (!map.hasLayer(satelliteLayerRef.current)) {
+        if (visible && satelliteVisible && satelliteTilesUrl) {
+            // Create layer if it doesn't exist or is invalid
+            if (!satelliteLayerRef.current || !map.hasLayer(satelliteLayerRef.current)) {
+                try {
+                    // Remove existing layer if it exists but is not on map
+                    if (satelliteLayerRef.current && map.hasLayer(satelliteLayerRef.current)) {
+                        map.removeLayer(satelliteLayerRef.current);
+                    }
+
+                    // Create new layer
+                    satelliteLayerRef.current = L.tileLayer(satelliteTilesUrl, {
+                        opacity: satelliteOpacity,
+                        zIndex: 1000,
+                        bounds,
+                        maxNativeZoom: maxZoom,
+                        maxZoom: 22,
+                        errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+                    });
+
                     satelliteLayerRef.current.addTo(map);
-                }
-            } else {
-                if (map.hasLayer(satelliteLayerRef.current)) {
-                    map.removeLayer(satelliteLayerRef.current);
+                    logger.log('Satellite layer created and added to map');
+                } catch (error) {
+                    logger.error('Error creating/adding satellite layer to map:', error);
                 }
             }
+        } else {
+            // Remove layer if it exists on map
+            if (satelliteLayerRef.current && map.hasLayer(satelliteLayerRef.current)) {
+                map.removeLayer(satelliteLayerRef.current);
+                logger.log('Satellite layer removed from map');
+            }
         }
-    }, [visible, satelliteVisible, map]);
+    }, [visible, satelliteVisible, satelliteTilesUrl, satelliteOpacity, bounds, maxZoom, map]);
 
     // Handle prediction layer visibility
     useEffect(() => {
-        if (predictionLayerRef.current) {
-            if (visible && predictionVisible) {
-                if (!map.hasLayer(predictionLayerRef.current)) {
+        if (visible && predictionVisible && predictionTilesUrl) {
+            // Create layer if it doesn't exist or is invalid
+            if (!predictionLayerRef.current || !map.hasLayer(predictionLayerRef.current)) {
+                try {
+                    // Remove existing layer if it exists but is not on map
+                    if (predictionLayerRef.current && map.hasLayer(predictionLayerRef.current)) {
+                        map.removeLayer(predictionLayerRef.current);
+                    }
+
+                    // Create new layer
+                    predictionLayerRef.current = L.tileLayer(predictionTilesUrl, {
+                        opacity: predictionOpacity,
+                        zIndex: 1001,
+                        bounds,
+                        maxNativeZoom: maxZoom,
+                        maxZoom: 22,
+                        errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+                    });
+
                     predictionLayerRef.current.addTo(map);
-                }
-            } else {
-                if (map.hasLayer(predictionLayerRef.current)) {
-                    map.removeLayer(predictionLayerRef.current);
+                    logger.log('Prediction layer created and added to map');
+                } catch (error) {
+                    logger.error('Error creating/adding prediction layer to map:', error);
                 }
             }
+        } else {
+            // Remove layer if it exists on map
+            if (predictionLayerRef.current && map.hasLayer(predictionLayerRef.current)) {
+                map.removeLayer(predictionLayerRef.current);
+                logger.log('Prediction layer removed from map');
+            }
         }
-    }, [visible, predictionVisible, map]);
+    }, [visible, predictionVisible, predictionTilesUrl, predictionOpacity, bounds, maxZoom, map]);
 
     // Handle satellite opacity changes
     useEffect(() => {

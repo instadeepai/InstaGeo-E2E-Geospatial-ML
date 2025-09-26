@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <link rel="icon" type="image/png" href="/static/images/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Page Not Found - InstaGeo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #1a1a2e;
+            color: #fff;
+            overflow: hidden;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 600px;
+            position: relative;
+            z-index: 1;
+        }
+        h1 {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            color: #2196F3;
+            text-shadow: 0 0 10px rgba(33, 150, 243, 0.5);
+        }
+        p {
+            font-size: 1.2rem;
+            line-height: 1.5;
+            margin-bottom: 2rem;
+            color: #e0e0e0;
+        }
+        .button {
+            display: inline-block;
+            padding: 1rem 2rem;
+            background-color: #2196F3;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4);
+            background-color: #1976D2;
+        }
+        .earth {
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            bottom: -150px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-radius: 50%;
+            overflow: hidden;
+            animation: rotateEarth 90s linear infinite;
+        }
+        .earth {
+            background: transparent;
+        }
+        .continents {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            animation: movePatterns 90s linear infinite;
+            filter: drop-shadow(0 0 50px rgba(33, 150, 243, 0.3));
+        }
+        .ocean {
+            fill: #1565C0;
+        }
+        .continent {
+            fill: #0fb55e;
+            opacity: 0.8;
+        }
+        .satellite {
+            position: absolute;
+            width: 100px;
+            height: 40px;
+            top: 30%;
+            left: -100px;
+            animation: orbit 15s linear infinite;
+            transform-style: preserve-3d;
+            perspective: 1000px;
+        }
+        .satellite-body {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, #e0e0e0, #ffffff);
+            border-radius: 10px;
+            box-shadow:
+                inset 0 0 20px rgba(0,0,0,0.2),
+                0 0 15px rgba(255,255,255,0.2);
+        }
+        .satellite-body::before {
+            content: '';
+            position: absolute;
+            width: 60%;
+            height: 60%;
+            top: 20%;
+            left: 20%;
+            background: linear-gradient(45deg, #1565C0, #2196F3);
+            border-radius: 50%;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.3);
+        }
+        .solar-panel-left, .solar-panel-right {
+            position: absolute;
+            width: 80px;
+            height: 30px;
+            background: linear-gradient(45deg, #2196F3 30%, #1565C0 70%);
+            top: 5px;
+            box-shadow:
+                inset 0 0 15px rgba(255,255,255,0.3),
+                0 0 10px rgba(33, 150, 243, 0.3);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        .solar-panel-left {
+            left: -85px;
+            transform: skew(-15deg) rotate(5deg);
+        }
+        .solar-panel-right {
+            right: -85px;
+            transform: skew(15deg) rotate(-5deg);
+        }
+        .solar-cell {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background:
+                linear-gradient(90deg, transparent 10%, rgba(255,255,255,0.1) 15%, transparent 20%),
+                linear-gradient(90deg, rgba(0,0,0,0.1) 0%, transparent 100%);
+            background-size: 20px 100%;
+        }
+        .antenna {
+            position: absolute;
+            width: 3px;
+            height: 25px;
+            background: linear-gradient(to top, #e0e0e0, #ffffff);
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            box-shadow: 0 0 5px rgba(255,255,255,0.3);
+        }
+        .antenna::before {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #2196F3;
+            border-radius: 50%;
+            top: -4px;
+            left: -2.5px;
+            box-shadow: 0 0 10px #2196F3;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        .signal {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #2196F3;
+            border-radius: 50%;
+            top: -12px;
+            left: -10px;
+            opacity: 0;
+            animation: signal 2s ease-out infinite;
+        }
+        .signal:nth-child(2) {
+            animation-delay: 0.5s;
+        }
+        .signal:nth-child(3) {
+            animation-delay: 1s;
+        }
+        @keyframes signal {
+            0% {
+                transform: scale(0.5);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(2);
+                opacity: 0;
+            }
+        }
+        .stars {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .stars::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background:
+                radial-gradient(circle at 50% 50%, rgba(255,255,255,0.8) 1px, transparent 1px),
+                radial-gradient(circle at 30% 70%, rgba(255,255,255,0.6) 1px, transparent 1px),
+                radial-gradient(circle at 70% 30%, rgba(255,255,255,0.7) 1px, transparent 1px);
+            background-size: 100px 100px, 150px 150px, 200px 200px;
+            animation: twinkle 3s ease-in-out infinite alternate;
+        }
+        @keyframes orbit {
+            0% {
+                transform: translate(-100px, 50px) rotate(0deg);
+            }
+            25% {
+                transform: translate(calc(25vw - 50px), -50px) rotate(5deg);
+            }
+            50% {
+                transform: translate(calc(50vw - 50px), -100px) rotate(0deg);
+            }
+            75% {
+                transform: translate(calc(75vw - 50px), -50px) rotate(-5deg);
+            }
+            100% {
+                transform: translate(calc(100vw + 100px), 50px) rotate(0deg);
+            }
+        }
+        @keyframes rotateEarth {
+            from { transform: translateX(-50%) rotate(0deg); }
+            to { transform: translateX(-50%) rotate(360deg); }
+        }
+        @keyframes movePatterns {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @keyframes twinkle {
+            from { opacity: 0.5; }
+            to { opacity: 1; }
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @media (max-width: 768px) {
+            h1 { font-size: 3rem; }
+            .earth {
+                width: 200px;
+                height: 200px;
+                bottom: -100px;
+            }
+            .satellite {
+                width: 80px;
+                height: 30px;
+            }
+            .solar-panel-left, .solar-panel-right {
+                width: 60px;
+                height: 25px;
+            }
+            .solar-panel-left { left: -65px; }
+            .solar-panel-right { right: -65px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="stars"></div>
+    <div class="satellite">
+        <div class="satellite-body">
+            <div class="antenna">
+                <div class="signal"></div>
+                <div class="signal"></div>
+                <div class="signal"></div>
+            </div>
+        </div>
+        <div class="solar-panel-left">
+            <div class="solar-cell"></div>
+        </div>
+        <div class="solar-panel-right">
+            <div class="solar-cell"></div>
+        </div>
+    </div>
+    <!-- Inspired from https://freesvg.org/planet-earth -->
+    <div class="earth">
+        <svg viewBox="0 0 386.07 387.6" class="continents">
+            <g transform="translate(-452.68 -541.42)">
+                <g transform="matrix(1.25 0 0 -1.25 145.71 1110.2)">
+                    <g>
+                        <g transform="translate(554.43 299.61)">
+                            <path class="ocean" d="m0 0c0-85.29-69.14-154.43-154.43-154.43-85.288 0-154.43 69.139-154.43 154.43 0 85.289 69.14 154.43 154.43 154.43s154.43-69.141 154.43-154.43"/>
+                        </g>
+                        <g transform="translate(487.95 212.66)">
+                            <path class="continent" d="m0 0s-0.919 26.656-1.379 39.064c-0.46 12.409 4.136 20.682-1.839 32.171-5.974 11.49-1.379 20.682-6.893 21.141-5.515 0.459-22.979 3.677-32.63 0-9.652-3.677-30.793 12.409-31.252 22.979s-3.676 18.383-3.676 18.383 11.949 19.262 15.166 18.593 3.677 12.199 5.975 13.118c2.298 0.92 26.655 7.354 33.549 7.354 6.893 0 1.838-7.354 1.838-7.354l21.141-7.81 3.677 8.273 18.383-5.515s-0.459 11.03-4.596 12.409c-4.137 1.378-21.601 9.651-21.601 9.651s3.678-6.894 1.839-8.732c-1.839-1.839-7.813 8.732-7.813 8.732l-13.327 5.055s-9.192-1.379-14.248-3.217c-5.055-1.838-7.353-10.57-7.353-10.57s-9.191-4.596-15.166-3.217c-5.975 1.378-4.137 12.868-4.137 12.868s11.03 0.919 11.949 4.136-7.812 9.192-7.812 9.192l6.893 3.217 6.434 11.232 10.111-1.122 3.217 11.95-0.807 11.806s67.293-31.638 88.51-83.995l-10.953 6.928 4.596-10.111 1.838 1.379 5.515-10.11v-8.273l-2.757-12.71s-17.515 29.546-25.737 37.068c0 0 11.957-27.574 26.197-41.822l4.595 4.754v-15.324-6.894l-4.136-9.652-5.055-15.166-0.92-11.949v-14.247l-6.894-6.893-6.893-5.056v-5.975l-6.894-9.203-9.651-10.11-9.651-6.435h-7.353z"/>
+                        </g>
+                        <g transform="translate(355.05 160.34)">
+                            <path class="continent" d="m0 0-9.191 11.949 1.379 6.435h5.974l-1.274 6.589 1.734 8.577 1.378 6.433 5.199 5.407s11.807 4.705 10.428 21.25c0 0 10.109 13.788 7.812 21.14-2.298 7.353-16.145 6.894-16.145 6.894l-22.919 9.651s-1.838 9.652-8.272 10.571c-6.435 0.918-8.273-3.677-11.031 0-2.758 3.676-6.576 9.194-13.858 9.652s-16.474 6.432-16.474 6.432-1.379 5.055-9.191 3.217c0 0-5.056 5.056-2.758 15.167 0 0-0.459 5.515-7.354 3.217 0 0-5.514 5.975-7.353 5.975-1.838 0-4.596 17.464 3.678 25.277 0 0 7.812 9.191 16.545 3.676 0 0-0.461-8.732 0.918-12.868s4.136 5.975 4.136 5.975l0.46 12.868s5.975 2.758 11.031 7.353c5.054 4.596 3.216 10.571 10.11 15.166 6.893 4.596 8.272 0 8.272 0l0.459 7.813h6.435l15.626 6.894s-7.354-0.46-10.111 3.677l19.761 10.57v5.974l-1.355 12.409-4.619-5.515-0.918 5.515-8.733 1.121h-3.216l-7.354-3.419-0.46-4.596-8.272-3.676-4.137 4.136 3.218 4.136 3.216 3.419 8.566 11.597s-56.809-31.864-73.36-88.241c0 0-0.925-17.772-1.384-24.206-0.46-6.434 5.054-12.408 5.054-12.408h5.056l1.838-4.596 4.136-1.379 2.299-1.379 1.378-3.583 1.838-6.528 4.137-0.92 2.297-4.135 2.758-0.46-0.919 3.676h3.677l1.378-3.216-4.136-3.217-1.379-3.218-0.459-7.352 0.459-5.516 0.46-5.055-4.136-2.298 0.918-5.055 0.461-3.217v-5.056l-2.299-0.919 16.545-22.519 5.056-1.839 3.216-0.459 5.056-1.839 4.137-7.812s13.327-29.415 15.166-33.55c1.838-4.133 21.141-21.138 29.412-19.759"/>
+                        </g>
+                        <g transform="translate(535 230) scale(0.6) rotate(145)">
+                            <path class="continent" d="m0 0c0 0-3.5 12-4 18-0.5 6-1 15-0.5 19 0.5 4 2 8 3 11 1 3 3 7 4.5 9 1.5 2 4 4 6 5 2 1 5 1.5 7 1 2-0.5 4-2 5-4 1-2 1.5-5 1-8-0.5-3-2-7-3-10-1-3-2-7-2.5-10-0.5-3-1-8-1.5-11-0.5-3-2-7-3-9-1-2-3-4-4.5-5-1.5-1-3.5-1.5-4.5-1-1 0.5-2 2-2.5 3-0.5 1-0.5 2.5-0.5 2.5z"/>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </svg>
+    </div>
+    <div class="container">
+        <h1>404</h1>
+        <p>Looks like the satellite carrying the page you are looking for is off course! It might be safer for you to return to the base with InstaGeo 🤔</p>
+        <a href="/" class="button">Return to Base</a>
+    </div>
+</body>
+</html>

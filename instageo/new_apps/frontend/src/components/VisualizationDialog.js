@@ -22,6 +22,7 @@ import {
     Download as DownloadIcon
 } from '@mui/icons-material';
 import { generateTiTilerColormap } from '../utils/segmentationColors';
+import { logger } from '../utils/logger';
 
 const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMonitor }) => {
     const [satelliteImageLoading, setSatelliteImageLoading] = useState(true);
@@ -34,7 +35,6 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
     const satellite_params = '&expression=b3;b2;b1&rescale=0,3000';
     // prediction_params will be dynamic based on stats
 
-    const classesMapping = task?.stages?.model_prediction?.result?.classes_mapping;
 
     // Fetch prediction statistics when component mounts or task changes
     useEffect(() => {
@@ -45,7 +45,7 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                 return;
             }
             // Check if this is a segmentation task
-            const isSegmentation = classesMapping !== null && classesMapping !== undefined;
+            const isSegmentation = task.model_type === 'seg';
 
             const titiler_data = task?.titiler_data;
 
@@ -68,9 +68,9 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                     }
                     setPredictionStats({
                         type: "seg",
-                        class_indices: Object.keys(classesMapping).map(Number).sort((a, b) => a - b), // All possible classes
+                        class_indices: Object.keys(task.classes_mapping).map(Number).sort((a, b) => a - b), // All possible classes
                         unique_values: uniqueCount, // Store count for display
-                        classes_mapping: classesMapping,
+                        classes_mapping: task.classes_mapping,
                         class_proportions: classProportions, // Add proportions data
                         valid_pixels: totalValidPixels, // Total valid pixels
                     });
@@ -94,10 +94,10 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                     });
                 }
             } catch (error) {
-                console.warn('Failed to fetch prediction statistics:', error);
+                logger.warn('Failed to fetch prediction statistics:', error);
                 if (isSegmentation) {
                     // Fallback to classes_mapping
-                    const classIndices = Object.keys(classesMapping).map(Number).sort((a, b) => a - b);
+                    const classIndices = Object.keys(task.classes_mapping).map(Number).sort((a, b) => a - b);
                     const emptyProportions = {};
                     classIndices.forEach(index => {
                         emptyProportions[index] = '0.0';
@@ -106,7 +106,7 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                         type: "seg",
                         class_indices: classIndices,
                         unique_values: classIndices.length,
-                        classes_mapping: classesMapping,
+                        classes_mapping: task.classes_mapping,
                         class_proportions: emptyProportions
                     });
                 } else {
@@ -118,22 +118,19 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
         };
 
         fetchPredictionStats();
-    }, [task, classesMapping]);
+    }, [task]);
 
     const getDynamicPredictionParams = () => {
-        if (predictionStats?.type === "seg") {
+        if (!predictionStats) return null;
+
+        if (predictionStats.type === "seg") {
             // For segmentation, generate custom colormap based on class indices
             const classIndices = predictionStats.class_indices || [];
             const colormapJson = generateTiTilerColormap(classIndices);
-
-            // For segmentation, use custom colormap with class-specific colors
-            // URL encode the JSON colormap
             return `&expression=b1&colormap=${encodeURIComponent(colormapJson)}`;
         } else {
-            // For regression, use rescaling (with fallback values)
-            const min = predictionStats?.min || 0;
-            const max = predictionStats?.max || 1;
-            return `&expression=b1&rescale=${min},${max}&colormap_name=viridis`;
+            // For regression, use rescaling with actual min/max values
+            return `&expression=b1&rescale=${predictionStats.min},${predictionStats.max}&colormap_name=viridis`;
         }
     };
 
@@ -186,7 +183,9 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                     maxZoom: maxZoom,
                     predictionStats: predictionStats,
                     modelType: task.model_type,
-                    classMapping: classesMapping
+                    modelShortName: task.model_short_name,
+                    modelName: task.model_name,
+                    classMapping: task.classes_mapping
                 });
 
                 onClose(); // Close dialog after adding to map
@@ -194,7 +193,7 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                     onCloseTasksMonitor(); // Close tasks monitor after adding to map
                 }
             } catch (error) {
-                console.error('Error fetching TileJSON:', error);
+                logger.error('Error fetching TileJSON:', error);
                 // Fallback without bounds and zoom constraints
                 const satelliteRgbTilesUrl = titiler_data.satellite.tiles_url + satellite_params;
                 const predictionTilesUrl = titiler_data.prediction.tiles_url + getDynamicPredictionParams();
@@ -209,7 +208,9 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                     name: `Task ${task.task_id}`,
                     predictionStats: predictionStats,
                     modelType: task.model_type,
-                    classMapping: classesMapping
+                    modelShortName: task.model_short_name,
+                    modelName: task.model_name,
+                    classMapping: task.classes_mapping
                 });
 
                 onClose();
@@ -227,7 +228,9 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
 
     const getPredictionPreviewUrl = () => {
         if (!titiler_data?.prediction?.preview_url) return '';
-        return titiler_data.prediction.preview_url + getDynamicPredictionParams();
+        const params = getDynamicPredictionParams();
+        if (!params) return '';
+        return titiler_data.prediction.preview_url + params;
     };
 
     const handleSatelliteImageLoad = () => {
@@ -263,7 +266,6 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                backgroundColor: 'grey.50',
                 borderBottom: '1px solid',
                 borderColor: 'divider',
                 py: 2
@@ -343,13 +345,13 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                                 <Box display="flex" justifyContent="center" gap={1} mt={1}>
                                     <Tooltip title="Download preview">
                                         <span>
-                                            <IconButton
-                                                size="small"
-                                                onClick={() => handleDownloadPreview(getSatellitePreviewUrl(), 'satellite_preview.png')}
-                                                disabled={satelliteImageError || satelliteImageLoading}
-                                            >
-                                                <DownloadIcon />
-                                            </IconButton>
+                                        <IconButton
+                                            size="small"
+                                            onClick={() => handleDownloadPreview(getSatellitePreviewUrl(), 'satellite_preview.png')}
+                                            disabled={satelliteImageError || satelliteImageLoading}
+                                        >
+                                            <DownloadIcon />
+                                        </IconButton>
                                         </span>
                                     </Tooltip>
                                 </Box>
@@ -366,7 +368,7 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                                         Model Prediction
                                     </Typography>
                                     <Chip
-                                        label={task.model_type?.toUpperCase() || 'PREDICTION'}
+                                        label={task.model_short_name}
                                         size="small"
                                         color="secondary"
                                     />
@@ -378,17 +380,26 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                                     minHeight: '200px',
                                     position: 'relative'
                                 }}>
-                                    {predictionImageLoading && (
+                                    {statsLoading && (
+                                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                                            <CircularProgress size={24} />
+                                            <Typography variant="caption" color="text.secondary">
+                                                Loading prediction stats...
+                                            </Typography>
+                                        </Box>
+                                    )}
+
+                                    {predictionImageLoading && !statsLoading && (
                                         <CircularProgress />
                                     )}
 
-                                    {predictionImageError && (
+                                    {predictionImageError && !statsLoading && (
                                         <Alert severity="error" size="small">
                                             Failed to load prediction data
                                         </Alert>
                                     )}
 
-                                    {titiler_data.prediction?.preview_url && (
+                                    {titiler_data.prediction?.preview_url && !statsLoading && predictionStats && (
                                         <CardMedia
                                             component="img"
                                             src={getPredictionPreviewUrl()}
@@ -409,13 +420,13 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                                 <Box display="flex" justifyContent="center" gap={1} mt={1}>
                                     <Tooltip title="Download preview">
                                         <span>
-                                            <IconButton
-                                                size="small"
-                                                onClick={() => handleDownloadPreview(getPredictionPreviewUrl(), 'prediction_preview.png')}
-                                                disabled={predictionImageError || predictionImageLoading}
-                                            >
-                                                <DownloadIcon />
-                                            </IconButton>
+                                        <IconButton
+                                            size="small"
+                                            onClick={() => handleDownloadPreview(getPredictionPreviewUrl(), 'prediction_preview.png')}
+                                            disabled={predictionImageError || predictionImageLoading}
+                                        >
+                                            <DownloadIcon />
+                                        </IconButton>
                                         </span>
                                     </Tooltip>
                                 </Box>

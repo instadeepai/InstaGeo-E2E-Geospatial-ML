@@ -3,15 +3,15 @@
 // 1. A large palette (30 colors) that are fairly distinct.
 // 2. generateSegmentationColors:  maps class indices -> hex colors.
 // 3. generateTiTilerColormap:     converts class indices directly into the
-//    semicolon‐separated 'index:r,g,b' string TiTiler expects.
+// colormap format TiTiler expects.
 
 const SEGMENTATION_COLORS = [
-    // Base
-    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
     // Light variants
     '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
     '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5',
+    // Base
+    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
     // Dark variants
     '#393b79', '#b35806', '#006d2c', '#a50f15', '#54278f',
     '#5d4037', '#c2185b', '#424242', '#827717', '#006064'
@@ -37,7 +37,7 @@ export function generateSegmentationColors(classIndices = []) {
  * TiTiler format example:
  *   "1":[31,119,180,255],"2":[255,127,14,255],
  *
- * @param {number[]|Object} input - class indices array OR {index: '#rrggbb'} mapping
+ * @param {number[]|Object} input - class indices array OR {index: '#rrggbb', ...} mapping
  * @returns {string} - json string of colormap definition
  */
 export function generateTiTilerColormap(input) {
@@ -62,7 +62,7 @@ export function generateTiTilerColormap(input) {
         const r = parseInt(hex.slice(1, 3), 16);
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
-        jsonObj[index] = [r, g, b]; // TiTiler accepts RGB (alpha optional)
+        jsonObj[index] = [r, g, b];
     });
 
     return JSON.stringify(jsonObj);
