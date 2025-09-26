@@ -122,9 +122,7 @@ def open_mf_tiff_dataset(
     return bands_dataset, mask_dataset, crs
 
 
-def parallel_download(
-    dataset: dict[str, Any], outdir: str, max_retries: int = 3
-) -> None:
+def parallel_download(dataset: dict[str, Any], outdir: str, max_retries: int = 3) -> None:
     """Parallel Download.
 
     Wraps `download_tile` with multiprocessing.Pool for downloading multiple tiles in
@@ -151,9 +149,7 @@ def parallel_download(
 
     while retries <= max_retries:
         temp_urls = [
-            url
-            for url in urls
-            if not os.path.exists(os.path.join(outdir, url.split("/")[-1]))
+            url for url in urls if not os.path.exists(os.path.join(outdir, url.split("/")[-1]))
         ]
         if not temp_urls:
             complete = True
@@ -208,13 +204,7 @@ def dispatch_hls_candidate_items(
     else:
         tile_observations["hls_candidate_items"] = (
             matches.groupby(matches.index)
-            .agg(
-                {
-                    "index_right": (
-                        lambda indices: [tile_candidate_items[id] for id in indices]
-                    )
-                }
-            )
+            .agg({"index_right": (lambda indices: [tile_candidate_items[id] for id in indices])})
             .reindex(tile_observations.index, fill_value=[])
         )
         return tile_observations
@@ -321,9 +311,7 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
         max_time=300,  # 5 minutes max
         jitter=backoff.full_jitter,
     )
-    def load_data(
-        self, tile_dict: dict[str, Any]
-    ) -> tuple[xr.DataArray, xr.DataArray, str]:
+    def load_data(self, tile_dict: dict[str, Any]) -> tuple[xr.DataArray, xr.DataArray, str]:
         """See parent class. Load Granules."""
         dsb, dsm, crs = open_hls_stac_items(
             tile_dict["granules"],
@@ -341,16 +329,14 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
         tile_dict: dict[str, Any],
     ) -> None | tuple[str, str | None]:
         """See parent class. Process a single row."""
-        label_filename = f"{os.path.splitext(row_dict['label_filename'])[0]}_{row_dict['mgrs_tile_id']}"  # noqa
-        chip_filename = label_filename.replace("mask", "merged").replace(
-            "label", "chip"
+        label_filename = (
+            f"{os.path.splitext(row_dict['label_filename'])[0]}_{row_dict['mgrs_tile_id']}"  # noqa
         )
+        chip_filename = label_filename.replace("mask", "merged").replace("label", "chip")
 
         chip_path = os.path.join(self.output_directory, "chips", f"{chip_filename}.tif")
 
-        label_path = os.path.join(
-            self.output_directory, "seg_maps", f"{label_filename}.tif"
-        )
+        label_path = os.path.join(self.output_directory, "seg_maps", f"{label_filename}.tif")
         if os.path.exists(chip_path) and os.path.exists(label_path):
             logging.info(f"Skipping {chip_path} because it's already created")
             return chip_path, label_path
@@ -371,9 +357,7 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
                 seg_map = None
 
             if dsm is not None:
-                chip_mask = geo_utils.slice_xr_dataset(
-                    dsm, geometry, chip_size=self.chip_size
-                )
+                chip_mask = geo_utils.slice_xr_dataset(dsm, geometry, chip_size=self.chip_size)
                 chip = apply_mask(
                     chip=chip,
                     mask=chip_mask,
@@ -396,9 +380,7 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
                 and chip.sizes["y"] == seg_map.sizes["y"]
             ):
                 # Overrides the chip coordinates to match the segmentation map.
-                seg_map, chip = xr.align(
-                    seg_map, chip, join="override", exclude=["band"]
-                )
+                seg_map, chip = xr.align(seg_map, chip, join="override", exclude=["band"])
 
                 # Clip values to valid HLS range (0-10000)
                 chip = chip.clip(min=0, max=10000)
@@ -410,15 +392,12 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
                     seg_map = mask_segmentation_map(
                         chip, seg_map, NO_DATA_VALUES.HLS, self.masking_strategy
                     )
-                    if (
-                        seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values
-                        == 0
-                    ):
+                    if seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values == 0:
                         logging.warning(f"Skipping {label_filename} due to empty label")
                         return None
-                seg_map = seg_map.where(
-                    ~np.isnan(seg_map), NO_DATA_VALUES.SEG_MAP
-                ).astype(np.uint8 if self.task_type == "seg" else np.float32)
+                seg_map = seg_map.where(~np.isnan(seg_map), NO_DATA_VALUES.SEG_MAP).astype(
+                    np.uint8 if self.task_type == "seg" else np.float32
+                )
                 chip = chip.where(~np.isnan(chip), NO_DATA_VALUES.HLS).astype(np.uint16)
 
                 seg_map.squeeze().rio.to_raster(label_path)
@@ -452,9 +431,7 @@ class HLSPointsPipeline(BasePointsDataPipeline):
         max_time=300,  # 5 minutes max
         jitter=backoff.full_jitter,
     )
-    def load_data(
-        self, tile_dict: dict[str, Any]
-    ) -> tuple[xr.Dataset, xr.Dataset, str]:
+    def load_data(self, tile_dict: dict[str, Any]) -> tuple[xr.Dataset, xr.Dataset, str]:
         """See parent class. Load Granules."""
         dsb, dsm, crs = open_hls_stac_items(
             tile_dict["granules"],
@@ -512,20 +489,12 @@ class HLSPointsPipeline(BasePointsDataPipeline):
                     chip_name = f"chip_{chip_id}.tif"
                     seg_map_name = f"seg_map_{chip_id}.tif"
 
-                    chip_filename = os.path.join(
-                        self.output_directory, "chips", chip_name
-                    )
+                    chip_filename = os.path.join(self.output_directory, "chips", chip_name)
                     chips_temp_filenames.append(chip_filename)
-                    seg_map_filename = os.path.join(
-                        self.output_directory, "seg_maps", seg_map_name
-                    )
+                    seg_map_filename = os.path.join(self.output_directory, "seg_maps", seg_map_name)
                     seg_maps_temp_filenames.append(seg_map_filename)
-                    if os.path.exists(chip_filename) or os.path.exists(
-                        seg_map_filename
-                    ):
-                        logging.info(
-                            f"Skipping {chip_filename} because it's already created"
-                        )
+                    if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
+                        logging.info(f"Skipping {chip_filename} because it's already created")
                         continue
 
                     chip = dsb.isel(
@@ -547,9 +516,7 @@ class HLSPointsPipeline(BasePointsDataPipeline):
                 try:
                     # Compute chips and masks locally before processing
                     chips = [chip.compute() for chip in chips]
-                    masks = (
-                        [mask.compute() for mask in masks] if dsm is not None else masks
-                    )
+                    masks = [mask.compute() for mask in masks] if dsm is not None else masks
 
                     for chip, mask, chip_filename, seg_map_filename in zip(
                         chips, masks, chips_temp_filenames, seg_maps_temp_filenames
@@ -569,9 +536,7 @@ class HLSPointsPipeline(BasePointsDataPipeline):
                             logging.warning(f"Skipping {chip_filename} due to cloud")
                             continue
 
-                        seg_map = create_segmentation_map(
-                            chip, obsv_records, self.window_size
-                        )
+                        seg_map = create_segmentation_map(chip, obsv_records, self.window_size)
                         seg_map = mask_segmentation_map(
                             chip,
                             seg_map,
@@ -579,15 +544,8 @@ class HLSPointsPipeline(BasePointsDataPipeline):
                             self.masking_strategy,
                         )
 
-                        if (
-                            seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP)
-                            .count()
-                            .values
-                            == 0
-                        ):
-                            logging.warning(
-                                f"Skipping {seg_map_filename} due to empty label"
-                            )
+                        if seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values == 0:
+                            logging.warning(f"Skipping {seg_map_filename} due to empty label")
                             continue
 
                         label_paths.append(seg_map_filename)
@@ -603,9 +561,7 @@ class HLSPointsPipeline(BasePointsDataPipeline):
                 time.sleep(5)
 
         except rasterio.errors.RasterioIOError as e:
-            logging.error(
-                f"Error {e} when reading dataset containing: {stac_items_str}"
-            )
+            logging.error(f"Error {e} when reading dataset containing: {stac_items_str}")
         except Exception as e:
             logging.error(f"Error {e} when processing {stac_items_str}")
 

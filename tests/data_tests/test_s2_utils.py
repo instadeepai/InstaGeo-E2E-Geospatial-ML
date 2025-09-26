@@ -218,10 +218,7 @@ def test_process_s2_metadata_valid(s2_metadata):
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 1
-    assert (
-        result.iloc[0]["title"]
-        == "S2A_MSIL2A_20201230T100031_N0214_R122_T33UUU_20201230T120024"
-    )
+    assert result.iloc[0]["title"] == "S2A_MSIL2A_20201230T100031_N0214_R122_T33UUU_20201230T120024"
     assert result.iloc[0]["tile_id"] == "T33UUU"
     assert result.iloc[0]["cloud_cover"] == 10.5
 
@@ -324,9 +321,7 @@ def test_retrieve_s2_metadata_success():
     with patch("instageo.data.s2_utils.requests.get") as mock_get, patch(
         "instageo.data.s2_utils.process_s2_metadata"
     ) as mock_process:
-        mock_get.return_value = MagicMock(
-            status_code=200, json=lambda: mock_response_data
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=lambda: mock_response_data)
         mock_process.return_value = processed_metadata
 
         result = retrieve_s2_metadata(tile_info_df)
@@ -382,9 +377,7 @@ def test_retrieve_s2_metadata_no_features():
     with patch("instageo.data.s2_utils.requests.get") as mock_get, patch(
         "instageo.data.s2_utils.process_s2_metadata"
     ) as mock_process:
-        mock_get.return_value = MagicMock(
-            status_code=200, json=lambda: mock_response_data
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=lambda: mock_response_data)
         mock_process.return_value = pd.DataFrame()
 
         result = retrieve_s2_metadata(tile_info_df)
@@ -414,9 +407,7 @@ def test_retrieve_s2_metadata_multiple_tiles():
     with patch("instageo.data.s2_utils.requests.get") as mock_get, patch(
         "instageo.data.s2_utils.process_s2_metadata"
     ) as mock_process:
-        mock_get.return_value = MagicMock(
-            status_code=200, json=lambda: mock_response_data
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=lambda: mock_response_data)
         mock_process.return_value = pd.DataFrame()
 
         result = retrieve_s2_metadata(tile_info_df)
@@ -509,9 +500,7 @@ def test_find_best_tile_temporal_tiebreaker():
         [
             {
                 "tile_queries": "query1",
-                "s2_tiles": [
-                    "S2A_MSIL2A_20230109"
-                ],  # Same size, closer temporal difference
+                "s2_tiles": ["S2A_MSIL2A_20230109"],  # Same size, closer temporal difference
                 "thumbnails": ["https://example.com/thumb2"],
                 "urls": ["https://example.com/tile2"],
             }
@@ -756,14 +745,10 @@ def test_add_s2_granules_valid():
     with patch(
         "instageo.data.data_pipeline.get_tile_info",
         return_value=(mock_tiles_info, mock_tile_queries),
-    ), patch(
-        "instageo.data.s2_utils.retrieve_s2_metadata", return_value=mock_tile_database
-    ), patch(
+    ), patch("instageo.data.s2_utils.retrieve_s2_metadata", return_value=mock_tile_database), patch(
         "instageo.data.s2_utils.find_best_tile", return_value=mock_query_result
     ):
-        result = add_s2_granules(
-            data, num_steps=3, temporal_step=10, temporal_tolerance=5
-        )
+        result = add_s2_granules(data, num_steps=3, temporal_step=10, temporal_tolerance=5)
     expected_result = pd.DataFrame(
         {
             "mgrs_tile_id": ["33UUU", "33UUP"],
@@ -826,9 +811,7 @@ def test_extract_and_delete_zip_files():
 @pytest.fixture
 def auth_instance():
     """Fixture to create an instance of S2AuthState."""
-    return S2AuthState(
-        client_id="test_client", username="test_user", password="test_pass"
-    )
+    return S2AuthState(client_id="test_client", username="test_user", password="test_pass")
 
 
 def test_authenticate_success(auth_instance):
@@ -851,9 +834,7 @@ def test_authenticate_failure(auth_instance):
     with patch.object(
         auth_instance, "_get_access_and_refresh_token", return_value=(None, None, None)
     ):
-        with pytest.raises(
-            ValueError, match="Failed to authenticate and obtain tokens."
-        ):
+        with pytest.raises(ValueError, match="Failed to authenticate and obtain tokens."):
             auth_instance.authenticate()
 
 
@@ -893,9 +874,7 @@ def test_single_item_in_search_object():
     bbox = [100.0, 0.0, 105.0, 1.0]
     datetime_str = "2023-03-28T12:00:00Z"
     datetime_obj = datetime.fromisoformat(datetime_str[:-1])
-    item = Item(
-        id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
-    )
+    item = Item(id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={})
     search_obj.item_collection.return_value = [item]
     result = get_item_collection([search_obj])
 
@@ -909,12 +888,8 @@ def test_multiple_items_in_search_object():
     datetime_str = "2023-03-28T12:00:00Z"
     datetime_obj = datetime.fromisoformat(datetime_str[:-1])
 
-    item1 = Item(
-        id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
-    )
-    item2 = Item(
-        id="item2", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
-    )
+    item1 = Item(id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={})
+    item2 = Item(id="item2", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={})
 
     search_obj.item_collection.return_value = [item1, item2]
     result = get_item_collection([search_obj])
@@ -928,14 +903,10 @@ def test_multiple_search_objects():
     bbox = [100.0, 0.0, 105.0, 1.0]
     datetime_str = "2023-03-28T12:00:00Z"
     datetime_obj = datetime.fromisoformat(datetime_str[:-1])
-    item1 = Item(
-        id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
-    )
+    item1 = Item(id="item1", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={})
     search_obj1.item_collection.return_value = [item1]
     search_obj2 = MagicMock(spec=ItemSearch)
-    item2 = Item(
-        id="item2", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={}
-    )
+    item2 = Item(id="item2", geometry=geometry, bbox=bbox, datetime=datetime_obj, properties={})
     search_obj2.item_collection.return_value = [item2]
     result = get_item_collection([search_obj1, search_obj2])
 

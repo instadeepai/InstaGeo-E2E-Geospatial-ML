@@ -80,9 +80,7 @@ class COGConverter:
 
             end_time = datetime.now()
             processing_duration = (end_time - start_time).total_seconds()
-            logger.info(
-                f"Merging to COGs completed successfully in {processing_duration} s"
-            )
+            logger.info(f"Merging to COGs completed successfully in {processing_duration} s")
 
             return {
                 "chips_merged_cog_path": merged_chips_cog_path,
@@ -129,9 +127,7 @@ class COGConverter:
 
             logger.info(f"Step 1 - Merging: gdal_merge.py with {len(tif_files)} files")
 
-            merge_result = subprocess.run(
-                merge_cmd, capture_output=True, text=True, check=True
-            )
+            merge_result = subprocess.run(merge_cmd, capture_output=True, text=True, check=True)
 
             if merge_result.stderr:
                 logger.warning(f"GDAL merge warnings: {merge_result.stderr}")
@@ -159,9 +155,7 @@ class COGConverter:
 
             logger.info(f"Step 2 - Converting to COG: {output_path}")
 
-            cog_result = subprocess.run(
-                cog_cmd, capture_output=True, text=True, check=True
-            )
+            cog_result = subprocess.run(cog_cmd, capture_output=True, text=True, check=True)
 
             if cog_result.stderr:
                 logger.warning(f"GDAL COG conversion warnings: {cog_result.stderr}")
@@ -198,9 +192,7 @@ class COGConverter:
                 if total_valid > 0:
                     max_label = int(valid_vals.max()) if valid_vals.size else 0
                     counts_arr = np.bincount(valid_vals, minlength=max_label + 1)
-                    class_counts = {
-                        str(i): int(c) for i, c in enumerate(counts_arr) if c > 0
-                    }
+                    class_counts = {str(i): int(c) for i, c in enumerate(counts_arr) if c > 0}
                 segmentation_stats = {
                     "valid_pixels": total_valid,
                     "class_counts": class_counts,

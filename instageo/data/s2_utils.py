@@ -106,9 +106,7 @@ class S2AuthState:
 
     """
 
-    def __init__(
-        self, client_id: str | None, username: str | None, password: str | None
-    ):
+    def __init__(self, client_id: str | None, username: str | None, password: str | None):
         """Initializes the S2AuthState instance with user credentials.
 
         Args:
@@ -376,9 +374,7 @@ def open_mf_jp2_dataset(
     scl_paths = []
     for granule in band_files["granules"]:
         for band in S2_HLS_COMMON_BANDS_ASSET:
-            pattern = os.path.join(
-                granule, "GRANULE/*", "IMG_DATA/R20m", f"*_{band}_20m.jp2"
-            )
+            pattern = os.path.join(granule, "GRANULE/*", "IMG_DATA/R20m", f"*_{band}_20m.jp2")
             matching_paths = glob.glob(pattern)
             band_paths.append(matching_paths[0])
         pattern = os.path.join(granule, "GRANULE/*", "IMG_DATA/R20m", "*_SCL_20m.jp2")
@@ -555,22 +551,14 @@ def find_best_tile(
         for query_date in query_dates:
             # Filter tiles within temporal tolerance
             filtered_tiles = tile_entries[
-                (
-                    tile_entries["date"]
-                    >= query_date - pd.Timedelta(days=temporal_tolerance)
-                )
-                & (
-                    tile_entries["date"]
-                    <= query_date + pd.Timedelta(days=temporal_tolerance)
-                )
+                (tile_entries["date"] >= query_date - pd.Timedelta(days=temporal_tolerance))
+                & (tile_entries["date"] <= query_date + pd.Timedelta(days=temporal_tolerance))
             ]
 
             if not filtered_tiles.empty:
                 # Sort tiles by size (descending) and temporal difference (ascending)
                 best_tile = (
-                    filtered_tiles.assign(
-                        temporal_diff=(filtered_tiles["date"] - query_date).abs()
-                    )
+                    filtered_tiles.assign(temporal_diff=(filtered_tiles["date"] - query_date).abs())
                     .sort_values(by=["size", "temporal_diff"], ascending=[False, True])
                     .iloc[0]
                 )
@@ -659,9 +647,7 @@ def download_tile_data(
             for _, row in granules_to_download.iterrows()
             if not (
                 os.path.exists(os.path.join(output_directory, f"{row['tiles']}.zip"))
-                or os.path.isfile(
-                    os.path.join(output_directory, row["tiles"], "manifest.safe")
-                )
+                or os.path.isfile(os.path.join(output_directory, row["tiles"], "manifest.safe"))
             )
         ]
         if not download_info_list:
@@ -728,9 +714,7 @@ def add_s2_granules(
         temporal_step=temporal_step,
         temporal_tolerance=temporal_tolerance,
     )
-    tile_queries_str = [
-        f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries
-    ]
+    tile_queries_str = [f"{tile_id}_{'_'.join(dates)}" for tile_id, dates in tile_queries]
     data["tile_queries"] = tile_queries_str
     tile_database = retrieve_s2_metadata(tiles_info, cloud_coverage)
     tile_queries_dict = {k: v for k, v in zip(tile_queries_str, tile_queries)}
@@ -766,17 +750,13 @@ def create_s2_dataset(
             lambda granule_lst: all(str(item).startswith("S2") for item in granule_lst)
         )
     ]
-    assert (
-        not data_with_tiles.empty
-    ), "No observation record with valid Sentinel-2 granules"
+    assert not data_with_tiles.empty, "No observation record with valid Sentinel-2 granules"
     s2_dataset = {}
     tiles_to_download = []
     urls = []
     for _, row in data_with_tiles.iterrows():
         s2_dataset[f'{row["date"].strftime("%Y-%m-%d")}_{row["mgrs_tile_id"]}'] = {
-            "granules": [
-                os.path.join(outdir, "s2_tiles", tile) for tile in row["s2_tiles"]
-            ],
+            "granules": [os.path.join(outdir, "s2_tiles", tile) for tile in row["s2_tiles"]],
         }
         tiles_to_download.extend(row["s2_tiles"])
         urls.extend(row["urls"])
@@ -891,9 +871,7 @@ class S2RasterPipeline(BaseRasterDataPipeline):
         max_time=300,  # 5 minutes max
         jitter=backoff.full_jitter,
     )
-    def load_data(
-        self, tile_dict: dict[str, Any]
-    ) -> tuple[xr.Dataset, xr.Dataset, str]:
+    def load_data(self, tile_dict: dict[str, Any]) -> tuple[xr.Dataset, xr.Dataset, str]:
         """See parent class. Load Granules."""
         try:
             dsb, dsm, crs = open_stac_items(
@@ -921,13 +899,13 @@ class S2RasterPipeline(BaseRasterDataPipeline):
         tile_dict: dict[str, Any],
     ) -> None | tuple[str, str]:
         """See parent class. Process a single row."""
-        label_filename = f"{os.path.splitext(row_dict['label_filename'])[0]}_{row_dict['mgrs_tile_id']}"  # noqa
+        label_filename = (
+            f"{os.path.splitext(row_dict['label_filename'])[0]}_{row_dict['mgrs_tile_id']}"  # noqa
+        )
         chip_filename = label_filename.replace("label", "chip")
 
         chip_path = os.path.join(self.output_directory, "chips", f"{chip_filename}.tif")
-        label_path = os.path.join(
-            self.output_directory, "seg_maps", f"{label_filename}.tif"
-        )
+        label_path = os.path.join(self.output_directory, "seg_maps", f"{label_filename}.tif")
         if os.path.exists(chip_path) and os.path.exists(label_path):
             logging.info(f"Skipping {chip_path} because it's already created")
             return chip_path, label_path
@@ -937,14 +915,10 @@ class S2RasterPipeline(BaseRasterDataPipeline):
             geometry = shape(row_dict["geometry"])
 
             chip = geo_utils.slice_xr_dataset(dsb, geometry, chip_size=self.chip_size)
-            seg_map = xr.open_dataarray(
-                os.path.join(self.raster_path, row_dict["label_filename"])
-            )
+            seg_map = xr.open_dataarray(os.path.join(self.raster_path, row_dict["label_filename"]))
 
             if dsm is not None:
-                chip_mask = geo_utils.slice_xr_dataset(
-                    dsm, geometry, chip_size=self.chip_size
-                )
+                chip_mask = geo_utils.slice_xr_dataset(dsm, geometry, chip_size=self.chip_size)
                 chip = apply_mask(
                     chip=chip,
                     mask=chip_mask,
@@ -960,9 +934,7 @@ class S2RasterPipeline(BaseRasterDataPipeline):
                 and chip.sizes["x"] == seg_map.sizes["x"]
                 and chip.sizes["y"] == seg_map.sizes["y"]
             ):
-                seg_map, chip = xr.align(
-                    seg_map, chip, join="override", exclude=["band"]
-                )
+                seg_map, chip = xr.align(seg_map, chip, join="override", exclude=["band"])
                 chip = chip.where((chip >= 0) & (chip <= 10000), 0)
 
                 if self.qa_check:
@@ -970,15 +942,10 @@ class S2RasterPipeline(BaseRasterDataPipeline):
                         logging.warning(f"Skipping {chip_filename} due to cloud")
                         return None
                     seg_map = mask_segmentation_map(chip, seg_map, NO_DATA_VALUES.S2)
-                    if (
-                        seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values
-                        == 0
-                    ):
+                    if seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values == 0:
                         logging.warning(f"Skipping {label_filename} due to empty label")
                         return None
-                seg_map = seg_map.where(
-                    ~np.isnan(seg_map), NO_DATA_VALUES.SEG_MAP
-                ).astype(np.int8)
+                seg_map = seg_map.where(~np.isnan(seg_map), NO_DATA_VALUES.SEG_MAP).astype(np.int8)
                 chip = chip.where(~np.isnan(chip), 0).astype(np.uint16)
 
                 seg_map.squeeze().rio.to_raster(label_path)

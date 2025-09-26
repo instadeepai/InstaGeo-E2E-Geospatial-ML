@@ -69,9 +69,7 @@ FLAGS = flags.FLAGS
 mgrs_coord_cache: Dict[str, Tuple[float, float]] = {}
 
 # Define flags
-flags.DEFINE_integer(
-    "random_state", 42, "Random seed for reproducibility", lower_bound=0
-)
+flags.DEFINE_integer("random_state", 42, "Random seed for reproducibility", lower_bound=0)
 
 flags.DEFINE_float(
     "test_ratio",
@@ -182,9 +180,7 @@ def find_connected_tiles(
 
     # Quick approximation: 1 degree of latitude ≈ 111km, 1 degree of longitude varies with latitude
     lat_threshold = distance_threshold / 111.0  # Convert km to degrees
-    lon_threshold = lat_threshold / abs(
-        np.cos(np.radians(current_lat))
-    )  # Adjust for latitude
+    lon_threshold = lat_threshold / abs(np.cos(np.radians(current_lat)))  # Adjust for latitude
 
     # First pass: Quick filter using lat/lon bounds to reduce number of candidates
     candidates = []
@@ -214,9 +210,7 @@ def find_connected_tiles(
     for other_tile in tiles_to_check:
         if other_tile in remaining_tiles:
             remaining_tiles.remove(other_tile)
-            connected.update(
-                find_connected_tiles(other_tile, remaining_tiles, distance_threshold)
-            )
+            connected.update(find_connected_tiles(other_tile, remaining_tiles, distance_threshold))
     return connected
 
 
@@ -370,9 +364,7 @@ def visualize_splits_locations(
                         gdf.geometry.y.max() + bw_adjust * cut,
                     )
                     # Calculate grid cell area in square degrees
-                    grid_area = ((x_max - x_min) * (y_max - y_min)) / (
-                        (gridsize - 1) ** 2
-                    )
+                    grid_area = ((x_max - x_min) * (y_max - y_min)) / ((gridsize - 1) ** 2)
 
                     # Set all ticks with proper count conversion
                     ticks = cbar.get_ticks()
@@ -599,9 +591,7 @@ def save_splits(
         visualize_splits_years(train_df, val_df, test_df, viz_dir)
 
 
-def _try_mgrs_groups(
-    df: pd.DataFrame, distance_threshold: float
-) -> List[Set[str]] | None:
+def _try_mgrs_groups(df: pd.DataFrame, distance_threshold: float) -> List[Set[str]] | None:
     """Try to create groups based on MGRS tiles proximity.
 
     Args:
@@ -672,9 +662,7 @@ def _try_random_split(
         if include_val:
             # Split remaining data into train and val
             # Adjust val_ratio to account for the first split if test was included
-            adjusted_val_ratio = (
-                val_ratio / (1 - test_ratio) if include_test else val_ratio
-            )
+            adjusted_val_ratio = val_ratio / (1 - test_ratio) if include_test else val_ratio
             train_df, val_df = train_test_split(
                 train_df, test_size=adjusted_val_ratio, random_state=random_state
             )
@@ -760,9 +748,7 @@ def _split_data(
     # Shuffle groups for train/val split
     test_groups = set(test_df["group_id"].unique()) if test_df is not None else set()
     remaining_groups = (
-        group_years
-        if allow_group_overlap
-        else [g for g in group_years if g[0] not in test_groups]
+        group_years if allow_group_overlap else [g for g in group_years if g[0] not in test_groups]
     )
     random.shuffle(remaining_groups)
 
@@ -772,9 +758,7 @@ def _split_data(
         current_size = 0
         i = 0
         while current_size < target_val_size and i < len(remaining_groups):
-            current_group = remaining_df[
-                remaining_df["group_id"] == remaining_groups[i][0]
-            ]
+            current_group = remaining_df[remaining_df["group_id"] == remaining_groups[i][0]]
             current_size += len(current_group)
             val_records.extend(current_group.index)
             i += 1
@@ -785,9 +769,7 @@ def _split_data(
 
     # Get training set
     train_df = (
-        remaining_df[~remaining_df.index.isin(val_df.index)]
-        if val_df is not None
-        else remaining_df
+        remaining_df[~remaining_df.index.isin(val_df.index)] if val_df is not None else remaining_df
     )
     val_groups = set(val_df["group_id"].unique()) if val_df is not None else set()
     remaining_groups = (
@@ -833,9 +815,7 @@ def find_closest_clusters(
     return closest_pair
 
 
-def merge_clusters(
-    cluster1: int, cluster2: int, df_with_clusters: pd.DataFrame
-) -> pd.DataFrame:
+def merge_clusters(cluster1: int, cluster2: int, df_with_clusters: pd.DataFrame) -> pd.DataFrame:
     """Function to merge two clusters.
 
     Args:
@@ -859,9 +839,7 @@ def _try_kmeans_groups(df: pd.DataFrame, n_clusters: int) -> None:
         n_clusters: Number of clusters to create
     """
     df = df.copy()
-    df[["lat", "lon"]] = df["mgrs_tile"].apply(
-        lambda x: pd.Series(mgrs_coord_cache.get(x))
-    )
+    df[["lat", "lon"]] = df["mgrs_tile"].apply(lambda x: pd.Series(mgrs_coord_cache.get(x)))
     std = StandardScaler()
     df[["lat", "lon"]] = std.fit_transform(df[["lat", "lon"]])
     kmeans = KMeans(n_clusters=n_clusters, random_state=42)
@@ -1057,9 +1035,7 @@ def main(argv: Any) -> None:
     valid_mask = df["mgrs_tile"].notna() & df["year"].notna()
     if not valid_mask.all():
         invalid_count = (~valid_mask).sum()
-        logging.warning(
-            f"Filtering out {invalid_count} records with invalid MGRS tiles or years"
-        )
+        logging.warning(f"Filtering out {invalid_count} records with invalid MGRS tiles or years")
         df = df[valid_mask].copy()
 
     # Populate cache with all unique MGRS tiles

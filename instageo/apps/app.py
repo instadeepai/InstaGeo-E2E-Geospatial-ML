@@ -34,9 +34,7 @@ from instageo import INSTAGEO_APPS_PATH
 from instageo.apps.viz import create_map_with_geotiff_tiles
 
 
-def generate_map(
-    directory: str, year: int, month: int, country_tiles: list[str]
-) -> None:
+def generate_map(directory: str, year: int, month: int, country_tiles: list[str]) -> None:
     """Generate the plotly map.
 
     Arguments:
@@ -80,9 +78,7 @@ def main() -> None:
         divider="rainbow",
     )
     st.sidebar.header("Settings")
-    with open(
-        INSTAGEO_APPS_PATH / "utils/country_code_to_mgrs_tiles.json"
-    ) as json_file:
+    with open(INSTAGEO_APPS_PATH / "utils/country_code_to_mgrs_tiles.json") as json_file:
         countries_to_tiles_map = json.load(json_file)
 
     with st.sidebar.container():

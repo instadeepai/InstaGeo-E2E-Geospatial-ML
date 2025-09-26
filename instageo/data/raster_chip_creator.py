@@ -55,9 +55,7 @@ log.setLevel(pylogging.WARNING)
 pylogging.getLogger("botocore.credentials").setLevel(pylogging.WARNING)
 pylogging.getLogger("earthdata").setLevel(pylogging.WARNING)
 
-flags.DEFINE_string(
-    "records_file", None, "Path to input records file containing geometries."
-)
+flags.DEFINE_string("records_file", None, "Path to input records file containing geometries.")
 flags.DEFINE_string("raster_path", None, "Path to input raster file.")
 
 
@@ -92,9 +90,7 @@ def main(argv: Any) -> None:
             bb_feature = json.load(json_file)
         obsv_records = geo_utils.create_grid_polygons(
             bbox_list=bb_feature,
-            date=FLAGS.date
-            if FLAGS.date
-            else datetime.strftime(datetime.now(), "%d-%m-%Y"),
+            date=FLAGS.date if FLAGS.date else datetime.strftime(datetime.now(), "%d-%m-%Y"),
             chip_size=FLAGS.chip_size,
             spatial_resolution=FLAGS.spatial_resolution,
             crs=FLAGS.src_crs,
@@ -104,9 +100,7 @@ def main(argv: Any) -> None:
         obsv_records["geometry_4326"] = obsv_records["geometry"].to_crs("EPSG:4326")
         obsv_records["date"] = pd.to_datetime(obsv_records["date"])
     if FLAGS.data_source == "HLS":
-        if not (
-            os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))
-        ):
+        if not (os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))):
             logging.info("Creating HLS dataset JSON.")
             logging.info("Retrieving HLS tile ID for each observation.")
             os.makedirs(os.path.join(FLAGS.output_directory), exist_ok=True)
@@ -124,12 +118,8 @@ def main(argv: Any) -> None:
             (
                 filtered_obsv_records,
                 hls_dataset,
-            ) = create_records_with_items(
-                obsv_records_with_hls_items, "hls_granules", "hls_items"
-            )
-            with open(
-                os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w"
-            ) as json_file:
+            ) = create_records_with_items(obsv_records_with_hls_items, "hls_granules", "hls_items")
+            with open(os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w") as json_file:
                 json.dump(hls_dataset, json_file, indent=4)
             filtered_obsv_records.to_file(
                 os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg"),
@@ -137,9 +127,7 @@ def main(argv: Any) -> None:
             )
         else:
             logging.info("HLS dataset JSON already created")
-            with open(
-                os.path.join(FLAGS.output_directory, "hls_dataset.json")
-            ) as json_file:
+            with open(os.path.join(FLAGS.output_directory, "hls_dataset.json")) as json_file:
                 hls_dataset = json.load(json_file)
             filtered_obsv_records = gpd.read_file(
                 os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")
@@ -162,9 +150,7 @@ def main(argv: Any) -> None:
         hls_raster_pipeline.run(hls_dataset, filtered_obsv_records)
 
     elif FLAGS.data_source == "S2":
-        if not (
-            os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
-        ):
+        if not (os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))):
             logging.info("Creating S2 dataset JSON.")
             logging.info("Retrieving S2 tile ID for each observation.")
             os.makedirs(os.path.join(FLAGS.output_directory), exist_ok=True)
@@ -186,12 +172,8 @@ def main(argv: Any) -> None:
             (
                 filtered_obsv_records,
                 s2_dataset,
-            ) = create_records_with_items(
-                obsv_records_with_s2_items, "s2_granules", "s2_items"
-            )
-            with open(
-                os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w"
-            ) as json_file:
+            ) = create_records_with_items(obsv_records_with_s2_items, "s2_granules", "s2_items")
+            with open(os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w") as json_file:
                 json.dump(s2_dataset, json_file, indent=4)
             filtered_obsv_records.to_file(
                 os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg"),
@@ -199,9 +181,7 @@ def main(argv: Any) -> None:
             )
         else:
             logging.info("S2 dataset JSON already created")
-            with open(
-                os.path.join(FLAGS.output_directory, "s2_dataset.json")
-            ) as json_file:
+            with open(os.path.join(FLAGS.output_directory, "s2_dataset.json")) as json_file:
                 s2_dataset = json.load(json_file)
             filtered_obsv_records = gpd.read_file(
                 os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")

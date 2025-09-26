@@ -171,12 +171,8 @@ def test_visualize_task_id_endpoint():
     assert "detail" in data
 
 
-@patch(
-    "instageo.new_apps.backend.app.tiler_service.InstaGeoTilerService._get_chips_cog_file"
-)
-@patch(
-    "instageo.new_apps.backend.app.tiler_service.InstaGeoTilerService._get_predictions_cog_file"
-)
+@patch("instageo.new_apps.backend.app.tiler_service.InstaGeoTilerService._get_chips_cog_file")
+@patch("instageo.new_apps.backend.app.tiler_service.InstaGeoTilerService._get_predictions_cog_file")
 def test_visualize_task_id_with_mocked_cogs(mock_predictions_cog, mock_chips_cog):
     """Test the visualize endpoint with mocked COG files to verify response structure."""
     from pathlib import Path

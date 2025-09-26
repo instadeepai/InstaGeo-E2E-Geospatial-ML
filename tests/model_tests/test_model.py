@@ -61,9 +61,7 @@ def test_interpolate_pos_encoding():
 
     pos_embed = torch.randn(1, 25, embed_dim)
 
-    result2 = interpolate_pos_encoding(
-        pos_embed, grid_size, patch_size, shape, embed_dim
-    )
+    result2 = interpolate_pos_encoding(pos_embed, grid_size, patch_size, shape, embed_dim)
     assert result2.shape == (1, 49, embed_dim)
 
 

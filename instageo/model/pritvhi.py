@@ -30,9 +30,7 @@ from timm.models.vision_transformer import Block
 logger = logging.getLogger(__name__)
 
 
-def get_1d_sincos_embed_from_grid_torch(
-    embed_dim: int, pos: torch.Tensor
-) -> torch.Tensor:
+def get_1d_sincos_embed_from_grid_torch(embed_dim: int, pos: torch.Tensor) -> torch.Tensor:
     """Generate a 1D sinusoidal positional embedding from the given positions.
 
     This function computes a 1D sinusoidal encoding for a list of positions
@@ -184,9 +182,7 @@ def interpolate_pos_encoding(
     if t_patches != grid_size[0]:
         # Re-compute pos embedding to handle changed num_frames
         new_grid_size = (t_patches, grid_size[1], grid_size[2])
-        new_pos_embed = get_3d_sincos_pos_embed(
-            pos_embed.shape[-1], new_grid_size, cls_token=True
-        )
+        new_pos_embed = get_3d_sincos_pos_embed(pos_embed.shape[-1], new_grid_size, cls_token=True)
         new_pos_embed = torch.from_numpy(new_pos_embed).float().unsqueeze(0)
     else:
         new_grid_size = grid_size
@@ -194,9 +190,7 @@ def interpolate_pos_encoding(
 
     class_pos_embed, patch_pos_embed = new_pos_embed[:, :1], new_pos_embed[:, 1:]
 
-    patch_pos_embed = patch_pos_embed.reshape(*new_grid_size, embed_dim).permute(
-        0, 3, 1, 2
-    )
+    patch_pos_embed = patch_pos_embed.reshape(*new_grid_size, embed_dim).permute(0, 3, 1, 2)
 
     patch_pos_embed = nn.functional.interpolate(
         patch_pos_embed,
@@ -263,11 +257,7 @@ class PatchEmbed(nn.Module):
         """
         B, C, T, H, W = x.shape
 
-        if (
-            T / self.patch_size[0] % 1
-            or H / self.patch_size[1] % 1
-            or W / self.patch_size[2] % 1
-        ):
+        if T / self.patch_size[0] % 1 or H / self.patch_size[1] % 1 or W / self.patch_size[2] % 1:
             warnings.warn(
                 f"Input {x.shape[-3:]} is not divisible by patch size {self.patch_size}."
                 f"The border will be ignored, add backbone_padding for pixel-wise tasks."
@@ -486,9 +476,7 @@ class PrithviViT(nn.Module):
         torch.nn.init.normal_(self.cls_token, std=0.02)
         self.apply(init_weights)
 
-    def interpolate_pos_encoding(
-        self, sample_shape: tuple[int, int, int]
-    ) -> torch.Tensor:
+    def interpolate_pos_encoding(self, sample_shape: tuple[int, int, int]) -> torch.Tensor:
         """Interpolate position encodings to match the input shape.
 
         Args:

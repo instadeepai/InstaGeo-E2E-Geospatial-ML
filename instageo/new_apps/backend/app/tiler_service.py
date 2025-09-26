@@ -52,8 +52,7 @@ class InstaGeoTilerService:
                             f"?url={task_id}_chips"
                         ),
                         "tilejson_url": (
-                            f"/api/titiler/WebMercatorQuad/tilejson.json"
-                            f"?url={task_id}_chips"
+                            f"/api/titiler/WebMercatorQuad/tilejson.json" f"?url={task_id}_chips"
                         ),
                         "preview_url": f"/api/titiler/preview.png?url={task_id}_chips",
                         "stats_url": f"/api/titiler/statistics?url={task_id}_chips",

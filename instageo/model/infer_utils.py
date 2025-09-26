@@ -91,9 +91,7 @@ def sliding_window_inference(
             batch_results = model.predict_step(batch_tensor).detach().cpu().numpy()
 
             for (x, y), result in zip(batch_coords, batch_results):
-                final_prediction[
-                    y : y + window_size[1], x : x + window_size[0]
-                ] = result
+                final_prediction[y : y + window_size[1], x : x + window_size[0]] = result
 
     return final_prediction
 
@@ -150,9 +148,7 @@ def chip_inference(
 
     with torch.no_grad():
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            for (data, _), file_names, nan_mask in tqdm(
-                dataloader, desc="Running Inference"
-            ):
+            for (data, _), file_names, nan_mask in tqdm(dataloader, desc="Running Inference"):
                 data = data.to(device)
                 prediction_batch = model(data)
 
@@ -188,9 +184,7 @@ def chip_inference(
                         output_folder,
                         profile,
                     )
-                    for prediction, file_name, profile in zip(
-                        predictions, file_names, profiles
-                    )
+                    for prediction, file_name, profile in zip(predictions, file_names, profiles)
                 ]
                 for future in futures:
                     future.result()

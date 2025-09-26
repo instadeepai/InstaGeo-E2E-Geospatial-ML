@@ -191,11 +191,7 @@ class RunningAUC:
     def _bin(self, score: float) -> int:
         """Convert a score to a bin index."""
         score = min(self.max_score, max(self.min_score, score))
-        return int(
-            (score - self.min_score)
-            / (self.max_score - self.min_score)
-            * (self.n_bins - 1)
-        )
+        return int((score - self.min_score) / (self.max_score - self.min_score) * (self.n_bins - 1))
 
     def update(self, y_true: np.ndarray, y_score: np.ndarray) -> None:
         """Update the AUC histograms with new predictions.
@@ -221,15 +217,11 @@ class RunningAUC:
             pos_mask = y_true == cls
             neg_mask = ~pos_mask
             if pos_mask.any():
-                pos_bins = np.fromiter(
-                    (self._bin(s) for s in cls_scores[pos_mask]), dtype=np.int32
-                )
+                pos_bins = np.fromiter((self._bin(s) for s in cls_scores[pos_mask]), dtype=np.int32)
                 np.add.at(self.pos_hist[cls], pos_bins, 1)
                 self.n_pos[cls] += pos_bins.size
             if neg_mask.any():
-                neg_bins = np.fromiter(
-                    (self._bin(s) for s in cls_scores[neg_mask]), dtype=np.int32
-                )
+                neg_bins = np.fromiter((self._bin(s) for s in cls_scores[neg_mask]), dtype=np.int32)
                 np.add.at(self.neg_hist[cls], neg_bins, 1)
                 self.n_neg[cls] += neg_bins.size
 

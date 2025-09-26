@@ -54,9 +54,7 @@ async def intercept_titiler_requests(
 ) -> Response:
     """Intercept TiTiler requests and map task_id to actual file paths."""
     # Check if this is a TiTiler request with task_id
-    if request.url.path.startswith("/api/titiler/") and "url=" in str(
-        request.query_params
-    ):
+    if request.url.path.startswith("/api/titiler/") and "url=" in str(request.query_params):
         url_param = request.query_params.get("url")
         if (
             not url_param.startswith("file://")
@@ -82,9 +80,7 @@ async def intercept_titiler_requests(
 
                 # Modify the request scope to update query string
                 request.scope["query_string"] = new_query.encode()
-                logger.info(
-                    f"Mapped task from {url_param} to file URL file://{cog_file}"
-                )
+                logger.info(f"Mapped task from {url_param} to file URL file://{cog_file}")
 
             except Exception as e:
                 logger.error(f"Failed to map task from {url_param} to file path: {e}")
@@ -372,14 +368,10 @@ async def health_check() -> Dict[str, Any]:
         try:
             redis_conn.ping()
             health_status["components"]["redis"]["status"] = "healthy"
-            health_status["components"]["redis"][
-                "message"
-            ] = "Redis connection successful"
+            health_status["components"]["redis"]["message"] = "Redis connection successful"
         except Exception as e:
             health_status["components"]["redis"]["status"] = "unhealthy"
-            health_status["components"]["redis"][
-                "message"
-            ] = f"Redis connection failed: {str(e)}"
+            health_status["components"]["redis"]["message"] = f"Redis connection failed: {str(e)}"
 
         # Check queue status
         try:
@@ -389,9 +381,7 @@ async def health_check() -> Dict[str, Any]:
             health_status["components"]["queues"]["details"] = queue_status
         except Exception as e:
             health_status["components"]["queues"]["status"] = "unhealthy"
-            health_status["components"]["queues"][
-                "message"
-            ] = f"Queue check failed: {str(e)}"
+            health_status["components"]["queues"]["message"] = f"Queue check failed: {str(e)}"
 
         # Check worker status (basic check)
         try:
@@ -401,9 +391,7 @@ async def health_check() -> Dict[str, Any]:
             vp_queue_length = len(visualization_preparation_queue)
 
             health_status["components"]["workers"]["status"] = "healthy"
-            health_status["components"]["workers"][
-                "message"
-            ] = "Workers can access queues"
+            health_status["components"]["workers"]["message"] = "Workers can access queues"
             health_status["components"]["workers"]["details"] = {
                 "data_processing_queue_length": dp_queue_length,
                 "model_prediction_queue_length": mp_queue_length,
@@ -411,14 +399,10 @@ async def health_check() -> Dict[str, Any]:
             }
         except Exception as e:
             health_status["components"]["workers"]["status"] = "unhealthy"
-            health_status["components"]["workers"][
-                "message"
-            ] = f"Worker check failed: {str(e)}"
+            health_status["components"]["workers"]["message"] = f"Worker check failed: {str(e)}"
 
         # Determine overall status based on component statuses
-        component_statuses = [
-            comp["status"] for comp in health_status["components"].values()
-        ]
+        component_statuses = [comp["status"] for comp in health_status["components"].values()]
 
         if any(status == "unhealthy" for status in component_statuses):
             health_status["status"] = "unhealthy"

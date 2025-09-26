@@ -96,9 +96,7 @@ class PrithviBaseModule(pl.LightningModule):
 
     def configure_optimizers(
         self,
-    ) -> Tuple[
-        List[torch.optim.Optimizer], List[torch.optim.lr_scheduler._LRScheduler]
-    ]:
+    ) -> Tuple[List[torch.optim.Optimizer], List[torch.optim.lr_scheduler._LRScheduler]]:
         """Configure the model's optimizers and learning rate schedulers.
 
         Returns:

@@ -180,9 +180,7 @@ def get_augmentations(cfg: DictConfig) -> Optional[List[Dict[str, Any]]]:
         if aug_name == "rotate":
             aug_config["parameters"]["degrees"] = aug_params["degrees"]
         elif aug_name == "brightness":
-            aug_config["parameters"]["brightness_range"] = aug_params[
-                "brightness_range"
-            ]
+            aug_config["parameters"]["brightness_range"] = aug_params["brightness_range"]
             aug_config["parameters"]["contrast_range"] = aug_params["contrast_range"]
         elif aug_name == "blur":
             aug_config["parameters"]["kernel_size"] = aug_params["kernel_size"]
@@ -196,9 +194,7 @@ def get_augmentations(cfg: DictConfig) -> Optional[List[Dict[str, Any]]]:
         augmentations.append(aug_config)
 
     if len(augmentations) == 0:
-        log.warning(
-            "No valid augmentations specified. No augmentations will be applied."
-        )
+        log.warning("No valid augmentations specified. No augmentations will be applied.")
         return None
 
     return augmentations
@@ -310,9 +306,7 @@ def create_instageo_dataset(
     )
 
 
-def init_neptune_logger(
-    cfg: DictConfig, test_filepath: str | None = None
-) -> AIchorNeptuneLogger:
+def init_neptune_logger(cfg: DictConfig, test_filepath: str | None = None) -> AIchorNeptuneLogger:
     """Initialize Neptune logger with common parameters.
 
     Args:
@@ -325,15 +319,11 @@ def init_neptune_logger(
     neptune_run = neptune.init_run(
         api_token=set_neptune_api_token(),
         project=os.environ["NEPTUNE_PROJECT"],
-        with_id=(
-            cfg.neptune_experiment_id if hasattr(cfg, "neptune_experiment_id") else None
-        ),
+        with_id=(cfg.neptune_experiment_id if hasattr(cfg, "neptune_experiment_id") else None),
     )
 
     if test_filepath:
-        neptune_run = neptune_run[
-            f"eval-{os.path.splitext(os.path.basename(test_filepath))[0]}"
-        ]
+        neptune_run = neptune_run[f"eval-{os.path.splitext(os.path.basename(test_filepath))[0]}"]
     neptune_logger = AIchorNeptuneLogger(run=neptune_run, log_model_checkpoints=False)
     neptune_logger.experiment["config"] = stringify_unsupported(OmegaConf.to_yaml(cfg))
     return neptune_logger
@@ -430,9 +420,7 @@ def main(cfg: DictConfig) -> None:
             shuffle=True,
             num_workers=cfg.dataloader.num_workers,
         )
-        mean, std, class_weights = compute_stats(
-            train_loader, is_reg_task=cfg.is_reg_task
-        )
+        mean, std, class_weights = compute_stats(train_loader, is_reg_task=cfg.is_reg_task)
         print(json.dumps({"mean": mean, "std": std, "class_weights": class_weights}))
         exit(0)
     model = create_model(cfg)
@@ -555,9 +543,7 @@ def main(cfg: DictConfig) -> None:
             with open(os.path.join(infer_filepath)) as json_file:
                 hls_dataset = json.load(json_file)
 
-            for key, hls_tile_path in tqdm(
-                hls_dataset.items(), desc="Processing HLS Dataset"
-            ):
+            for key, hls_tile_path in tqdm(hls_dataset.items(), desc="Processing HLS Dataset"):
                 try:
                     hls_tile, _ = process_data(
                         hls_tile_path,

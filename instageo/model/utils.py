@@ -78,14 +78,10 @@ def patch_embed_weights_are_compatible(
         return False
 
     model_shape = [
-        model_patch_embed.shape[i]
-        for i in range(len(model_patch_embed.shape))
-        if i != 1
+        model_patch_embed.shape[i] for i in range(len(model_patch_embed.shape)) if i != 1
     ]
     checkpoint_shape = [
-        checkpoint_patch_embed.shape[i]
-        for i in range(len(checkpoint_patch_embed.shape))
-        if i != 1
+        checkpoint_patch_embed.shape[i] for i in range(len(checkpoint_patch_embed.shape)) if i != 1
     ]
     return model_shape == checkpoint_shape
 
@@ -166,9 +162,7 @@ def get_proj_key(state_dict: dict, return_prefix: bool = False) -> Tuple:
     proj_key = None
 
     for key in state_dict.keys():
-        if key.endswith("patch_embed.proj.weight") or key.endswith(
-            "patch_embed.projection.weight"
-        ):
+        if key.endswith("patch_embed.proj.weight") or key.endswith("patch_embed.projection.weight"):
             proj_key = key
             break
 
@@ -258,12 +252,8 @@ def select_patch_embed_weights(
             torch.nn.init.xavier_uniform_(temp_weight.view([temp_weight.shape[0], -1]))
             for index, band in enumerate(model_bands):
                 if band in pretrained_bands:
-                    logging.info(
-                        f"Loaded weights for {band} in position {index} of patch embed"
-                    )
-                    temp_weight[:, index] = patch_embed_weight[
-                        :, pretrained_bands.index(band)
-                    ]
+                    logging.info(f"Loaded weights for {band} in position {index} of patch embed")
+                    temp_weight[:, index] = patch_embed_weight[:, pretrained_bands.index(band)]
         else:
             log.warning(
                 f"Incompatible shapes between patch embedding of model {temp_weight.shape} and\
@@ -314,17 +304,13 @@ def checkpoint_filter_fn_vit(
             continue
 
         if k.startswith("encoder."):
-            clean_dict[
-                k.replace("encoder.", "")
-            ] = v  # Convert Prithvi MAE to Prithvi ViT
+            clean_dict[k.replace("encoder.", "")] = v  # Convert Prithvi MAE to Prithvi ViT
         else:
             clean_dict[k] = v
 
     state_dict = clean_dict
 
-    state_dict = select_patch_embed_weights(
-        state_dict, model, pretrained_bands, model_bands
-    )
+    state_dict = select_patch_embed_weights(state_dict, model, pretrained_bands, model_bands)
 
     return state_dict
 
@@ -355,9 +341,7 @@ class CarbonTrackerCallback(Callback):
             measure_power_secs=5, tracking_mode="machine", log_level="error"
         )
 
-    def on_train_epoch_start(
-        self, trainer: Trainer, pl_module: LightningModule
-    ) -> None:
+    def on_train_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Start carbon tracking for a training epoch."""
         self.tracker.start()
 

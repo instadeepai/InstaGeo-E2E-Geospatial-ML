@@ -338,9 +338,7 @@ def clean_data(
                 observation_points = None
                 if observation_points_csv:
                     observation_points = pd.read_csv(observation_points_csv)
-                    if not all(
-                        col in observation_points.columns for col in ["x", "y", "date"]
-                    ):
+                    if not all(col in observation_points.columns for col in ["x", "y", "date"]):
                         raise ValueError(
                             "Observation points CSV must contain 'x', 'y', and 'date' columns"
                         )
@@ -348,9 +346,7 @@ def clean_data(
                     if "mgrs_tile_id" not in observation_points.columns:
                         mgrs_object = MGRS()
                         observation_points["mgrs_tile_id"] = observation_points.apply(
-                            lambda row: mgrs_object.toMGRS(
-                                row["y"], row["x"], MGRSPrecision=0
-                            ),
+                            lambda row: mgrs_object.toMGRS(row["y"], row["x"], MGRSPrecision=0),
                             axis=1,
                         )
                     df["Label"] = df["Label"].apply(

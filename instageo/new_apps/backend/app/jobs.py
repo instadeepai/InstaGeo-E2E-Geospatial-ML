@@ -23,9 +23,7 @@ redis_conn: Any = redis.Redis(
 # Initialize RQ queues for the two-stage pipeline
 data_processing_queue = Queue(DATA_PROCESSING_QUEUE_NAME, connection=redis_conn)
 model_prediction_queue = Queue(MODEL_PREDICTION_QUEUE_NAME, connection=redis_conn)
-visualization_preparation_queue = Queue(
-    VISUALIZATION_PREPARATION_QUEUE_NAME, connection=redis_conn
-)
+visualization_preparation_queue = Queue(VISUALIZATION_PREPARATION_QUEUE_NAME, connection=redis_conn)
 
 
 class JobType:

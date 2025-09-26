@@ -1,6 +1,10 @@
 [tool.isort]
 profile = "black"
 
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
 [tool.mypy]
 python_version = "3.10"
 namespace_packages = true

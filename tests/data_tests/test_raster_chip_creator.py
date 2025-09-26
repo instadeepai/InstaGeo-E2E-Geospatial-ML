@@ -162,9 +162,7 @@ def test_main_hls_pipeline_existing_dataset(
     mock_pipeline.return_value = mock_pipeline_instance
 
     # Create existing dataset files
-    with open(
-        os.path.join(setup_and_teardown_output_dir, "hls_dataset.json"), "w"
-    ) as f:
+    with open(os.path.join(setup_and_teardown_output_dir, "hls_dataset.json"), "w") as f:
         import json
 
         json.dump(mock_hls_dataset, f)

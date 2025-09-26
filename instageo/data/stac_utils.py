@@ -84,9 +84,7 @@ def is_daytime(item: Item) -> bool:
     if item_datetime is pd.NaT or item_datetime is None:
         return False
     centroid = box(*item.bbox).centroid
-    city = LocationInfo(
-        "Unknown", "Unknown", "UTC", latitude=centroid.y, longitude=centroid.x
-    )
+    city = LocationInfo("Unknown", "Unknown", "UTC", latitude=centroid.y, longitude=centroid.x)
     s = sun(city.observer, date=item_datetime)
     return s["sunrise"] <= item_datetime <= s["sunset"]
 
@@ -149,9 +147,7 @@ def dispatch_candidate_items(
     # Group matches
     obs[candidate_items_field] = (
         matches.groupby(matches.index)
-        .agg(
-            {"index_right": lambda indices: [tile_candidate_items[i] for i in indices]}
-        )
+        .agg({"index_right": lambda indices: [tile_candidate_items[i] for i in indices]})
         .reindex(obs.index, fill_value=[])
     )
     return obs
@@ -231,9 +227,7 @@ def get_raster_tile_info(
         A `tile_info` dataframe and a list of `tile_queries`
     """
     push_max_date_to_end_of_day = "time" not in data.columns
-    df = data[["mgrs_tile_id", "input_features_date", "geometry_4326"]].reset_index(
-        drop=True
-    )
+    df = data[["mgrs_tile_id", "input_features_date", "geometry_4326"]].reset_index(drop=True)
     tile_queries: List[Tuple[str, List[str]]] = []
     tile_info: List[Any] = []
     for _, (tile_id, date, geom) in df.iterrows():
@@ -260,9 +254,9 @@ def get_raster_tile_info(
         .reset_index()
     )
     tile_info_df[["min_date", "max_date"]] = tile_info_df["date"].apply(pd.Series)
-    tile_info_df[["lon_min", "lat_min", "lon_max", "lat_max"]] = tile_info_df[
-        "geometry"
-    ].apply(lambda geom: pd.Series(geom.bounds))
+    tile_info_df[["lon_min", "lat_min", "lon_max", "lat_max"]] = tile_info_df["geometry"].apply(
+        lambda geom: pd.Series(geom.bounds)
+    )
 
     # Convert temporal tolerance to total days including minutes
     total_temporal_tol = temporal_tolerance + (temporal_tolerance_minutes / (24 * 60))
@@ -270,13 +264,9 @@ def get_raster_tile_info(
     tile_info_df["max_date"] += pd.Timedelta(days=total_temporal_tol)
     tile_info_df["min_date"] = tile_info_df["min_date"].dt.strftime("%Y-%m-%dT%H:%M:%S")
     if push_max_date_to_end_of_day:
-        tile_info_df["max_date"] = tile_info_df["max_date"].dt.strftime(
-            "%Y-%m-%dT23:59:59"
-        )
+        tile_info_df["max_date"] = tile_info_df["max_date"].dt.strftime("%Y-%m-%dT23:59:59")
     else:
-        tile_info_df["max_date"] = tile_info_df["max_date"].dt.strftime(
-            "%Y-%m-%dT%H:%M:%S"
-        )
+        tile_info_df["max_date"] = tile_info_df["max_date"].dt.strftime("%Y-%m-%dT%H:%M:%S")
     tile_info_df = tile_info_df[
         ["tile_id", "min_date", "max_date", "lon_min", "lon_max", "lat_min", "lat_max"]
     ]
@@ -308,28 +298,21 @@ def create_records_with_items(
         obsvs = best_items[tile_id]
         obsvs[granules_field] = obsvs.apply(
             lambda obsv: [
-                item.id if isinstance(item, Item) else None
-                for item in obsv[items_field]
+                item.id if isinstance(item, Item) else None for item in obsv[items_field]
             ],
             axis=1,
         )
         obsvs = obsvs[
-            obsvs.apply(
-                partial(is_valid_dataset_entry, item_id_field=granules_field), axis=1
-            )
+            obsvs.apply(partial(is_valid_dataset_entry, item_id_field=granules_field), axis=1)
         ]
         obsvs["stac_items_str"] = obsvs[granules_field].apply(lambda x: "_".join(x))
         for _, obsv in obsvs.drop_duplicates(subset=[granules_field]).iterrows():
             dataset[obsv["stac_items_str"]] = {
                 "granules": [item.to_dict() for item in obsv[items_field]]
             }
-        obsvs = obsvs.drop(
-            ["geometry_4326", items_field, "tile_queries", granules_field], axis=1
-        )
+        obsvs = obsvs.drop(["geometry_4326", items_field, "tile_queries", granules_field], axis=1)
         records_with_items.append(obsvs)
-    filtered_records = pd.concat(records_with_items, ignore_index=True).set_geometry(
-        "geometry"
-    )
+    filtered_records = pd.concat(records_with_items, ignore_index=True).set_geometry("geometry")
     return filtered_records, dataset
 
 
@@ -460,9 +443,7 @@ def find_best_items(
             ),
             axis=1,
         )
-        best_items[tile_id] = tile_obsvs_with_items.drop(
-            columns=[candidate_items_field]
-        )
+        best_items[tile_id] = tile_obsvs_with_items.drop(columns=[candidate_items_field])
     return best_items
 
 
