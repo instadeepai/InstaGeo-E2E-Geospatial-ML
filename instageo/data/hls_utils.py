@@ -396,7 +396,7 @@ class HLSRasterPipeline(BaseRasterDataPipeline):
                         logging.warning(f"Skipping {label_filename} due to empty label")
                         return None
                 seg_map = seg_map.where(~np.isnan(seg_map), NO_DATA_VALUES.SEG_MAP).astype(
-                    np.uint8 if self.task_type == "seg" else np.float32
+                    np.int8 if self.task_type == "seg" else np.float32
                 )
                 chip = chip.where(~np.isnan(chip), NO_DATA_VALUES.HLS).astype(np.uint16)
 

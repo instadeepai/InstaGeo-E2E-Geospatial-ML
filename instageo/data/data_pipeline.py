@@ -54,6 +54,15 @@ DATA_PIPELINE_SETTINGS = DataPipelineSettings()
 MPC_STAC_API_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
 
+def assert_in_dtype_range(value: int, dtype: np.dtype) -> None:
+    """Raise AssertionError if value is not representable in dtype."""
+    info = np.iinfo(dtype) if np.issubdtype(dtype, np.integer) else np.finfo(dtype)
+    assert info.min <= value <= info.max, (
+        f"Value {value} is out of range for dtype {dtype} "
+        f"(valid range: {info.min} to {info.max})"
+    )
+
+
 def mask_segmentation_map(
     chip: xr.DataArray,
     seg_map: xr.DataArray,
@@ -77,12 +86,14 @@ def mask_segmentation_map(
         The segmentation map after masking
     """
     if masking_strategy == "each":
-        valid_mask = (chip != chip_no_data_value).any(dim="band").astype(np.uint16)
+        valid_mask = (chip != chip_no_data_value).any(dim="band").astype(seg_map.dtype)
     elif masking_strategy == "any":
-        valid_mask = (chip != chip_no_data_value).all(dim="band").astype(np.uint16)
+        valid_mask = (chip != chip_no_data_value).all(dim="band").astype(seg_map.dtype)
     else:
         raise ValueError(f"Invalid masking strategy: {masking_strategy}")
+
     seg_no_data_value = NO_DATA_VALUES.SEG_MAP
+    assert_in_dtype_range(seg_no_data_value, seg_map.dtype)
     seg_map = seg_map.where(valid_mask, seg_no_data_value)
     return seg_map
 

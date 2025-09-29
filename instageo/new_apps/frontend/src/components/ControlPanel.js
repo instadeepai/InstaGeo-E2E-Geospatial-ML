@@ -10,6 +10,7 @@ import { DEFAULT_TASK_PARAMS, PARAMS_HELP, LOGO_PATHS } from '../constants';
 import { logger } from '../utils/logger';
 import { INSTAGEO_BACKEND_API_ENDPOINTS } from '../config';
 import { fetchModelsWithTTL, clearModelsCache } from '../utils/modelsCache';
+import ProfileMenu from './ProfileMenu';
 
 const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing, appTheme }) => {
 
@@ -29,6 +30,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
   });
 
 
+
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -39,6 +41,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
         setModels(data || []);
       } catch (e) {
         logger.warn('Failed to load models:', e);
+        if (mounted) setModels([]);
       } finally {
         if (mounted) setLoadingModels(false);
       }
@@ -57,6 +60,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
       setModels(data || []);
     } catch (e) {
       logger.warn('Failed to reload models:', e);
+      setModels([]);
     } finally {
       setLoadingModels(false);
     }
@@ -70,9 +74,11 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
 
   const modelsByKey = useMemo(() => {
     const map = {};
-    for (const m of models) {
-      if (!map[m.model_key]) map[m.model_key] = [];
-      map[m.model_key].push(m);
+    if (models && Array.isArray(models)) {
+      for (const m of models) {
+        if (!map[m.model_key]) map[m.model_key] = [];
+        map[m.model_key].push(m);
+      }
     }
     return map;
   }, [models]);
@@ -154,10 +160,9 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
           />
         </Box>
 
-        <Typography variant="h6" sx={{
-          mb: 2,
-          textAlign: 'center'
-        }}>
+        <ProfileMenu appTheme={appTheme} />
+
+        <Typography variant="h6" sx={{ mb: 2, color: '#1E88E5', textAlign: 'center' }}>
           Parameters
         </Typography>
 
@@ -456,6 +461,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
           )}
         </Button>
       </Box>
+
     </Drawer>
   );
 };

@@ -22,8 +22,18 @@ It leverages the [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-10
 
 To get started with InstaGeo, ensure you have Python installed on your system. Then, execute the following command in your terminal or command prompt to install InstaGeo:
 
+If you do not already have uv installed, install it with pip or see other installation [options](https://docs.astral.sh/uv/getting-started/installation/)
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh # (Linux/macOS)
+```
+
 ```bash
-pip install instageo
+cd InstaGeo # cd into instaGeo project root
+uv venv # create a virtual environment
+source .venv/bin/activate  # (Linux/macOS)
+.venv\Scripts\activate     # (Windows)
+
+uv sync --group all --locked --extra cpu
 ```
 This command will download and install the latest version of InstaGeo along with its required dependencies.
 
@@ -31,7 +41,6 @@ This command will download and install the latest version of InstaGeo along with
 After installation, you may want to verify that InstaGeo has been correctly installed and is functioning as expected. To do this, run the included test suite with the following commands:
 
 ```bash
-export PYTHONPATH=$PYTHONPATH:$(pwd)
 pytest --verbose .
 ```
 ## Usage
@@ -94,7 +103,7 @@ The `model_registry_sync.sh` script downloads pre-trained models and their confi
 
 **Usage**:
 ```bash
-./instageo/model/registry/model_registry_sync.sh <gs://path/to/registry_file.yaml> <CHECKPOINT_DIR>
+./instageo/model/registry/model_registry_sync.sh <gs://path/to/registry_file.yaml> <MODELS_DESTINATION_PATH>
 ```
 
 **Example**:
@@ -276,15 +285,8 @@ python -m instageo.model.run --config-name=locust \
     mode=sliding_inference
 ```
 
-#### Visualize Predictions
-- Run InstaGeo Serve
-```bash
-cd instageo/apps
-streamlit run app.py
-```
-- Specify the directory containing the predictions.
-
-![InstaGeo Serve](assets/instageo_serve.png)
+#### Instageo Web Application
+- [Setup and Run InstaGeo web application](instageo/new_apps/README.md)
 
 
 ## Contributing

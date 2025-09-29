@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Box, Typography, useTheme } from '@mui/material';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import { BASE_MAP_CONFIG, DARK_MODE_MAP_FILTER, APP_THEMES } from '../constants';
 
 const BoundingBoxSnapshot = ({ bbox, taskId }) => {

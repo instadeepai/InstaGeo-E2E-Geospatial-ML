@@ -82,7 +82,7 @@ def test_segmentation_map_masking():
     seg_map_path = "tests/data/chip_178_022.mask.tif"
     chip_no_data_value = -9999
     chip = rioxarray.open_rasterio(chip_path)
-    seg_map = rioxarray.open_rasterio(seg_map_path)
+    seg_map = rioxarray.open_rasterio(seg_map_path).astype(chip.dtype)
     seg_map = seg_map.assign_coords(x=chip.x.values, y=chip.y.values)
     seg_map = mask_segmentation_map(chip, seg_map, chip_no_data_value)
     assert seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values == 0

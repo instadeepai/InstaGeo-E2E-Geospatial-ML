@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
 # Example usage:
-# ./model_registry_sync.sh gs://path/to/models_registry.yaml /path/to/checkpoint_dir
+# ./model_registry_sync.sh gs://path/to/models_registry.yaml /path/to/models_destination_path
 # This will sync the checkpoint and .hydra directory from the GCS folder to the local directory
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: $0 <gs://path/to/models_registry.yaml> <CHECKPOINT_DIR>"
+  echo "Usage: $0 <gs://path/to/models_registry.yaml> <MODELS_DESTINATION_PATH>"
   exit 1
 fi
 
@@ -13,7 +13,7 @@ fi
 gsutil cp "$1" models_registry.yaml
 
 MODELS_YAML="models_registry.yaml"
-CHECKPOINT_DIR="$2"
+MODELS_DESTINATION_PATH="$2"
 
 yq -r '
   .models
@@ -29,7 +29,7 @@ yq -r '
     continue
   fi
 
-  DEST_DIR="${CHECKPOINT_DIR}/${MODEL_KEY}/${SIZE}"
+  DEST_DIR="${MODELS_DESTINATION_PATH}/${MODEL_KEY}/${SIZE}"
   echo "Syncing ${GCS_FOLDER} -> ${DEST_DIR}"
   mkdir -p "${DEST_DIR}"
 

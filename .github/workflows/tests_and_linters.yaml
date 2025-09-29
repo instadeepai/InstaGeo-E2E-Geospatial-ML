@@ -4,35 +4,47 @@ on: [push, pull_request]
 
 jobs:
   tests-and-linters:
-    name: "Python 3.10 on instadeep-ci"
+    name: "Python 3.11 on instadeep-ci"
     runs-on: instadeep-ci
     container:
-      image:  python:3.10
+      image: python:3.11
 
     steps:
-      - name: Install dependencies for viewer test
-        run: apt-get update && apt-get install -y xvfb redis-server
-      - name: Checkout your repo 📦
-        uses: actions/checkout@v3
-
-      - name: Install python dependencies 🔧
+      - name: Install OS dependencies
         run: |
-          pip install pip==25.0.1
-          pip install -r requirements.txt \
-          -r instageo/model/requirements.txt \
-          -r instageo/data/requirements.txt \
-          -r instageo/apps/requirements.txt \
-          -r instageo/new_apps/backend/requirements.txt
+          apt-get update
+          apt-get install -y --no-install-recommends xvfb redis-server curl ca-certificates
+          rm -rf /var/lib/apt/lists/*
+      - name: Checkout repo 📦
+        uses: actions/checkout@v5
 
-      - run: git config --system --add safe.directory $GITHUB_WORKSPACE
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set uv environment variables
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "UV_LINK_MODE=copy" >> $GITHUB_ENV
+          echo "UV_SYSTEM_PYTHON=false" >> $GITHUB_ENV
+
+      - name: Install project dependencies and activate venv
+        run: |
+          uv sync --locked --group all --extra cpu
+          # Activate the virtual environment by adding it to PATH
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+          echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> $GITHUB_ENV
+
+      - name: Git safe.directory
+        run: git config --system --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Run linters 🖌️
-        run: pre-commit run --all-files --verbose
+        run: which python && pre-commit run --all-files --verbose
+
       - name: Start Redis service
         run: |
           redis-server --daemonize yes
           redis-cli ping
-      - name: Set PYTHONPATH
-        run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
+
       - name: Run tests 🧪
         env:
           EARTHDATA_USERNAME: ${{ secrets.EARTHDATA_USERNAME }}
@@ -40,6 +52,5 @@ jobs:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
           REDIS_DB: 0
+
         run: pytest --cov --cov-config=.coveragerc --cov-report=html --cov-report=term-missing --cov-fail-under=50 -m "not auth"
-#      - name: Test build docs 📖
-#        run: mkdocs build --verbose --site-dir docs_public

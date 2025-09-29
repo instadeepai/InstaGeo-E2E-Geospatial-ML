@@ -92,7 +92,7 @@ def chip_inference(
                     prediction_batch = prediction_batch.cpu().numpy().squeeze(1)
                 else:
                     prediction_batch = (
-                        torch.argmax(prediction_batch, dim=1).cpu().numpy().astype(np.uint8)
+                        torch.argmax(prediction_batch, dim=1).cpu().numpy().astype(np.int8)
                     )
 
                 profiles = []
@@ -101,8 +101,8 @@ def chip_inference(
                         profile = src.profile
                         profile.update(
                             count=1,
-                            dtype=rasterio.uint8
-                            if prediction_batch.dtype == np.uint8
+                            dtype=rasterio.int8
+                            if prediction_batch.dtype == np.int8
                             else rasterio.float32,
                         )
                         profiles.append(profile)

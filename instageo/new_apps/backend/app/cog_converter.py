@@ -203,7 +203,7 @@ class COGConverter:
             pred_cog = Path(pred_cog_path)
             with rasterio.open(pred_cog) as src:
                 band = src.read(1, masked=True)
-                valid_vals = band.compressed().astype(np.uint8)  # Ensure uint8 for class indices
+                valid_vals = band.compressed().astype(np.int8)  # Ensure np.int8 for class indices
                 total_valid = int(valid_vals.size)
                 class_counts: Dict[str, int] = {}
                 if total_valid > 0:

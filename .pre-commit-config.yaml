@@ -15,11 +15,11 @@
 
 default_stages: ["pre-commit", "commit-msg", "pre-push"]
 default_language_version:
-  python: python3.10
+  python: python3.11
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -54,7 +54,7 @@ repos:
         args:
           [
             "--max-line-length=100",
-            "--extend-ignore=E203,BLK100",
+            "--extend-ignore=E203,W503,E731",
             "--exclude=*tests*",
           ]
 
@@ -63,7 +63,7 @@ repos:
     hooks:
       - id: mypy
         exclude: ^docs/|test
-        args: [--config-file=setup.cfg]
+        args: [--config-file=pyproject.toml]
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.0.0

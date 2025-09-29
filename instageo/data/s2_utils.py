@@ -415,7 +415,7 @@ def create_mask_from_scl(
     Returns:
         Xarray dataset or dataarray containing the produced mask.
     """
-    return scl_data.isin(class_ids).astype(np.uint8)
+    return scl_data.isin(class_ids).astype(np.int8)
 
 
 def process_s2_metadata(metadata: dict, tile_id: str) -> pd.DataFrame:
