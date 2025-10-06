@@ -17,14 +17,14 @@ Sentinel-1, part of [ESA](https://www.esa.int/)'s [Copernicus Program](https://w
 
 ## Requirements
 - Python >= 3.10
-- Required Python libraries listed in `requirements.txt`
+- Install dependencies using uv (recommended)
 - Ensure that wget is installed on your system
 
 ## Installation
-Ensure that Python 3.10 and all required libraries are installed. You can install the required libraries using pip:
+Ensure that Python 3.10 is installed. Install InstaGeo data dependencies using uv:
 
 ```bash
-pip install -r requirements.txt
+uv sync --locked --extra data --extra cpu
 ```
 ## Authentication
 ### Harmonized Landsat Sentinel - HLS
@@ -281,3 +281,42 @@ python raster_chip_creator.py \
  --output_dir /path/to/output \
  --chip_size 256
 ```
+
+## Advanced Usage
+
+### Multi-Source Data Retrieval
+InstaGeo efficiently searches for and downloads multi-spectral earth observation images from:
+- **HLS (Harmonized Landsat Sentinel-2)**: 30m resolution, 2-3 day temporal coverage
+- **Sentinel-2**: 10-60m resolution, 5-day revisit time, 13 spectral bands
+- **Sentinel-1**: C-band SAR imagery for all-weather monitoring
+
+### Advanced Data Processing Features
+- **Automated Chip Creation**: Break down large satellite tiles into ML-ready patches with configurable sizes
+- **Segmentation Map Generation**: Pixel-level categorization for training targets
+- **Quality Assessment**: Built-in cloud masking, data validation, and filtering
+- **Temporal Alignment**: Multi-temporal data stacking with configurable temporal tolerance
+
+### Scalable Pipeline Architecture
+- **Dask Integration**: Distributed processing for large-scale data operations
+- **Configurable Settings**: Environment-based configuration for GDAL options, API endpoints, and processing parameters
+- **Authentication Management**: Seamless integration with NASA EarthData and Copernicus Data Space Ecosystem
+
+### Data Cleaning and Validation
+Advanced data cleaning capabilities with customizable strategies for handling no-data values, cloud coverage, and observation quality.
+
+## Best Practices
+
+### Performance Optimization
+- Use appropriate `batch_size` for your system's memory capacity
+- Configure `temporal_tolerance` based on your data requirements
+- Leverage Dask for distributed processing of large datasets
+
+### Quality Control
+- Always validate downloaded data before processing
+- Use appropriate masking strategies for your use case
+- Monitor cloud coverage thresholds for optical imagery
+
+### Storage Management
+- Organize output directories by date and data source
+- Implement cleanup strategies for temporary files
+- Consider compression for long-term storage of processed chips

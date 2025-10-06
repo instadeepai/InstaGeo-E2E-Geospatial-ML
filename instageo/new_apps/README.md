@@ -39,11 +39,34 @@ A complete geospatial analysis platform with React frontend and FastAPI backend,
 ### Prerequisites
 - Docker and Docker Compose
 
-### Start the Application
-```bash
-cd instageo/new_apps
-./start.sh
-```
+### Starting the Application
+
+1. **Configure Environment Variables**
+
+   Copy the example environment file and update it with your settings:
+   ```bash
+   cp instageo/new_apps/config.env.example instageo/new_apps/config.env
+   # Edit instageo/new_apps/config.env to set your configuration (e.g., credentials, ports, etc.)
+   ```
+
+2. **Launch the Full Stack**
+
+   **Option 1: Using the deployment script (recommended)**
+   ```bash
+   # From project root directory
+   export STAGE=dev
+   ./scripts/deploy.sh --skip-registry-sync  # Quick local development
+
+   # For production with Cloudflare tunnel
+   export STAGE=prod
+   ./scripts/deploy.sh --cloudflare
+   ```
+
+   The script will:
+   - Load your environment variables
+   - Build and start all Docker services
+   - Set up Cloudflare tunnel (if `--cloudflare` flag is used)
+   - Print useful commands for monitoring and scaling
 
 The application will be available at:
 - **Frontend**: http://localhost
@@ -150,10 +173,10 @@ Before running the deployment script, you must configure Cloudflare Tunnels:
 Navigate at the root directory of the project and run
 ```bash
 # Deploy with Cloudflare tunnel
-./deploy.sh
+./scripts/deploy.sh
 
 # Deploy without Cloudflare tunnel
-./deploy.sh --skip-cloudflare
+./scripts/deploy.sh --skip-cloudflare
 ```
 
 ## Monitoring
@@ -241,7 +264,6 @@ InstaGeo/                           # Root project directory
 │       │   ├── tests/             # Backend tests
 │       │   │   └── test_api.py    # API endpoint tests
 │       │   ├── Dockerfile         # Backend container
-│       │   ├── requirements.txt   # Python dependencies
 │       │   ├── config.env.example # Environment template
 │       │   └── README.md          # Backend documentation
 │       ├── frontend/              # React frontend
@@ -269,4 +291,106 @@ InstaGeo/                           # Root project directory
 ├── tests/                          # Project tests
 │   └── ...
 └── ...                             # Other project files
+```
+
+## Detailed Features
+
+### Frontend Features
+- **Interactive Mapping**: Leaflet-based map interface with drawing tools for bounding box creation
+- **Real-time Validation**: Area calculation and constraint validation
+- **Task Management**: Comprehensive task monitoring with filtering and pagination
+- **Dark/Light Theme**: Toggle between themes with consistent styling
+- **Model Selection**: Dynamic model configuration with parameter adjustment
+- **Progress Tracking**: Real-time status updates with detailed stage information
+- **PDF Generation**: Export task results with charts and map visualizations
+
+### Backend Architecture
+- **Task-Based System**: Two-stage processing (data extraction + model prediction)
+- **RESTful API**: FastAPI-based endpoints for task management
+- **Job Queue Management**: Redis-backed queues with RQ (Redis Queue)
+- **Worker Scaling**: Separate workers for data processing and model prediction
+- **Model Registry**: Integrated model management and metadata system
+- **TiTiler Integration**: Dynamic tile serving for geospatial data visualization
+
+### Key Features
+- **Containerized Deployment**: Docker Compose for easy setup and scaling
+- **Production Ready**: Nginx reverse proxy, Cloudflare tunnel support
+- **Monitoring Dashboard**: RQ Dashboard for queue and worker monitoring
+- **Hot Reload**: Development mode with live code updates
+- **Error Handling**: Comprehensive error tracking and recovery
+
+## Using the Web Interface
+
+1. **Draw Bounding Box**: Use the map interface to draw rectangular areas of interest
+2. **Select Model**: Choose from available geospatial models (AOD estimation, flood detection, etc.)
+3. **Configure Parameters**: Set date, cloud coverage, and processing parameters
+4. **Submit Task**: Start data processing and model prediction
+5. **Monitor Progress**: Track task status in real-time
+6. **View Results**: Visualize predictions on the map and download PDF reports
+
+## API Usage
+
+### Task Management Endpoints
+
+#### Create Task
+```bash
+POST /api/run-model
+{
+  "bboxes": [
+    [116.0, 39.0, 116.5, 39.5],
+    [-74.1, 40.6, -73.9, 40.8]
+  ],
+  "model_key": "aod_estimation",
+  "model_size": "tiny",
+  "date": "2024-06-01",
+  "cloud_coverage": 15,
+  "temporal_tolerance": 3
+}
+```
+
+#### Check Task Status
+```bash
+GET /api/task/{task_id}
+```
+
+#### Get All Tasks
+```bash
+GET /api/tasks
+```
+
+### Health & Monitoring
+```bash
+GET /api/health        # Health check
+GET /api/queues/status # Queue status
+```
+
+## Task System Details
+
+- When you submit a task via `/api/run-model`, the backend creates a new task with a unique ID and enqueues a data processing job
+- When data processing completes, a model prediction job is automatically enqueued and linked to the same task
+- Task status and results are stored in Redis and can be queried at any time
+
+**Task Status Values:**
+- `data_processing`: Task is processing satellite data
+- `model_prediction`: Task is running model predictions
+- `completed`: Task finished successfully
+- `failed`: Task encountered an error
+
+## Performance and Scaling
+
+### Worker Configuration
+Configure worker replicas in `config.env`:
+```bash
+DATA_PROCESSING_WORKER_REPLICAS=1
+MODEL_PREDICTION_WORKER_REPLICAS=1
+VISUALIZATION_PREPARATION_WORKER_REPLICAS=1
+```
+
+### Scaling Commands
+```bash
+# Scale data processing workers
+docker compose up -d --scale instageo-backend-data-processing-worker=4
+
+# Scale model prediction workers
+docker compose up -d --scale instageo-backend-model-prediction-worker=4
 ```

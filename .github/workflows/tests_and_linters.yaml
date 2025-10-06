@@ -29,7 +29,7 @@ jobs:
 
       - name: Install project dependencies and activate venv
         run: |
-          uv sync --locked --group all --extra cpu
+          uv sync --locked --extra all --extra cpu --extra dev
           # Activate the virtual environment by adding it to PATH
           echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
           echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> $GITHUB_ENV

@@ -122,7 +122,6 @@ test_*
 *_test.py
 
 # Experiments
-experiments/
 outputs/
 results/
 

@@ -20,6 +20,17 @@ if [ ! -f "$COMPOSE_FILE" ]; then
     exit 1
 fi
 
+# Load environment variables from config.env
+if [ ! -f "instageo/new_apps/config.env" ]; then
+    echo "❌ config.env not found at instageo/new_apps/config.env"
+    exit 1
+fi
+
+echo "🔑 Loading environment from config.env"
+set -a
+source instageo/new_apps/config.env
+set +a
+
 # Enable Docker Compose Bake for better build performance
 export COMPOSE_BAKE=true
 
@@ -48,7 +59,7 @@ else
 fi
 
 # Build and start services with appropriate profile
-docker compose -f $COMPOSE_FILE --profile $COMPOSE_PROFILES build --no-cache
+docker compose -f $COMPOSE_FILE --profile $COMPOSE_PROFILES build # --no-cache
 docker compose -f $COMPOSE_FILE --profile $COMPOSE_PROFILES up -d
 
 # Wait for services to be ready

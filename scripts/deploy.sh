@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Usage: ./deploy.sh [--registry-sync-only] [--skip-registry-sync]
+# Usage: ./deploy.sh [--registry-sync-only] [--skip-registry-sync] [--cloudflare]
 # --registry-sync-only: Only sync model registry
 # --skip-registry-sync: Skip model registry sync
-# --skip-cloudflare: Skip Cloudflare Tunnel creation
+# --cloudflare: Enable Cloudflare Tunnel creation
 
 # Exit on error
 set -e
@@ -12,12 +12,12 @@ echo "🚀 Starting InstaGeo deployment..."
 # Parse arguments
 REGISTRY_SYNC_ONLY=false
 SKIP_REGISTRY_SYNC=false
-SKIP_CLOUDFLARE=false
+SKIP_CLOUDFLARE=true
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --registry-sync-only) REGISTRY_SYNC_ONLY=true ;;
         --skip-registry-sync) SKIP_REGISTRY_SYNC=true ;;
-        --skip-cloudflare) SKIP_CLOUDFLARE=true ;;
+        --cloudflare) SKIP_CLOUDFLARE=false ;;
         *) echo "Unknown parameter: $1"; exit 1 ;;
     esac
     shift
@@ -69,5 +69,5 @@ echo "🚀 Starting application stack..."
 if [ "$SKIP_CLOUDFLARE" = true ]; then
     export DOMAIN_NAME="localhost"
 fi
-./start_app_stack.sh
+./scripts/start_app_stack.sh
 echo "✅ Deployment completed successfully!"

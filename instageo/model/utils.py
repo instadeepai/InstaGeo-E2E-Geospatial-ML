@@ -444,6 +444,7 @@ def log_carbon_info(neptune_run: Optional[Run], emissions_data: EmissionsData) -
     """
     if neptune_run is not None:
         run = neptune_run.experiment
+        emissions_data = get_carbon_info(emissions_data)
         for key, value in emissions_data.items():
             run[f"{key}"] = value
 

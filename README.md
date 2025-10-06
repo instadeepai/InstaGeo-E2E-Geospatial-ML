@@ -5,37 +5,203 @@
 
 ## Overview
 
-InstaGeo is geospatial deep learning Python package designed to facilitate geospatial machine learning using satellite imagery data from :
-* [Harmonized Landsat and Sentinel-2 (HLS)](https://hls.gsfc.nasa.gov/) Data Product
-* Sentinel-2 which is part of [ESA](https://www.esa.int/)'s [Copernicus Program](https://www.copernicus.eu/en), with data extracted from this [Microsoft Planetary Computer (MPC)](https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a) product.
-* Sentinel-1 which is also part of [ESA](https://www.esa.int/)'s [Copernicus Program](https://www.copernicus.eu/en), with data extracted from this [Microsoft Planetary Computer (MPC)](https://planetarycomputer.microsoft.com/dataset/sentinel-1-rtc) product.
+InstaGeo is an end-to-end geospatial machine learning framework that automates data preprocessing, model training, inference and deployment, enabling seamless extraction of actionable insights from satellite imagery such [Harmonized Landsat and Sentinel-2 (HLS)](https://hls.gsfc.nasa.gov/) and [Sentinel-2](https://dataspace.copernicus.eu/data-collections/copernicus-sentinel-data/sentinel-2) and [Sentinel-1](https://sentinels.copernicus.eu/copernicus/sentinel-1).
 
 It leverages the [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M) geospatial foundational model and consists of three core components: Data, Model, and Apps, each tailored to support various aspects of geospatial data retrieval, manipulation, preprocessing, model training, and inference serving.
 
 ### Components
 
-1. [**Data**](./instageo/data/README.md): Focuses on retrieving, manipulating, and processing satellite data for classification and segmentation tasks such as disaster mapping, crop classification, and breeding ground prediction.
-2. [**Model**](./instageo/model/README.md): Centers around data loading, training, and evaluating models, particularly leveraging the Prithvi model for various modeling tasks. It includes a sliding-window feature that allows inference to be run on large inputs and a chip inference feature that performs efficient and optimized inference on geospatial image "chips" using a pre-trained model.
-3. [**Apps**](./instageo/apps/README.md): Aims to operationalize models developed in the Model component for practical applications.
+1. [**Data**](./instageo/data/README.md): Focuses on retrieving, manipulating, and processing satellite data for classification and segmentation tasks such as disaster mapping, crop classification, and breeding ground prediction. Supports HLS, Sentinel-2, and Sentinel-1 data sources with advanced data pipeline capabilities.
+
+2. [**Model**](./instageo/model/README.md): Centers around data loading, training, and evaluating models, particularly leveraging the Prithvi model for various modeling tasks. Features include chip inference for optimized processing, model registry system, and Ray-based model serving capabilities.
+
+3. [**Apps**](./instageo/new_apps/README.md): A geospatial analysis platform featuring interactive mapping, task-based processing, and real-time monitoring capabilities.
 
 ## Installation
 
-To get started with InstaGeo, ensure you have Python installed on your system. Then, execute the following command in your terminal or command prompt to install InstaGeo:
+InstaGeo uses modern Python dependency management with [uv](https://docs.astral.sh/uv/) for fast, reliable package installation.
 
-If you do not already have uv installed, install it with pip or see other installation [options](https://docs.astral.sh/uv/getting-started/installation/)
-```
-curl -LsSf https://astral.sh/uv/install.sh | sh # (Linux/macOS)
-```
+### Prerequisites
+- Python 3.11+ (required)
+- Docker and Docker Compose (for full-stack application)
+
+### Install uv Package Manager
+If you don't have uv installed, install it using one of these methods:
 
 ```bash
-cd InstaGeo # cd into instaGeo project root
-uv venv # create a virtual environment
+# Linux/macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or with pip
+pip install uv
+```
+
+### Install InstaGeo
+
+#### Option 1: Using uv (Recommended)
+```bash
+# Clone and navigate to the project
+cd InstaGeo
+
+# Create virtual environment
+uv venv
+
+# Activate virtual environment
 source .venv/bin/activate  # (Linux/macOS)
 .venv\Scripts\activate     # (Windows)
 
-uv sync --group all --locked --extra cpu
+# Install dependencies (--locked ensures reproducible builds)
+# For CPU-only PyTorch (recommended for most users)
+uv sync --locked --extra all --extra dev --extra cpu
+
+# For GPU-enabled PyTorch (Linux only, requires CUDA)
+uv sync --locked --extra all --extra dev --extra gpu
 ```
-This command will download and install the latest version of InstaGeo along with its required dependencies.
+
+#### Option 2: Using pip
+```bash
+# Create virtual environment
+python -m venv .venv
+
+# Activate virtual environment
+source .venv/bin/activate  # (Linux/macOS)
+.venv\Scripts\activate     # (Windows)
+
+# Install directly from GitHub repository
+# For CPU-only PyTorch (recommended for most users)
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git#egg=InstaGeo[all,cpu]"
+
+# For GPU-enabled PyTorch (Linux only, requires CUDA)
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git#egg=InstaGeo[all,gpu]"
+
+# For development (includes dev tools)
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git#egg=InstaGeo[all,dev,cpu]"
+
+# Install from specific branch (e.g., develop)
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git@develop#egg=InstaGeo[all,cpu]"
+
+# Install from specific tag/release
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git@v0.1.0#egg=InstaGeo[all,cpu]"
+
+```
+
+#### Option 3: Using pip (Local Development)
+```bash
+# Clone and navigate to the project (for local development)
+git clone https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git
+cd InstaGeo-E2E-Geospatial-ML
+
+# Create virtual environment
+python -m venv .venv
+
+# Activate virtual environment
+source .venv/bin/activate  # (Linux/macOS)
+.venv\Scripts\activate     # (Windows)
+
+# Install in editable mode for development
+# For CPU-only PyTorch (recommended for most users)
+pip install -e ".[all,dev,cpu]"
+
+# For GPU-enabled PyTorch (Linux only, requires CUDA)
+pip install -e ".[all,dev,gpu]"
+```
+
+### Dependency Groups
+InstaGeo organizes dependencies into focused groups:
+- **data**: Geospatial data processing and satellite imagery handling
+- **model**: Machine learning training and inference capabilities
+- **apps**: Web application and API serving components
+- **dev**: Development tools (linting, testing, pre-commit hooks)
+- **all**: Includes data, model, and apps groups
+
+**Note**: The `--locked` flag ensures you install the exact versions specified in `uv.lock`, providing reproducible builds across different environments.
+
+### Install Specific Components
+
+#### Using uv
+```bash
+# Data processing only
+uv sync --locked --extra data --extra cpu
+
+# Model training only
+uv sync --locked --extra model --extra cpu
+
+# Web application only
+uv sync --locked --extra apps --extra cpu
+
+# Development tools
+uv sync --locked --extra dev --extra cpu
+```
+
+#### Using pip (from GitHub)
+```bash
+# Data processing only
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git#egg=InstaGeo[data,cpu]"
+
+# Model training only
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git#egg=InstaGeo[model,cpu]"
+
+# Web application only
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git#egg=InstaGeo[apps,cpu]"
+
+# Development tools
+pip install "git+https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML.git#egg=InstaGeo[dev,cpu]"
+```
+
+## Updating Dependencies
+
+### Updating the Lock File
+
+InstaGeo uses `uv.lock` to ensure reproducible builds. When you need to update dependencies:
+
+#### Update All Dependencies
+```bash
+# Update all dependencies to their latest compatible versions
+uv lock --upgrade
+
+# Sync your environment with the updated lock file
+uv sync --locked --extra all --extra dev --extra cpu
+```
+
+#### Update Specific Packages
+```bash
+# Update specific packages
+uv lock --upgrade-package numpy --upgrade-package pandas
+
+# Update a package to a specific version
+uv add "numpy>=2.0.0"
+uv lock
+```
+
+#### Add New Dependencies
+```bash
+# Add to runtime dependencies
+uv add "new-package>=1.0.0"
+
+# Add to optional dependencies
+uv add --optional apps "web-framework>=3.0.0"
+```
+
+#### Lock File Best Practices
+- **Commit `uv.lock`**: Always commit the lock file to ensure reproducible builds
+- **Regular Updates**: Update dependencies regularly for security and bug fixes
+- **Test After Updates**: Run tests after updating to catch compatibility issues
+
+#### Troubleshooting Lock Issues
+```bash
+# If you encounter lock file conflicts
+uv lock --refresh
+
+# Reset lock file completely (use with caution)
+rm uv.lock
+uv lock
+
+# Verify lock file integrity
+uv sync --locked --dry-run
+```
 
 ## Running Tests
 After installation, you may want to verify that InstaGeo has been correctly installed and is functioning as expected. To do this, run the included test suite with the following commands:
@@ -43,251 +209,287 @@ After installation, you may want to verify that InstaGeo has been correctly inst
 ```bash
 pytest --verbose .
 ```
+
+## Quick Start - Full-Stack Application
+
+To quickly get started with the modern InstaGeo web application:
+
+### Prerequisites
+- Docker and Docker Compose
+- Python 3.11+ (for development)
+
+### Launch the Application
+
+#### Prerequisites
+1. **Docker and Docker Compose** installed and running
+2. **Configuration file**: Copy and configure `instageo/new_apps/config.env.example` to `instageo/new_apps/config.env`
+
+#### Basic Launch
+```bash
+# Set environment stage (dev or prod)
+export STAGE=dev
+
+# Basic deployment (skips model registry sync, Cloudflare tunnel disabled by default)
+./scripts/deploy.sh --skip-registry-sync
+```
+
+#### Deployment Options and Flags
+
+The `deploy.sh` script supports several flags for different deployment scenarios:
+
+```bash
+# Default deployment (skips Cloudflare tunnel, includes model registry sync)
+./scripts/deploy.sh
+
+# Skip model registry synchronization (local development)
+./scripts/deploy.sh --skip-registry-sync
+
+# Enable Cloudflare tunnel (production deployment)
+./scripts/deploy.sh --cloudflare
+
+# Production with models and Cloudflare tunnel
+./scripts/deploy.sh --cloudflare
+
+# Only sync model registry (don't start application)
+./scripts/deploy.sh --registry-sync-only
+```
+
+**Note**: Cloudflare tunnel is **disabled by default**. Use `--cloudflare` flag to enable it for production deployments.
+
+#### Deployment Flag Details
+
+| Flag | Description | Use Case |
+|------|-------------|----------|
+| `--skip-registry-sync` | Skip downloading models from Google Cloud Storage | When models are already available locally or not needed |
+| `--cloudflare` | Enable Cloudflare tunnel setup | Production deployments with public access |
+| `--registry-sync-only` | Only sync models, don't start application | Update models without restarting services |
+
+**Default Behavior:**
+- **Cloudflare tunnel**: **Disabled by default** (use `--cloudflare` to enable)
+- **Model registry sync**: **Enabled by default** (use `--skip-registry-sync` to disable)
+- **Local development**: Simple setup with `./scripts/deploy.sh --skip-registry-sync`
+
+#### Environment Configuration
+
+Before deployment, configure `instageo/new_apps/config.env`:
+
+**Required for all deployments:**
+```bash
+STAGE=dev                              # or 'prod'
+REDIS_HOST=instageo-redis
+REDIS_PORT=6379
+DATA_FOLDER=/app/instageo-data
+EARTHDATA_USERNAME=your-username       # NASA EarthData credentials
+EARTHDATA_PASSWORD=your-password
+```
+
+**Required for model registry sync:**
+```bash
+HOST_MODELS_PATH=/path/to/models       # Local path for model storage
+MODELS_REGISTRY_GCS_URI="gs://path/to/models/registry.yaml"
+```
+
+**Required for Cloudflare tunnel (use `--cloudflare` flag):**
+```bash
+DOMAIN_NAME=your-domain.com
+CLOUDFLARE_TUNNEL_NAME=instageo-tunnel
+CLOUDFLARE_TUNNEL_CREDS='{"AccountTag":"...","TunnelSecret":"...","TunnelID":"..."}'
+```
+*Note: Only needed when using `./scripts/deploy.sh --cloudflare`*
+
+**Optional worker scaling:**
+```bash
+DATA_PROCESSING_WORKER_REPLICAS=1      # Scale data processing workers
+MODEL_PREDICTION_WORKER_REPLICAS=1     # Scale model prediction workers
+VISUALIZATION_PREPARATION_WORKER_REPLICAS=1
+```
+
+#### Access Points
+
+**Development Mode (STAGE=dev):**
+- **Frontend**: http://localhost (Interactive web interface)
+- **Backend API**: http://localhost/api (REST API endpoints)
+- **RQ Dashboard**: http://localhost:9181 (Job queue monitoring)
+
+**Production Mode (STAGE=prod):**
+- **Frontend**: https://your-domain.com (via Cloudflare tunnel)
+- **Backend API**: https://your-domain.com/api
+- **RQ Dashboard**: https://your-domain.com:9181 (password protected)
+
+#### Common Deployment Scenarios
+
+**Quick Local Development (no models needed):**
+```bash
+export STAGE=dev
+./scripts/deploy.sh --skip-registry-sync
+```
+
+**Local Development with Models:**
+```bash
+export STAGE=dev
+./scripts/deploy.sh
+```
+
+**Production with Cloudflare:**
+```bash
+export STAGE=prod
+./scripts/deploy.sh --cloudflare
+```
+
+**Update Models Only:**
+```bash
+./scripts/deploy.sh --registry-sync-only
+```
+
+#### Deployment Troubleshooting
+
+**Common Issues:**
+
+1. **Docker not running:**
+   ```bash
+   # Check Docker status
+   docker info
+   # Start Docker if needed
+   ```
+
+2. **Configuration file missing:**
+   ```bash
+   # Copy and edit configuration
+   cp instageo/new_apps/config.env.example instageo/new_apps/config.env
+   # Edit the file with your settings
+   ```
+
+3. **Port conflicts:**
+   ```bash
+   # Check what's using ports 80, 3000, 8000, 6379, 9181
+   lsof -i :80
+   # Stop conflicting services or change ports in config.env
+   ```
+
+4. **Model registry sync fails:**
+   ```bash
+   # Check Google Cloud authentication
+   gcloud auth list
+   # Or skip registry sync for local development
+   ./scripts/deploy.sh --skip-registry-sync
+   ```
+
+5. **Cloudflare tunnel issues:**
+   ```bash
+   # Cloudflare is disabled by default
+   # To enable: ./scripts/deploy.sh --cloudflare
+   # Check tunnel credentials in config.env if issues persist
+   ```
+
+**Useful Management Commands:**
+```bash
+# View service logs
+docker compose -f instageo/new_apps/docker-compose.dev.yml logs -f
+
+# Stop all services
+docker compose -f instageo/new_apps/docker-compose.dev.yml down
+
+# Restart specific service
+docker compose -f instageo/new_apps/docker-compose.dev.yml restart instageo-backend-api
+
+# Scale workers
+docker compose -f instageo/new_apps/docker-compose.dev.yml up -d --scale instageo-backend-data-processing-worker=4
+```
+
+### Using the Web Interface
+1. **Draw Bounding Box**: Use the map interface to draw rectangular areas of interest
+2. **Select Model**: Choose from available geospatial models (AOD estimation, flood detection, etc.)
+3. **Configure Parameters**: Set date, cloud coverage, and processing parameters
+4. **Submit Task**: Start data processing and model prediction
+5. **Monitor Progress**: Track task status in real-time
+6. **View Results**: Visualize predictions on the map and download PDF reports
+
+For detailed setup and configuration, see the [New Apps documentation](./instageo/new_apps/README.md).
 ## Usage
 
 ### Data Component
 
-- **Data Retrieval**: InstaGeo efficiently searches for and download multi-spectral earth observation images from different satellite data products (HLS, Sentinel-2 and Sentinel-1).
+InstaGeo's data component provides powerful tools for satellite imagery processing:
 
-- **Create Chips and Segmentation Maps**: InstaGeo breaks down large satellite image tiles into smaller, manageable patches (referred to as "chips") suitable for deep learning model training. It also generate segmentation maps, which serve as targets for training, by categorizing each pixel in the chips.
+- **Multi-Source Support**: Download and process HLS, Sentinel-2, and Sentinel-1 imagery
+- **Automated Processing**: Create ML-ready chips with segmentation maps
+- **Quality Control**: Built-in cloud masking and data validation
+- **Scalable Architecture**: Dask integration for distributed processing
+
+**Key Tools:**
+- `chip_creator.py`: Create training chips from observation records
+- `raster_chip_creator.py`: Generate chips from existing raster files
+
+For detailed usage instructions, examples, and configuration options, see the [Data Component Documentation](./instageo/data/README.md).
 
 ### Model Component
 
-- **Training Custom Models**: Utilize the Prithvi geospatial foundational model as a backbone to develop custom models tailored for precise geospatial applications. These applications include, but are not limited to, flood mapping for emergency response planning, crop classification for agricultural management, and locust breeding ground prediction to address food security.
+Advanced machine learning capabilities built on the Prithvi foundational model:
 
-- **Inference on Large-scale Geospatial Data**: Perform inference using the models that have been trained on 'chips' (typically measuring 224 x 224 pixels) on expansive tiles, which can measure 3660 x 3660 pixels.
+- **Custom Training**: Fine-tune models for classification and regression tasks
+- **Multiple Inference Modes**: Chip inference, sliding window, and Ray-based serving
+- **Model Registry**: Centralized model management with GCS integration
+- **Comprehensive Metrics**: Advanced evaluation and monitoring capabilities
 
-- **Chip Inference**:
-Perform efficient and optimized inference on geospatial image "chips" using a pre-trained model. It processes the data in batches, makes predictions, and saves the results as TIFF files with the appropriate geospatial metadata. It uses GPU (if available) and multithreading to save files faster.
+**Key Features:**
+- Support for temporal and non-temporal inputs
+- Model distillation and custom loss functions
+- Hydra-based configuration management
+- Pre-trained models for various geospatial tasks
 
-### Apps Component
+For training examples, inference modes, and model registry setup, see the [Model Component Documentation](./instageo/model/README.md).
 
-- **Operationalize Models**: Select an area of interest and a model to use for inference, and the data extraction process will be run automatically accordingly to the specifications of the data accepted by the model (appropriate satellite source, chip size, temporal dimension and number of steps) so that the selected model can perform inference seamlessly. Model predictions can be overlaid and visualized on an interactive map and analytics can be generated in a PDF format.
+### Apps Component (Legacy)
 
-### Model Registry Synchronization
+Basic model operationalization with interactive mapping and PDF report generation. See the [Apps Documentation](./instageo/apps/README.md) for details.
 
-InstaGeo provides a model registry system that allows you to download pre-trained models from Google Cloud Storage. To use this feature, you'll need to set up Google Cloud credentials and run the synchronization script.
+### New Apps Component (Modern Full-Stack Platform)
 
-#### Setting up Google Cloud Credentials
+A complete geospatial analysis platform with React frontend and FastAPI backend:
 
-1. **Install Google Cloud SDK** (if not already installed):
-   ```bash
-   # For macOS
-   brew install google-cloud-sdk
+- **Interactive Web Interface**: Draw bounding boxes, select models, monitor tasks
+- **Production Ready**: Docker deployment with Nginx, Redis, and worker scaling
+- **Real-time Processing**: Two-stage task system with progress tracking
+- **API Integration**: RESTful endpoints for programmatic access
 
-   # For Ubuntu/Debian
-   curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
-   echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-   sudo apt-get update && sudo apt-get install google-cloud-sdk
-   ```
-
-2. **Authenticate with Google Cloud**:
-   ```bash
-   gcloud auth login
-   ```
-
-3. **Set up Application Default Credentials**:
-   ```bash
-   gcloud auth application-default login
-   ```
-
-4. **Verify your setup**:
-   ```bash
-   gcloud auth list
-   gsutil ls gs://example/path/
-   ```
-
-#### Running the Model Registry Sync Script
-
-The `model_registry_sync.sh` script downloads pre-trained models and their configuration files from Google Cloud Storage to your local machine.
-
-**Usage**:
+**Quick Start:**
 ```bash
-./instageo/model/registry/model_registry_sync.sh <gs://path/to/registry_file.yaml> <MODELS_DESTINATION_PATH>
+export STAGE=dev
+./scripts/deploy.sh --skip-registry-sync
 ```
 
-**Example**:
-```bash
-# Navigate to the root directory of the project
-cd InstaGeo
+For detailed setup, API documentation, and deployment options, see the [New Apps Documentation](./instageo/new_apps/README.md).
 
-# Create a directory for models configurations and checkpoints
-# This should correspond to the HOST_MODELS_PATH variable (check instageo/new_apps/backend/config.env.example)
-mkdir -p /path/to/models/folder
+## Examples and Tutorials
 
-# Run the sync script
-cd instageo/model/registry && chmod +x model_registry_sync.sh
-./model_registry_sync.sh "gs://path/to/registry/file.yaml" /path/to/models/folder
-```
+### End-to-End Demo
+See the [InstaGeo Demo Notebook](notebooks/InstaGeo_Demo.ipynb) for a complete end-to-end example using locust breeding ground prediction.
 
-The models_registry.yaml should look like this
-```
-# Configuration file for available models and their metadata
-# yaml-language-server: $schema=null
+### Component-Specific Examples
+- **Data Processing**: See [Data Component Documentation](./instageo/data/README.md) for chip creation examples
+- **Model Training**: See [Model Component Documentation](./instageo/model/README.md) for training examples with Sen1Floods11, crop classification, and locust prediction
+- **Web Application**: See [New Apps Documentation](./instageo/new_apps/README.md) for API usage and deployment examples
 
-version: "1.0"
-last_updated: "2025-08-05"
+## Deployment
 
-models:
-  model1:
-    model_type: reg
-    model_short_name: "mod"
-    model_name: "model for estimation"
-    description: "Estimates for quality monitoring"
-    classes_mapping: null
-    data_source: "HLS"
-    temporal_step: 30
-    sizes:
-      tiny:
-        gcs_folder: "gs://model1/model"
-        num_params: 3.0
+After preparing data and training models, the model can be deployed using InstaGeo.
+See [Quick Start – Full-Stack Application](./instageo/new_apps/README.md#quick-start) for setup and deployment instructions.
 
-  model2:
-    model_type: seg
-    model_short_name: "mod2"
-    model_name: "model2"
-    description: "description"
-    classes_mapping:
-      0: "0"
-      1: "1"
-    data_source: "HLS"
-    temporal_step: 30
-    sizes:
-      teacher:
-        gcs_folder: "gs://model2/model/"
-        num_params: 90.0
-```
+### Deployment Features
+- **Containerized Architecture**: Docker Compose for consistent environments
+- **Cloudflare Tunnel Integration**: Secure public access without port forwarding
+- **Nginx Reverse Proxy**: Production-ready load balancing and routing
+- **Worker Scaling**: Configurable data processing and model prediction workers
+- **Monitoring**: Built-in RQ Dashboard for queue and worker monitoring
+- **Environment Management**: Separate configurations for development and production
 
-This will:
-- Download the best checkpoint file (`instageo_best_checkpoint.ckpt`) for each model
-- Download the Hydra configuration directory (`.hydra`) for each model
-- Organize the files in the structure: `<HOST_MODELS_PATH>/<model_key>/<size>/`
-(Update the config.env with the HOST_MODELS_PATH variable)
-
-
-**Available Models**:
-- **AOD Estimator**: Aerosol optical depth estimation from satellite imagery
-- **Sen1Floods**: Flood area segmentation from Sentinel-1 imagery
-- **Biomass Estimator**: Biomass estimation for environmental monitoring
-- **Locust Prediction**: Locust breeding ground prediction
-- **Crop Classification**: Crop type classification over agricultural regions
-
-Each model may have multiple sizes (e.g., `tiny`, `student`, `teacher`, `normal`) with different parameter counts and performance characteristics.
-
-### Putting It All Together - Locust Breeding Ground Prediction
-See [InstGeo_Demo](notebooks/InstaGeo_Demo.ipynb) notebook for an end-to-end demo.
-#### Download locust breeding ground observation records.
-```bash
-mkdir locust_breeding
-gsutil -m cp -r gs://instageo/data/locust_breeding/records locust_breeding
-```
-
-#### Download HLS tiles, create chips and segmentation maps
-
-**Note: Ensure that you have up to **1.5TB** free disk space**
-
-Create output directory for each split
-```bash
-mkdir locust_breeding/train locust_breeding/val locust_breeding/test
-```
-
-- Train Split
-```bash
-python -m "instageo.data.chip_creator" \
-    --dataframe_path="locust_breeding/records/train.csv" \
-    --output_directory="locust_breeding/train" \
-    --min_count=1 \
-    --chip_size=224 \
-    --temporal_tolerance=3 \
-    --temporal_step=30 \
-    --num_steps=3
-```
-
-- Validation Split
-```bash
-python -m "instageo.data.chip_creator" \
-    --dataframe_path="locust_breeding/records/val.csv" \
-    --output_directory="locust_breeding/val" \
-    --min_count=1 \
-    --chip_size=224 \
-    --temporal_tolerance=3 \
-    --temporal_step=30 \
-    --num_steps=3
-```
-
-- Test Split
-```bash
-python -m "instageo.data.chip_creator" \
-    --dataframe_path="locust_breeding/records/test.csv" \
-    --output_directory="locust_breeding/test" \
-    --min_count=1 \
-    --chip_size=224 \
-    --temporal_tolerance=3 \
-    --temporal_step=30 \
-    --num_steps=3
-```
-
-#### Launch Training
-
-Before launching training, modify the path to chips and segmentation maps in each split
-```python
-for split in ["train", "val", "test"]:
-    root_dir = "locust_breeding"
-    chips = [
-        chip.replace("chip", f"{split}/chips/chip")
-        for chip in os.listdir(os.path.join(root_dir, f"{split}/chips"))
-    ]
-    seg_maps = [
-        chip.replace("chip", f"{split}/seg_maps/seg_map") for chip in chips_orig
-    ]
-
-    df = pd.DataFrame({"Input": chips, "Label": seg_maps})
-    df.to_csv(os.path.join(root_dir, f"{split}.csv"))
-```
-
-```bash
-python -m instageo.model.run --config-name=locust \
-    root_dir='locust_breeding' \
-    train_filepath="locust_breeding/train.csv" \
-    valid_filepath="locust_breeding/val.csv"
-```
-
-#### Run Evaluation
-```bash
-python -m instageo.model.run --config-name=locust \
-    root_dir='locust_breeding' \
-    test_filepath="locust_breeding/test.csv" \
-    train.batch_size=16 \
-    checkpoint_path='instageo-data/outputs/2024-03-01/09-16-30/instageo_epoch-10-val_iou-0.70.ckpt' \
-    mode=eval
-```
-
-#### Run Inference on Africa Continent
-- Download HLS tiles
-```bash
-python -m "instageo.data.chip_creator" \
-    --dataframe_path="gs://instageo/utils/africa_prediction_template.csv" \
-    --output_directory="inference/20223-01" \
-    --min_count=1 \
-    --temporal_tolerance=3 \
-    --temporal_step=30 \
-    --num_steps=3 \
-    --processing_method="download-only"
-```
-
-- Inference
-```bash
-python -m instageo.model.run --config-name=locust \
-    root_dir='inference/20223-01' \
-    test_filepath='hls_dataset.json' \
-    train.batch_size=16 \
-    checkpoint_path='instageo-data/outputs/2024-03-01/09-16-30/instageo_epoch-10-val_iou-0.70.ckpt' \
-    mode=sliding_inference
-```
-
-#### Instageo Web Application
-- [Setup and Run InstaGeo web application](instageo/new_apps/README.md)
-
+### Infrastructure Components
+- **Frontend**: React application with hot reload in development
+- **Backend**: FastAPI with multiple worker processes
+- **Database**: Redis for task storage and job queues
+- **Workers**: Scalable RQ workers for data processing and model prediction
+- **Proxy**: Nginx for routing and static file serving
+- **Monitoring**: RQ Dashboard for operational visibility
 
 ## Contributing
 

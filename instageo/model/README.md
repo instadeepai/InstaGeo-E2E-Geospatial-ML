@@ -6,7 +6,19 @@ The InstaGeo Model component is designed for training, validation and inference 
 
 ## Requirements
 
-See `requirements.txt`
+Install dependencies using uv (recommended):
+
+CPU
+
+```bash
+uv sync --locked --extra model --extra cpu
+```
+
+GPU
+
+```bash
+uv sync --locked --extra model --extra gpu
+```
 
 ## Features
 - Supports both classification and regression tasks
@@ -16,15 +28,6 @@ See `requirements.txt`
 - Sliding window inference for inference on expansive tiles, which measure 3660 x 3660 pixels
 - Reproducible training pipeline
 - Command-line flags for easy configuration of training parameters.
-
-<!-- ## Installation
-
-Ensure you have the required libraries installed:
-
-```bash
-# pip install instageo # this will work when we publish to PyPi
-pip install . #run from instageo root
-``` -->
 
 ## Usage
 
@@ -239,6 +242,88 @@ When the saved checkpoint is evaluated on the test set, you should have results 
 | Overall Accuracy | 0.85 |
 | Mean IoU | 0.74 |
 | Cross Entropy Loss | 0.40 |
+
+## Advanced Model Features
+
+### Training Custom Models
+Utilize the Prithvi geospatial foundational model as a backbone to develop custom models tailored for precise geospatial applications. Supports both classification and regression tasks with temporal and non-temporal inputs.
+
+### Advanced Inference Capabilities
+- **Chip Inference**: Efficient batch processing with GPU acceleration and multithreading for TIFF output
+- **Ray-based Model Serving**: Scalable model deployment with Ray Serve for production environments
+
+### Model Registry System
+Centralized model management with metadata tracking, version control, and Google Cloud Storage integration for model artifacts.
+
+### Enhanced Metrics and Monitoring
+Comprehensive evaluation metrics including streaming regression metrics, R² scores, Pearson correlation, and expected error calculations.
+
+### Flexible Architecture
+Support for model distillation, custom loss functions, and configurable training pipelines with Hydra configuration management.
+
+## Model Registry Synchronization
+
+InstaGeo provides a model registry system that allows you to download pre-trained models from Google Cloud Storage.
+
+### Setting up Google Cloud Credentials
+
+1. **Install Google Cloud SDK** (if not already installed):
+   ```bash
+   # For macOS
+   brew install google-cloud-sdk
+
+   # For Ubuntu/Debian
+   curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+   echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+   sudo apt-get update && sudo apt-get install google-cloud-sdk
+   ```
+
+2. **Authenticate with Google Cloud**:
+   ```bash
+   gcloud auth login
+   ```
+
+3. **Set up Application Default Credentials**:
+   ```bash
+   gcloud auth application-default login
+   ```
+
+4. **Verify your setup**:
+   ```bash
+   gcloud auth list
+   gsutil ls gs://example/path/
+   ```
+
+### Running the Model Registry Sync Script
+
+The `model_registry_sync.sh` script downloads pre-trained models and their configuration files from Google Cloud Storage to your local machine.
+
+**Usage**:
+```bash
+./instageo/model/registry/model_registry_sync.sh <gs://path/to/registry_file.yaml> <MODELS_DESTINATION_PATH>
+```
+
+**Example**:
+```bash
+# Navigate to the root directory of the project
+cd InstaGeo
+
+# Create a directory for models configurations and checkpoints
+mkdir -p /path/to/models/folder
+
+# Run the sync script
+cd instageo/model/registry && chmod +x model_registry_sync.sh
+./model_registry_sync.sh "gs://path/to/registry/file.yaml" /path/to/models/folder
+```
+
+### Available Models
+- **AOD Estimator**: Aerosol optical depth estimation from satellite imagery
+- **Sen1Floods**: Flood area segmentation from Sentinel-1 imagery
+- **Biomass Estimator**: Biomass estimation for environmental monitoring
+- **Locust Prediction**: Locust breeding ground prediction
+- **Crop Classification**: Crop type classification over agricultural regions
+
+Each model may have multiple sizes (e.g., `tiny`, `student`, `teacher`, `normal`) with different parameter counts and performance characteristics.
 
 ## Customization
 

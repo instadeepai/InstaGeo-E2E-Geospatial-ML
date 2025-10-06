@@ -58,8 +58,8 @@ ENV PATH=/app/.venv/bin:$PATH \
     PYTHONPATH=/app:/app/backend
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --group all \
-    --locked \
+    uv sync --locked \
+    --extra all \
     --extra cpu \
     --no-install-project \
     --no-editable
