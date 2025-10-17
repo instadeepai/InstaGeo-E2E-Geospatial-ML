@@ -15,7 +15,7 @@ fi
 # download 2024 us cdl raster
 gsutil cp gs://instageo/data/observation_records/us_cdls/2024_30m_cdls.tif data/us_cdl_raster.tif
 
-python experiments/iyusuf/utils/create_instageo_us_cdl_records.py \
+python experiments_dir/utils/create_instageo_us_cdl_records.py \
     --raster-path 'data/us_cdl_raster.tif' \
     --records-file data/us_cdl_records.gpkg \
     --date 2024-09-01 \

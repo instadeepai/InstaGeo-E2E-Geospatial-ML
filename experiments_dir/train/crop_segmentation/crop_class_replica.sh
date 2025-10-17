@@ -3,8 +3,8 @@
 mkdir data
 
 gsutil -m cp -r gs://instageo/data/multitemporal-crop-classification-replica/* data
-python experiments/iyusuf/utils/create_dataset.py --root-dir=data/train --train-file=train.csv --name-regex 'chip_(.*).merged_(.*)' --seg-map-pattern 'chip_\1.mask_\2'
-python experiments/iyusuf/utils/create_dataset.py --root-dir=data/val --train-file=val.csv --name-regex 'chip_(.*).merged_(.*)' --seg-map-pattern 'chip_\1.mask_\2'
+python experiments_dir/utils/create_dataset.py --root-dir=data/train --train-file=train.csv --name-regex 'chip_(.*).merged_(.*)' --seg-map-pattern 'chip_\1.mask_\2'
+python experiments_dir/utils/create_dataset.py --root-dir=data/val --train-file=val.csv --name-regex 'chip_(.*).merged_(.*)' --seg-map-pattern 'chip_\1.mask_\2'
 
 echo "Computing Data Statistics..."
 stats_output=$(python -m instageo.model.run --config-name=multitemporal_crop_classification \

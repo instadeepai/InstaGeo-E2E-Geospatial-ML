@@ -6,9 +6,9 @@ mkdir data
 
 gsutil -m cp -r gs://instageo-internal/data/locust-replica-2025-04-17T10:20:35/* data/
 
-python experiments/iyusuf/utils/create_dataset.py --root-dir=data/train --train-file=train.csv
-python experiments/iyusuf/utils/create_dataset.py --root-dir=data/val --train-file=val.csv
-python experiments/iyusuf/utils/create_dataset.py --root-dir=data/test --train-file=test.csv
+python experiments_dir/utils/create_dataset.py --root-dir=data/train --train-file=train.csv
+python experiments_dir/utils/create_dataset.py --root-dir=data/val --train-file=val.csv
+python experiments_dir/utils/create_dataset.py --root-dir=data/test --train-file=test.csv
 
 python -c "import glob, os, numpy as np, rasterio; from collections import Counter; label_counts = Counter(); [label_counts.update(dict(zip(*np.unique(rasterio.open(f).read(1), return_counts=True)))) for f in glob.glob('data/train/seg_maps/*.tif')]; print('Label counts:'); [print(f'Label {k}: {v} pixels') for k, v in sorted(label_counts.items())]"
 python -c "import glob, os, numpy as np, rasterio; from collections import Counter; label_counts = Counter(); [label_counts.update(dict(zip(*np.unique(rasterio.open(f).read(1), return_counts=True)))) for f in glob.glob('data/val/seg_maps/*.tif')]; print('Label counts:'); [print(f'Label {k}: {v} pixels') for k, v in sorted(label_counts.items())]"
