@@ -16,6 +16,11 @@ It leverages the [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-10
 2. [**Model**](./instageo/model/README.md): Centers around data loading, training, and evaluating models, particularly leveraging the Prithvi model for various modeling tasks. Features include chip inference for optimized processing, model registry system, and Ray-based model serving capabilities.
 
 3. [**Apps**](./instageo/new_apps/README.md): A geospatial analysis platform featuring interactive mapping, task-based processing, and real-time monitoring capabilities.
+<div align="center">
+
+![instageo_app](https://github.com/user-attachments/assets/034482d8-9a33-4ea1-a46d-c8f35ba2e8bb)
+
+</div>
 
 ## Paper and Key Results
 
