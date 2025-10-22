@@ -29,6 +29,7 @@ from datetime import datetime
 from typing import Any, List, Optional, Tuple
 
 import backoff
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import planetary_computer
@@ -48,9 +49,12 @@ from tqdm import tqdm
 
 from instageo.data import geo_utils
 from instageo.data.data_pipeline import (
+    BasePointsDataPipeline,
     BaseRasterDataPipeline,
     adjust_dims,
     apply_mask,
+    create_segmentation_map,
+    get_chip_coords,
     get_tile_info,
     mask_segmentation_map,
 )
@@ -959,12 +963,183 @@ class S2RasterPipeline(BaseRasterDataPipeline):
             return None
 
 
+class S2PointsPipeline(BasePointsDataPipeline):
+    """S2 Points Data Pipeline."""
+
+    def setup(self) -> None:
+        """Setup for environment to be used by Dask workers.
+
+        Configures relevant GDAL options for reading COGs
+        """
+        pass
+
+    @ratelimit.limits(calls=DATA_PIPELINE_SETTINGS.COG_DOWNLOAD_RATELIMIT, period=60)
+    @backoff.on_exception(
+        backoff.expo,
+        (rasterio.errors.RasterioIOError, Exception),
+        max_tries=5,
+        max_time=300,  # 5 minutes max
+        jitter=backoff.full_jitter,
+    )
+    def load_data(self, tile_dict: dict[str, Any]) -> tuple[xr.Dataset, xr.Dataset, str]:
+        """See parent class. Load Granules."""
+        try:
+            dsb, dsm, crs = open_stac_items(
+                tile_dict["granules"],
+                self.src_crs,
+                self.spatial_resolution,
+                bands_asset=BANDS.ASSET,
+                blocksize=(BLOCKSIZE.X, BLOCKSIZE.Y),
+                mask_band="SCL",
+                load_masks=True,
+                fill_value=NO_DATA_VALUES.S2,
+                sign_func=sign,
+            )
+        except Exception as e:
+            logging.error(f"Error loading data: {str(e)}")
+            time.sleep(10 * 60)  # Wait 10 minutes before retrying
+            raise
+
+        return dsb, dsm, crs
+
+    def process_tile(
+        self,
+        obsv_records: gpd.GeoDataFrame,
+        flags_dict: dict[str, Any],
+        tile_dict: dict[str, Any],
+        batch_size: int,
+    ) -> tuple[list[str], list[str]]:
+        """Processes a single tile.
+
+        Arguments:
+            obsv_records: Observation records dataframe.
+            flags_dict: Dictionary mapping all arguments and values needed to process the row.
+            tile_dict: Input to `self.load_data`, which contains the granules to load.
+            batch_size: Number of records to process at a time.
+        Returns: tuple of the chip and label filenames lists.
+        """
+        tile_id = obsv_records.iloc[0]["mgrs_tile_id"]
+        stac_items_str = obsv_records.iloc[0]["stac_items_str"]
+        chip_paths = []
+        label_paths = []
+
+        try:
+            date_id = obsv_records.iloc[0]["date"].strftime("%Y%m%d")
+            dsb, dsm, crs = self.load_data(tile_dict)
+            n_chips_x = dsb.sizes["x"] // self.chip_size
+            n_chips_y = dsb.sizes["y"] // self.chip_size
+            chip_coords = get_chip_coords(obsv_records, dsb, self.chip_size)
+
+            # Process chips in smaller batches to avoid overwhelming the API
+            for i in range(0, len(chip_coords), batch_size):
+                batch_coords = chip_coords[i : i + batch_size]
+                chips, masks, seg_maps_temp_filenames, chips_temp_filenames = (
+                    [],
+                    [],
+                    [],
+                    [],
+                )
+
+                for x, y in batch_coords:
+                    # TODO: handle potential partially out of bound chips
+                    if (x >= n_chips_x) or (y >= n_chips_y):
+                        continue
+
+                    chip_id = f"{date_id}_{tile_id}_{x}_{y}"
+                    chip_name = f"chip_{chip_id}.tif"
+                    seg_map_name = f"seg_map_{chip_id}.tif"
+
+                    chip_filename = os.path.join(self.output_directory, "chips", chip_name)
+                    chips_temp_filenames.append(chip_filename)
+                    seg_map_filename = os.path.join(self.output_directory, "seg_maps", seg_map_name)
+                    seg_maps_temp_filenames.append(seg_map_filename)
+                    if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
+                        logging.info(f"Skipping {chip_filename} because it's already created")
+                        continue
+
+                    chip = dsb.isel(
+                        x=slice(x * self.chip_size, (x + 1) * self.chip_size),
+                        y=slice(y * self.chip_size, (y + 1) * self.chip_size),
+                    )
+                    chips.append(chip)
+
+                    if dsm is not None:
+                        chip_mask = dsm.isel(
+                            x=slice(x * self.chip_size, (x + 1) * self.chip_size),
+                            y=slice(y * self.chip_size, (y + 1) * self.chip_size),
+                        )
+                        masks.append(chip_mask)
+                    else:
+                        masks.append(None)
+
+                # Process the batch
+                try:
+                    # Compute chips and masks locally before processing
+                    chips = [chip.compute() for chip in chips]
+                    masks = [mask.compute() for mask in masks] if dsm is not None else masks
+
+                    for chip, mask, chip_filename, seg_map_filename in zip(
+                        chips, masks, chips_temp_filenames, seg_maps_temp_filenames
+                    ):
+                        if mask is not None:
+                            chip = apply_mask(
+                                chip=chip,
+                                mask=mask,
+                                no_data_value=NO_DATA_VALUES.S2,
+                                mask_decoder=create_mask_from_scl,
+                                data_source="S2",
+                                mask_types=self.mask_types,
+                                masking_strategy=self.masking_strategy,
+                            )
+
+                        if chip.where(chip != NO_DATA_VALUES.S2).count().values == 0:
+                            logging.warning(
+                                f"Skipping {chip_filename} due to no valid data pixels "
+                                f"after masking"
+                            )
+                            continue
+
+                        seg_map = create_segmentation_map(
+                            chip, obsv_records, self.window_size, self.task_type
+                        )
+                        seg_map = mask_segmentation_map(
+                            chip,
+                            seg_map,
+                            NO_DATA_VALUES.S2,
+                            self.masking_strategy,
+                        )
+
+                        if seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values == 0:
+                            logging.warning(f"Skipping {seg_map_filename} due to empty label")
+                            continue
+
+                        label_paths.append(seg_map_filename)
+                        chip_paths.append(chip_filename)
+                        seg_map.rio.to_raster(seg_map_filename)
+                        chip.rio.to_raster(chip_filename)
+
+                except Exception as e:
+                    logging.error(f"Error processing batch: {str(e)}")
+                    continue
+
+                # Add a delay between batches to avoid rate limiting
+                time.sleep(5)
+
+        except rasterio.errors.RasterioIOError as e:
+            logging.error(f"Error {e} when reading dataset containing: {stac_items_str}")
+        except Exception as e:
+            logging.error(f"Error {e} when processing {stac_items_str}")
+
+        return chip_paths, label_paths
+
+
 def add_s2_stac_items(
     client: Client,
     data: pd.DataFrame,
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 12,
+    temporal_tolerance_minutes: int = 0,
     cloud_coverage: int = 10,
     daytime_only: bool = False,
 ) -> dict[str, pd.DataFrame]:
@@ -981,6 +1156,8 @@ def add_s2_stac_items(
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
         temporal_tolerance (int): Tolerance (in days) for finding closest S2 items.
+        temporal_tolerance_minutes (int): Additional tolerance in minutes for
+            finding closest S2 items.
         cloud_coverage (int): Maximum percentage of cloud coverage to be tolerated for a granule.
         daytime_only (bool): Flag to determine whether to filter out night time granules.
 
@@ -995,6 +1172,7 @@ def add_s2_stac_items(
         num_steps=num_steps,
         temporal_step=temporal_step,
         temporal_tolerance=temporal_tolerance,
+        temporal_tolerance_minutes=temporal_tolerance_minutes,
     )
 
     data["tile_queries"] = tile_queries

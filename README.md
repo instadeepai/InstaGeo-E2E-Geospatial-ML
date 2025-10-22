@@ -489,10 +489,14 @@ For detailed setup, API documentation, and deployment options, see the [New Apps
 ## Examples and Tutorials
 
 ### End-to-End Demo
-See the [InstaGeo Demo Notebook](notebooks/InstaGeo_Demo.ipynb) for a complete end-to-end example using locust breeding ground prediction.
+See the [InstaGeo Demo Notebook](notebooks/InstaGeo_Demo.ipynb) for a complete end-to-end example using a locust breeding ground prediction task (Note: The App section in this notebook still uses the legacy `apps` component).
 
 ### Component-Specific Examples
-- **Data Processing**: See [Data Component Documentation](./instageo/data/README.md) for chip creation examples
+- **Data Processing**: See [Data Component Documentation](./instageo/data/README.md) for chip creation examples and check the demo notebooks for data preparation scenarios
+   - **Chip Creator Demo**: [notebooks/chip_creator_demo.ipynb](notebooks/chip_creator_demo.ipynb)
+   - **Raster Chip Creator Demo**: [notebooks/raster_chip_creator_demo.ipynb](notebooks/raster_chip_creator_demo.ipynb)
+   - **Data Cleaner Demo**: [notebooks/data_cleaner_demo.ipynb](notebooks/data_cleaner_demo.ipynb)
+   - **Data Splitter Demo**: [notebooks/data_splitter_demo.ipynb](notebooks/data_splitter_demo.ipynb)
 - **Model Training**: See [Model Component Documentation](./instageo/model/README.md) for training examples with Sen1Floods11, crop classification, and locust prediction
 - **Web Application**: See [New Apps Documentation](./instageo/new_apps/README.md) for API usage and deployment examples
 

@@ -26,7 +26,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import backoff
 import geopandas as gpd
-import numpy as np
 
 # Utility functions for STAC-based processing (shared between HLS and S2)
 import pandas as pd
@@ -44,13 +43,15 @@ from shapely.ops import unary_union
 
 from instageo.data import geo_utils
 from instageo.data.data_pipeline import adjust_dims
-from instageo.data.settings import DataPipelineSettings
+from instageo.data.settings import DataPipelineSettings, S1BandsSettings
+
+S1_BANDS = S1BandsSettings()
 
 DATA_PIPELINE_SETTINGS = DataPipelineSettings()
 
 
 def is_valid_dataset_entry(obsv: pd.Series, item_id_field: str) -> bool:
-    """Checks S2 granules validity for a given observation.
+    """Checks STAC granules validity for a given observation.
 
     The granules will be added to the dataset if they are all non
     null and unique for all timesteps.
@@ -329,7 +330,7 @@ def retrieve_stac_metadata(
     tile_info_df: pd.DataFrame,
     collections: list[str],
     bands_nameplate: dict[str, dict[str, str]],
-    cloud_coverage: int = 10,
+    cloud_coverage: int | None = 10,
     daytime_only: bool = False,
 ) -> dict[str, List[Item]]:
     """Retrieve STAC items Metadata.
@@ -343,7 +344,8 @@ def retrieve_stac_metadata(
         tile_info_df (pd.DataFrame): A dataframe containing tile_id, start_date and
             end_date in each row.
         collections (list[str]): List of collection IDs to search in.
-        cloud_coverage (int): Maximum percentage of cloud coverage to be tolerated for a granule.
+        cloud_coverage (int | None): Maximum percentage of cloud coverage to be
+            tolerated for a granule.
         daytime_only (bool): Flag to determine whether to filter out night time granules.
         rate_limit_calls (int): Number of API calls allowed per period.
         rate_limit_period (int): Time period in seconds for rate limiting.
@@ -368,7 +370,7 @@ def retrieve_stac_metadata(
                 datetime=f"{start_date}/{end_date}",
                 bbox=geo_utils.make_valid_bbox(lon_min, lat_min, lon_max, lat_max),
                 sortby=[{"field": "datetime", "direction": "asc"}],
-                query={"eo:cloud_cover": {"lte": cloud_coverage}},
+                query={} if cloud_coverage is None else {"eo:cloud_cover": {"lte": cloud_coverage}},
             )
             candidate_items = search.item_collection()
         except APIError as e:
@@ -479,7 +481,7 @@ def open_stac_items(
     # Load the bands for all timesteps and stack them in a data array
     assets_to_load = bands_asset + [mask_band] if load_masks else bands_asset
     if sign_func is not None:
-        plain_items = [sign_func(item).to_dict() for item in ItemCollection(tile_dict)]
+        plain_items = sign_func(ItemCollection(tile_dict))
     else:
         plain_items = [item.to_dict() for item in ItemCollection(tile_dict)]
     stacked_items = stackstac.stack(
@@ -496,7 +498,8 @@ def open_stac_items(
     bands = adjust_dims(stacked_items.sel(band=bands_asset))
     masks = adjust_dims(stacked_items.sel(band=[mask_band])) if load_masks else None
 
-    bands = bands.astype(np.uint16)
+    # Convert to float32 if we are dealing with Sentinel-1
+    bands = bands.astype("float32") if bands_asset == S1_BANDS.ASSET else bands.astype("uint16")
     bands.attrs["scale_factor"] = 1
 
     return bands, masks, bands.crs

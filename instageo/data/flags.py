@@ -101,7 +101,7 @@ flags.DEFINE_enum(
     ["seg", "reg"],
     """Type of the task for which the chips are being generated. This will
     impact the data type used to save the labels and thus the storage used.
-    - "seg" for segmentation tasks. The labels raster file will be saved as int16.
+    - "seg" for segmentation tasks. The labels raster file will be saved as int8.
     - "reg" for regression tasks. The labels raster file will be saved as float32.
     """,
 )

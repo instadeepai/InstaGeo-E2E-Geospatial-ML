@@ -51,6 +51,14 @@ Define training parameters using command-line arguments or YAML configs (see `in
 
 Prepare your data using the InstaGeo Chip Creator or similar tools.
 Your dataset CSV should include `Input` and `Label` columns, with paths relative to `root_dir`.
+Take a look at how you can prepare your dataset in the demo notebooks that cover useful data preparation examples (chip creation, cleaning, and splitting). You can use the following notebooks in `notebooks/` as references for reproducible data prepreparation:
+
+- `chip_creator_demo.ipynb` – point-based chip creation
+- `raster_chip_creator_demo.ipynb` – raster/bbox-based chip creation
+- `data_cleaner_demo.ipynb` – cleaning of chips and segmentation maps dataset
+- `data_splitter_demo.ipynb` – train/val/test splits with multiple strategies
+
+ The commands in these notebooks produce CSVs with `Input` and `Label` paths compatible with the training commands below.
 
 ### 3. Training Example
 

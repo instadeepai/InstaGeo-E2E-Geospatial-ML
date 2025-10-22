@@ -536,7 +536,9 @@ class HLSPointsPipeline(BasePointsDataPipeline):
                             logging.warning(f"Skipping {chip_filename} due to cloud")
                             continue
 
-                        seg_map = create_segmentation_map(chip, obsv_records, self.window_size)
+                        seg_map = create_segmentation_map(
+                            chip, obsv_records, self.window_size, self.task_type
+                        )
                         seg_map = mask_segmentation_map(
                             chip,
                             seg_map,

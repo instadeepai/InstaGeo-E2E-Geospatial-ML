@@ -78,6 +78,8 @@ flags.DEFINE_string(
 flags.DEFINE_string("date", None, "Date of the observations.")
 
 
+# TODO: Unify the code with the chip_creator.py file
+# TODO: Handle Sentinel-1 data
 def main(argv: Any) -> None:
     """Raster Chip Creator.
 

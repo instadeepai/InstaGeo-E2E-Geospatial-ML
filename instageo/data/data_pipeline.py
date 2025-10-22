@@ -666,6 +666,7 @@ class BasePointsDataPipeline(ABC):
         spatial_resolution: float,
         qa_check: bool = True,
         window_size: int = 0,
+        task_type: str = "seg",
     ) -> None:
         """Init."""
         self.output_directory = output_directory
@@ -676,6 +677,7 @@ class BasePointsDataPipeline(ABC):
         self.spatial_resolution = spatial_resolution
         self.qa_check = qa_check
         self.window_size = window_size
+        self.task_type = task_type
 
     @abstractmethod
     def setup(self) -> None:
@@ -705,8 +707,18 @@ class BasePointsDataPipeline(ABC):
         # Get the first record to construct the chip identifier
         first_record = df.iloc[0]
         date_id = first_record["date"].strftime("%Y%m%d")
-        tile_name_splits = stac_items_str.split("_")[0].split(".")
-        tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
+
+        # Use mgrs_tile_id from the record instead of parsing from stac_items_str
+        if "mgrs_tile_id" in first_record:
+            tile_id = first_record["mgrs_tile_id"]
+        else:
+            # Fallback to parsing from stac_items_str (for HLS compatibility)
+            tile_name_splits = stac_items_str.split("_")[0].split(".")
+            if len(tile_name_splits) >= 4:
+                tile_id = f"{tile_name_splits[1]}_{tile_name_splits[2]}_{tile_name_splits[3]}"
+            else:
+                tile_id = stac_items_str.split("_")[0]
+
         chip_base_id = f"{date_id}_{tile_id}"
 
         return chip_base_id in existing_chips
@@ -799,7 +811,7 @@ class BasePointsDataPipeline(ABC):
                 chip_paths = []
                 label_paths = []
                 for stac_items_str, tile_dict in tqdm(
-                    dataset.items(), desc="Processing HLS Dataset"
+                    dataset.items(), desc="Processing Dataset entries"
                 ):
                     df = obsv_records[obsv_records["stac_items_str"] == stac_items_str]
                     future = client.submit(

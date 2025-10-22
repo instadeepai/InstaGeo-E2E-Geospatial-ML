@@ -44,6 +44,9 @@ from sklearn.cluster import KMeans
 from sklearn.discriminant_analysis import StandardScaler
 from sklearn.model_selection import train_test_split
 
+# TODO: Make map visualization more customizable and localized to the dataset
+# TODO: Clean up code
+
 # Visualization constants
 # These values may need to be tuned for different datasets
 VIZ_COLORS = {
@@ -849,6 +852,7 @@ def merge_clusters(cluster1: int, cluster2: int, df_with_clusters: pd.DataFrame)
     return df_with_clusters
 
 
+# TODO: Add option to ignore test or val set
 def _try_kmeans_groups(df: pd.DataFrame, n_clusters: int) -> None:
     """Try to create groups based on KMeans clustering.
 

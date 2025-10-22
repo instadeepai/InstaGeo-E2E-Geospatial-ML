@@ -195,6 +195,33 @@ class S2BandsSettings(BaseSettings):
     }
 
 
+class S1BlockSizes(BaseSettings):
+    """Settings for block sizes used in S1 COG tiling."""
+
+    X: int = 512
+    Y: int = 512
+
+
+class S1APISettings(BaseSettings):
+    """Settings for Sentinel-1 API configuration."""
+
+    URL: str = "https://planetarycomputer.microsoft.com/api/stac/v1"
+    COLLECTIONS: List[str] = ["sentinel-1-rtc"]
+
+
+class S1BandsSettings(BaseSettings):
+    """Settings for Sentinel-1 bands configuration."""
+
+    ASSET: List[str] = ["vv", "vh"]
+
+    NAMEPLATE: Dict[str, Dict[str, str]] = {
+        "sentinel-1-rtc": {
+            "vv": "vv",
+            "vh": "vh",
+        }
+    }
+
+
 class DataPipelineSettings(BaseSettings):
     """Settings for data pipeline configuration."""
 

@@ -23,38 +23,26 @@ import ast
 import json
 import logging as std_logging
 import os
-from functools import partial
-from typing import Any, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
-import dask.distributed
-import earthaccess
 import geopandas as gpd
 import pandas as pd
-import rasterio
 from absl import app, flags, logging
 from dotenv import load_dotenv
 from pystac_client import Client
 from shapely.geometry import Point
-from tqdm import tqdm
 
 from instageo.data import hls_utils, s1_utils, s2_utils
-from instageo.data.data_pipeline import (
-    NO_DATA_VALUES,
-    apply_mask,
-    create_and_save_chips_with_seg_maps,
-    get_pystac_client,
-    get_tiles,
-)
+from instageo.data.data_pipeline import get_tiles
 from instageo.data.flags import FLAGS
 from instageo.data.hls_utils import HLSPointsPipeline, add_hls_stac_items
-from instageo.data.settings import GDALOptions, S2Bands
+from instageo.data.s1_utils import S1PointsPipeline, add_s1_stac_items
+from instageo.data.s2_utils import S2PointsPipeline, add_s2_stac_items
 from instageo.data.stac_utils import create_records_with_items
 
 load_dotenv(os.path.expanduser("~/.credentials"))
 logging.set_verbosity(logging.INFO)
 std_logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
-
-S2_BANDS = S2Bands().VALUES
 
 flags.DEFINE_string("dataframe_path", None, "Path to the DataFrame file.")
 
@@ -70,17 +58,6 @@ flags.DEFINE_boolean(
     """Indicates whether or not the current task is a time series one. The data will be then
     retrieved before the date of observation""",
 )
-flags.DEFINE_list(
-    "s2_bands",
-    ["B02", "B03", "B04", "B8A", "B11", "B12"],
-    "List of different bands to extract. Applies only if `data_source` is set to 'S2'",
-)
-flags.register_validator(
-    "s2_bands",
-    lambda bands: all(b in S2_BANDS for b in bands),
-    message=f"Valid values are {S2_BANDS}",
-)
-
 flags.DEFINE_enum(
     "processing_method",
     "cog",
@@ -177,14 +154,105 @@ def check_required_flags() -> None:
             raise app.UsageError(f"Flag --{flag_name} is required.")
 
 
-def setup() -> None:
-    """Setup for environment to be used by Dask client.
+# TODO: Improve this workflow by using a more generic approach
+# The pipeline classes and the add_stac_items_func are similar for all data sources
 
-    Configures relevant GDAL options for reading COGs
+# Data source configuration
+DATA_SOURCE_CONFIG: Dict[str, Dict[str, Any]] = {
+    "HLS": {
+        "add_stac_items_func": add_hls_stac_items,
+        "pipeline_class": HLSPointsPipeline,
+        "granules_field": "hls_granules",
+        "items_field": "hls_items",
+        "client_func": lambda: Client.open(hls_utils.API.URL),
+        "extra_params": ["temporal_tolerance_minutes", "cloud_coverage", "daytime_only"],
+    },
+    "S2": {
+        "add_stac_items_func": add_s2_stac_items,
+        "pipeline_class": S2PointsPipeline,
+        "granules_field": "s2_granules",
+        "items_field": "s2_items",
+        "client_func": lambda: Client.open(s2_utils.API.URL),
+        "extra_params": ["temporal_tolerance_minutes", "cloud_coverage", "daytime_only"],
+    },
+    "S1": {
+        "add_stac_items_func": add_s1_stac_items,
+        "pipeline_class": S1PointsPipeline,
+        "granules_field": "s1_granules",
+        "items_field": "s1_items",
+        "client_func": lambda: Client.open(s1_utils.API.URL),
+        "extra_params": ["temporal_tolerance_minutes"],
+    },
+}
+
+
+def process_data_source(
+    data_source: str,
+    sub_data: pd.DataFrame,
+    add_stac_items_func: Callable,
+    pipeline_class: type,
+    granules_field: str,
+    items_field: str,
+    client_func: Callable,
+    **kwargs,
+) -> None:
+    """Generic function to process any data source (HLS, S2, S1).
+
+    Args:
+        data_source: Name of the data source (e.g., "HLS", "S2", "S1")
+        sub_data: Input data DataFrame
+        add_stac_items_func: Function to add STAC items (e.g., add_hls_stac_items)
+        pipeline_class: Pipeline class to instantiate (e.g., HLSPointsPipeline)
+        granules_field: Field name for granules (e.g., "hls_granules")
+        items_field: Field name for items (e.g., "hls_items")
+        client_func: Function to get STAC client
+        **kwargs: Additional arguments for add_stac_items_func
     """
-    earthaccess.login(strategy="environment", persist=True)
-    env = rasterio.Env(**GDALOptions().model_dump())
-    env.__enter__()
+    dataset_file = os.path.join(FLAGS.output_directory, f"{data_source.lower()}_dataset.json")
+    records_file = os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")
+
+    if not (os.path.exists(dataset_file) and os.path.exists(records_file)):
+        logging.info(f"Creating {data_source} dataset JSON.")
+        logging.info(f"Retrieving {data_source} tile ID for each observation.")
+        os.makedirs(os.path.join(FLAGS.output_directory), exist_ok=True)
+
+        # Convert to GeoPandas DataFrame
+        geometry = [Point(xy) for xy in zip(sub_data["x"], sub_data["y"])]
+        sub_data = gpd.GeoDataFrame(sub_data, geometry=geometry, crs=f"EPSG:{FLAGS.src_crs}")
+        sub_data["geometry_4326"] = sub_data["geometry"].to_crs("EPSG:4326")
+
+        client = client_func()
+        sub_data_with_items = add_stac_items_func(client, sub_data, **kwargs)
+
+        (
+            filtered_obsv_records,
+            dataset,
+        ) = create_records_with_items(sub_data_with_items, granules_field, items_field)
+
+        with open(dataset_file, "w") as json_file:
+            json.dump(dataset, json_file, indent=4)
+        filtered_obsv_records.to_file(records_file, driver="GPKG")
+    else:
+        logging.info(f"{data_source} dataset JSON already created")
+        with open(dataset_file) as json_file:
+            dataset = json.load(json_file)
+        filtered_obsv_records = gpd.read_file(records_file)
+
+    logging.info("Creating Chips and Segmentation Maps")
+
+    pipeline = pipeline_class(
+        output_directory=FLAGS.output_directory,
+        chip_size=FLAGS.chip_size,
+        mask_types=getattr(FLAGS, "mask_types", []),
+        masking_strategy=FLAGS.masking_strategy,
+        src_crs=FLAGS.src_crs,
+        spatial_resolution=getattr(FLAGS, "spatial_resolution", None),
+        window_size=FLAGS.window_size,
+        task_type=FLAGS.task_type,
+    )
+
+    # Run pipeline
+    pipeline.run(dataset, filtered_obsv_records)
 
 
 def main(argv: Any) -> None:
@@ -230,251 +298,32 @@ def main(argv: Any) -> None:
     FLAGS.num_steps = 1 if not FLAGS.is_time_series_task else FLAGS.num_steps
     sub_data = get_tiles(data, src_crs=FLAGS.src_crs, min_count=FLAGS.min_count)
 
-    if FLAGS.data_source == "HLS":
-        logging.info("Using Harmonized Landsat Sentinel-2 pipeline")
-        if not (
-            os.path.exists(os.path.join(FLAGS.output_directory, "hls_dataset.json"))
-            and os.path.exists(os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg"))
-        ):
-            logging.info("Creating HLS dataset JSON.")
-            logging.info("Retrieving HLS tile ID for each observation.")
-            os.makedirs(os.path.join(FLAGS.output_directory), exist_ok=True)
-
-            # Convert to GeoPandas DataFrame
-            # Once all pipelines have been migrated, move this section outside this if-block
-            geometry = [Point(xy) for xy in zip(sub_data["x"], sub_data["y"])]
-            sub_data = gpd.GeoDataFrame(sub_data, geometry=geometry, crs=f"EPSG:{FLAGS.src_crs}")
-            sub_data["geometry_4326"] = sub_data["geometry"].to_crs("EPSG:4326")
-
-            client = Client.open(hls_utils.API.URL)
-            sub_data_with_hls_items = add_hls_stac_items(
-                client,
-                sub_data,
-                num_steps=FLAGS.num_steps,
-                temporal_step=FLAGS.temporal_step,
-                temporal_tolerance=FLAGS.temporal_tolerance,
-                temporal_tolerance_minutes=FLAGS.temporal_tolerance_minutes,
-                cloud_coverage=FLAGS.cloud_coverage,
-                daytime_only=FLAGS.daytime_only,
-            )
-            (
-                filtered_obsv_records,
-                hls_dataset,
-            ) = create_records_with_items(sub_data_with_hls_items, "hls_granules", "hls_items")
-            with open(os.path.join(FLAGS.output_directory, "hls_dataset.json"), "w") as json_file:
-                json.dump(hls_dataset, json_file, indent=4)
-            filtered_obsv_records.to_file(
-                os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg"),
-                driver="GPKG",
-            )
-        else:
-            logging.info("HLS dataset JSON already created")
-            with open(os.path.join(FLAGS.output_directory, "hls_dataset.json")) as json_file:
-                hls_dataset = json.load(json_file)
-            filtered_obsv_records = gpd.read_file(
-                os.path.join(FLAGS.output_directory, "filtered_obsv_records.gpkg")
-            )
-
-        if FLAGS.processing_method in ["download", "download-only"]:
-            logging.info("Downloading HLS Tiles")
-            os.makedirs(os.path.join(FLAGS.output_directory, "hls_tiles"), exist_ok=True)
-            hls_utils.parallel_download(
-                hls_dataset,
-                outdir=os.path.join(FLAGS.output_directory, "hls_tiles"),
-            )
-        if FLAGS.processing_method == "download-only":
-            return
-        logging.info("Creating Chips and Segmentation Maps")
-
-        hls_points_pipeline = HLSPointsPipeline(
-            output_directory=FLAGS.output_directory,
-            chip_size=FLAGS.chip_size,
-            mask_types=FLAGS.mask_types,
-            masking_strategy=FLAGS.masking_strategy,
-            src_crs=FLAGS.src_crs,
-            spatial_resolution=FLAGS.spatial_resolution,
-            window_size=FLAGS.window_size,
-        )
-
-        # Run HLS Points pipeline
-        hls_points_pipeline.run(hls_dataset, filtered_obsv_records)
-
-    elif FLAGS.data_source == "S2":
-        logging.info("Using Sentinel-2 pipeline")
-        if not (
-            os.path.exists(os.path.join(FLAGS.output_directory, "s2_dataset.json"))
-            and os.path.exists(os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv"))
-        ):
-            logging.info("Creating S2 dataset JSON.")
-            logging.info("Retrieving S2 tile ID for each observation.")
-
-            sub_data_with_tiles = s2_utils.add_s2_granules(
-                sub_data,
-                num_steps=FLAGS.num_steps,
-                temporal_step=FLAGS.temporal_step,
-                temporal_tolerance=FLAGS.temporal_tolerance,
-                cloud_coverage=FLAGS.cloud_coverage,
-            )
-
-            logging.info("Retrieving S2 tiles that will be downloaded.")
-            s2_dataset, s2_granules_to_download = s2_utils.create_s2_dataset(
-                sub_data_with_tiles, outdir=FLAGS.output_directory
-            )
-            with open(os.path.join(FLAGS.output_directory, "s2_dataset.json"), "w") as json_file:
-                json.dump(s2_dataset, json_file, indent=4)
-            s2_granules_to_download.to_csv(
-                os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv")
-            )
-        else:
-            logging.info("S2 dataset JSON already created")
-            with open(os.path.join(FLAGS.output_directory, "s2_dataset.json")) as json_file:
-                s2_dataset = json.load(json_file)
-            s2_granules_to_download = pd.read_csv(
-                os.path.join(FLAGS.output_directory, "s2_granules_to_download.csv")
-            )
-        s2_tiles_dir = os.path.join(FLAGS.output_directory, "s2_tiles")
-        os.makedirs(s2_tiles_dir, exist_ok=True)
-        if FLAGS.processing_method in ["download", "download-only"]:
-            logging.info("Downloading Sentinel-2 Tiles")
-            s2_utils.download_tile_data(
-                s2_granules_to_download,
-                s2_tiles_dir,
-                client_id=os.getenv("CLIENT_ID"),
-                username=os.getenv("USERNAME"),
-                password=os.getenv("PASSWORD"),
-            )
-            logging.info("Unzipping Sentinel-2 products")
-            s2_utils.extract_and_delete_zip_files(s2_tiles_dir)
-
-        if FLAGS.processing_method == "download-only":
-            return
-
-        logging.info("Creating Chips and Segmentation Maps")
-        all_chips = []
-        all_seg_maps = []
-        os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
-        os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-        s2_pystac_client = get_pystac_client()
-        with dask.distributed.Client() as client:
-            for key, tile_dict in tqdm(s2_dataset.items(), desc="Processing Sentinel-2 Dataset"):
-                obsv_date_str, tile_id = key.split("_")
-                obsv_data = sub_data[
-                    (sub_data["date"] == pd.to_datetime(obsv_date_str))
-                    & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
-                ]
-                try:
-                    chips, seg_maps = create_and_save_chips_with_seg_maps(
-                        data_reader=(
-                            partial(
-                                s2_utils.search_and_open_s2_cogs,
-                                s2_pystac_client,
-                                FLAGS.s2_bands,
-                            )
-                            if FLAGS.processing_method == "cog"
-                            else s2_utils.open_mf_jp2_dataset
-                        ),
-                        mask_fn=apply_mask,
-                        processing_method=FLAGS.processing_method,
-                        tile_dict=tile_dict,
-                        data_source=FLAGS.data_source,
-                        df=obsv_data,
-                        chip_size=FLAGS.chip_size,
-                        output_directory=FLAGS.output_directory,
-                        no_data_value=NO_DATA_VALUES.S2,
-                        src_crs=FLAGS.src_crs,
-                        mask_decoder=s2_utils.create_mask_from_scl,
-                        mask_types=FLAGS.mask_types,
-                        masking_strategy=FLAGS.masking_strategy,
-                        window_size=FLAGS.window_size,
-                        task_type=FLAGS.task_type,
-                    )
-                    all_chips.extend(chips)
-                    all_seg_maps.extend(seg_maps)
-                except rasterio.errors.RasterioIOError as e:
-                    logging.error(f"Error {e} when reading dataset containing: {tile_dict}")
-                except IndexError as e:
-                    logging.error(f"Error {e} when processing {key}")
-
-        logging.info("Saving dataframe of chips and segmentation maps.")
-        pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
-            os.path.join(FLAGS.output_directory, "s2_chips_dataset.csv")
-        )
-
-    elif FLAGS.data_source == "S1":
-        logging.info("Using Sentinel-1 pipeline")
-        s1_pystac_client = get_pystac_client()
-        s1_dataset_with_items: Any = {}
-        if not (os.path.exists(os.path.join(FLAGS.output_directory, "s1_dataset.json"))):
-            logging.info("Creating S1 dataset JSON.")
-            logging.info("Retrieving S1 tile ID for each observation.")
-
-            sub_data_with_tiles = s1_utils.add_s1_items(
-                s1_pystac_client,
-                sub_data,
-                src_crs=FLAGS.src_crs,
-                num_steps=FLAGS.num_steps,
-                temporal_step=FLAGS.temporal_step,
-                temporal_tolerance=FLAGS.temporal_tolerance,
-            )
-
-            logging.info("Retrieving S1 tiles that will be loaded.")
-            s1_dataset, s1_dataset_with_items = s1_utils.create_s1_dataset(sub_data_with_tiles)
-            with open(os.path.join(FLAGS.output_directory, "s1_dataset.json"), "w") as json_file:
-                json.dump(s1_dataset, json_file, indent=4)
-        else:
-            logging.info("S1 dataset JSON already created")
-            with open(os.path.join(FLAGS.output_directory, "s1_dataset.json")) as json_file:
-                s1_dataset = json.load(json_file)
-                logging.info("Loading PySTAC items from dataset")
-                s1_dataset_with_items = s1_utils.load_pystac_items_from_dataset(s1_dataset)
-        logging.info("Creating Chips and Segmentation Maps")
-        all_chips = []
-        all_seg_maps = []
-        os.makedirs(os.path.join(FLAGS.output_directory, "chips"), exist_ok=True)
-        os.makedirs(os.path.join(FLAGS.output_directory, "seg_maps"), exist_ok=True)
-        FLAGS.processing_method = "cog"
-        with dask.distributed.Client() as client:
-            for key, tile_dict in tqdm(
-                s1_dataset_with_items.items(), desc="Processing Sentinel-1 Dataset"
-            ):
-                obsv_date_str, tile_id, _ = key.split("_")
-                obsv_data = sub_data[
-                    (sub_data["date"] == pd.to_datetime(obsv_date_str))
-                    & (sub_data["mgrs_tile_id"].str.contains(tile_id.strip("T")))
-                ]
-                try:
-                    chips, seg_maps = create_and_save_chips_with_seg_maps(
-                        data_reader=s1_utils.open_s1_cogs,
-                        mask_fn=apply_mask,
-                        processing_method=FLAGS.processing_method,
-                        tile_dict=tile_dict,
-                        data_source=FLAGS.data_source,
-                        df=obsv_data,
-                        chip_size=FLAGS.chip_size,
-                        output_directory=FLAGS.output_directory,
-                        no_data_value=NO_DATA_VALUES.S1,
-                        src_crs=FLAGS.src_crs,
-                        mask_decoder=s1_utils.decode_mask,
-                        mask_types=[],
-                        masking_strategy=FLAGS.masking_strategy,
-                        window_size=FLAGS.window_size,
-                        task_type=FLAGS.task_type,
-                    )
-                    all_chips.extend(chips)
-                    all_seg_maps.extend(seg_maps)
-                except rasterio.errors.RasterioIOError as e:
-                    logging.error(f"Error {e} when reading dataset containing: {tile_dict}")
-                except IndexError as e:
-                    logging.error(f"Error {e} when processing {key}")
-
-        logging.info("Saving dataframe of chips and segmentation maps.")
-        pd.DataFrame({"Input": all_chips, "Label": all_seg_maps}).to_csv(
-            os.path.join(FLAGS.output_directory, "s1_chips_dataset.csv")
-        )
-    else:
+    # Process data source using configuration registry
+    if FLAGS.data_source not in DATA_SOURCE_CONFIG:
         raise ValueError(
-            "Error: data_source value is not correct. Please enter 'HLS' or 'S2' or 'S1'."
+            f"Error: data_source value '{FLAGS.data_source}' is not correct. "
+            f"Please enter one of: {', '.join(DATA_SOURCE_CONFIG.keys())}."
         )
+
+    config = DATA_SOURCE_CONFIG[FLAGS.data_source]
+    logging.info(f"Using {FLAGS.data_source} pipeline")
+
+    # Build extra parameters from FLAGS
+    extra_params = {param: getattr(FLAGS, param) for param in config["extra_params"]}
+
+    process_data_source(
+        data_source=FLAGS.data_source,
+        sub_data=sub_data,
+        add_stac_items_func=config["add_stac_items_func"],
+        pipeline_class=config["pipeline_class"],
+        granules_field=config["granules_field"],
+        items_field=config["items_field"],
+        client_func=config["client_func"],
+        num_steps=FLAGS.num_steps,
+        temporal_step=FLAGS.temporal_step,
+        temporal_tolerance=FLAGS.temporal_tolerance,
+        **extra_params,
+    )
 
 
 if __name__ == "__main__":

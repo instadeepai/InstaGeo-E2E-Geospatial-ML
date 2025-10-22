@@ -19,222 +19,54 @@
 
 """Utility Functions for generating Sentinel-1 chips."""
 
-import bisect
-from collections import Counter
-from datetime import timedelta
-from typing import Any, List
+import os
+import time
+from typing import Any
 
+import backoff
 import geopandas as gpd
 import pandas as pd
-import planetary_computer
-import stackstac
+import rasterio
+import ratelimit
 import xarray as xr
 from absl import logging
-from pystac.item import Item
-from pystac.item_collection import ItemCollection
+from planetary_computer import sign
 from pystac_client import Client
 
-from instageo.data.data_pipeline import NO_DATA_VALUES, adjust_dims, get_tile_info
-from instageo.data.geo_utils import make_valid_bbox
+from instageo.data.data_pipeline import (
+    NO_DATA_VALUES,
+    BasePointsDataPipeline,
+    create_segmentation_map,
+    get_chip_coords,
+    mask_segmentation_map,
+)
+from instageo.data.settings import (
+    DataPipelineSettings,
+    S1APISettings,
+    S1BandsSettings,
+    S1BlockSizes,
+)
+from instageo.data.stac_utils import (
+    find_best_items,
+    get_raster_tile_info,
+    open_stac_items,
+    retrieve_stac_metadata,
+)
 
-BLOCKSIZE = 512
-COLLECTION = "sentinel-1-rtc"
-POLARIZATIONS = ["vv", "vh"]
-
-
-def retrieve_s1_metadata(
-    client: Client,
-    tile_info_df: pd.DataFrame,
-) -> dict[str, List[Item]]:
-    """Retrieve S1 items Metadata.
-
-    Given a tile_id, start_date and end_date, this function searches all the items
-    available for this tile_id in this time window. A pystac_client Client is used
-    to query a STAC API.
-
-    Args:
-        client (pystac_client.Client): pystac_client client to use to perform the search.
-        tile_info_df (pd.DataFrame): A dataframe containing tile_id, start_date and
-            end_date in each row.
-
-    Returns:
-        A dictionary mapping tile_id to a list of available Sentinel-1 PySTAC items
-          representing granules that contain all the polarizations needed.
-    """
-    items_dict: Any = {}
-    contains_polarizations = lambda item: all(pol in item.assets for pol in POLARIZATIONS)
-
-    for _, (
-        tile_id,
-        start_date,
-        end_date,
-        lon_min,
-        lon_max,
-        lat_min,
-        lat_max,
-    ) in tile_info_df.iterrows():
-        search = client.search(
-            collections=[COLLECTION],
-            datetime=f"{start_date}/{end_date}",
-            bbox=make_valid_bbox(lon_min, lat_min, lon_max, lat_max),
-            sortby=[{"field": "datetime", "direction": "asc"}],
-        )
-        candidate_items = search.item_collection()
-        candidate_items = list(filter(contains_polarizations, candidate_items))
-        if len(candidate_items) == 0:
-            logging.warning(f"No items found for {tile_id}")
-            continue
-        items_dict[tile_id] = candidate_items
-    return items_dict
+# Initialize settings
+API = S1APISettings()
+BANDS = S1BandsSettings()
+BLOCKSIZE = S1BlockSizes()
+DATA_PIPELINE_SETTINGS = DataPipelineSettings()
 
 
-def dispatch_candidate_items(
-    tile_observations: pd.DataFrame,
-    src_crs: int,
-    tile_candidate_items: List[Item],
-) -> pd.DataFrame:
-    """Dispatches appropriate Sentinel-1 PySTAC items to each observation.
-
-    A given observation will have a candidate item if it falls within the
-    geometry of the granule.
-
-    Args:
-        tile_observations (pandas.DataFrame): DataFrame containing observations
-            of the same tile.
-        src_crs (int): Source CRS of the observations.
-        tile_candidate_items (List[Item]): List of candidate items for a given tile
-    Returns:
-        A DataFrame with observations and their containing granules (items)
-        when possible.
-    """
-    s1_item_ids = [item.id for item in tile_candidate_items]
-    candidate_items_gdf = gpd.GeoDataFrame.from_features(tile_candidate_items, crs=4326)
-    candidate_items_gdf["s1_item_id"] = s1_item_ids
-    candidate_items_gdf = candidate_items_gdf[["s1_item_id", "geometry"]]
-
-    tile_observations = gpd.GeoDataFrame(
-        tile_observations,
-        geometry=gpd.points_from_xy(
-            x=tile_observations.x,
-            y=tile_observations.y,
-        ),
-        crs=src_crs,
-    ).to_crs(4326)
-
-    matches = gpd.sjoin(
-        tile_observations,
-        candidate_items_gdf,
-        predicate="within",
-    )
-    tile_observations["s1_candidate_items"] = (
-        matches.groupby(matches.index)
-        .agg({"index_right": (lambda indices: [tile_candidate_items[id] for id in indices])})
-        .reindex(tile_observations.index, fill_value=[])
-    )
-    return tile_observations.drop(columns=["geometry"])
-
-
-def find_best_s1_items(
-    data: pd.DataFrame,
-    src_crs: int,
-    tiles_database: dict[str, List[Item]],
-    temporal_tolerance: int = 12,
-) -> dict[str, pd.DataFrame]:
-    """Finds best Sentinel-1 PySTAC items for all observations when possible.
-
-    For each observation, an attempt is made to retrieve the Sentinel-1 granules
-    that actually contain the observation. The `dispatch_candidate_items` function is
-    thus used to ensure that the best Sentinel-1 PySTAC items are not just
-    the closest in terms of datetime.
-
-    Args:
-        data (pd.DataFrame): A dataframe containing observations that fall within a
-            dense tile.
-        src_crs (int): Source CRS of the observations.
-        tiles_database(dict[str, List[Item]]): A dictionary mapping a tile ID to a list
-          of available Sentinel-1 PySTAC items.
-        temporal_tolerance (int): Tolerance (in days) for finding closest Sentinel-1 items.
-
-    Returns:
-        A dictionary mapping each MGRS tile ID to a DataFrame containing the observations
-        that fall within that tile with their associated best PySTAC items representing
-        the Sentinel-1 granules.
-
-    """
-    best_s1_items = {}
-    for tile_id in tiles_database:
-        tile_obsvs = data[data["mgrs_tile_id"] == tile_id]
-
-        # Before retrieving the temporally closest items, let's filter
-        # the items by making sure only the ones with geometry in which
-        # the observations fall are kept.
-        tile_obsvs_with_s1_items = dispatch_candidate_items(
-            tile_obsvs, src_crs, tiles_database[tile_id]
-        )
-
-        # We can then retrieve the closest item in time.
-        tile_obsvs_with_s1_items["s1_items"] = tile_obsvs_with_s1_items.apply(
-            lambda obsv: find_closest_items(obsv, temporal_tolerance), axis=1
-        )
-
-        best_s1_items[tile_id] = tile_obsvs_with_s1_items.drop(columns=["s1_candidate_items"])
-    return best_s1_items
-
-
-def find_closest_items(obsv: pd.Series, temporal_tolerance: int = 12) -> List[Item | None]:
-    """Finds temporally closest Sentinel-1 PySTAC items for a given observation.
-
-    Args:
-        obsv (pandas.Series): Observation data containing the observation date
-         and the Sentinel-1 candidate items from which to pick.
-        temporal_tolerance (int): Number of days that can be tolerated for matching
-            granules from the candidate items.
-
-    Returns:
-        List[Item | None]: A list containing items if found within the temporal
-           tolerance or None values.
-
-    """
-    dates = obsv.tile_queries[1]
-    items = obsv.s1_candidate_items
-    if not items:
-        return [None] * len(dates)
-    closest_items = []
-    for date in dates:
-        query_date = pd.to_datetime(date, utc=True)
-        closest_item = None
-        min_diff = timedelta.max.days
-
-        index = bisect.bisect_left(items, query_date, key=lambda item: item.datetime)
-
-        # Let's select when possible the closest item anterior to the observation date.
-        if index > 0:
-            diff = abs((items[index - 1].datetime - query_date).days)
-            if diff < min_diff:
-                closest_item = items[index - 1]
-                min_diff = diff
-
-        # Let's select when possible the closest item posterior or corresponding to the
-        #  observation date. That item is kept as closest, if it is closer to the
-        # observation date, when compared to the potential item selected in the previous step.
-        if index < len(items):
-            diff = abs((items[index].datetime - query_date).days)
-            if diff < min_diff:
-                closest_item = items[index]
-                min_diff = diff
-
-        # The closest item is added if it is within the temporal tolerance
-        closest_items.append(closest_item if min_diff <= temporal_tolerance else None)
-    return closest_items
-
-
-def add_s1_items(
+def add_s1_stac_items(
     client: Client,
     data: pd.DataFrame,
-    src_crs: int,
     num_steps: int = 3,
     temporal_step: int = 10,
     temporal_tolerance: int = 12,
+    temporal_tolerance_minutes: int = 0,
 ) -> dict[str, pd.DataFrame]:
     """Searches and adds Sentinel-1 Granules.
 
@@ -246,130 +78,187 @@ def add_s1_items(
         client (pystac_client.Client): pystac_client client to use to perform the search.
         data (pd.DataFrame): A dataframe containing observations that fall within a
             dense tile.
-        src_crs (int): Source CRS of the observations.
         num_steps (int): Number of temporal steps into the past to fetch.
         temporal_step (int): Step size (in days) for creating temporal steps.
         temporal_tolerance (int): Tolerance (in days) for finding closest Sentinel-1 items.
-
+        temporal_tolerance_minutes (int): Additional tolerance in minutes for
+            finding closest Sentinel-1 items.
 
     Returns:
         A dictionary mapping each MGRS tile ID to a DataFrame containing the observations
           that fall within that tile with their associated PySTAC items representing granules.
     """
-    tiles_info, tile_queries = get_tile_info(
+    if "input_features_date" not in data.columns:
+        data = data.rename(columns={"date": "input_features_date"})
+
+    tiles_info, tile_queries = get_raster_tile_info(
         data,
         num_steps=num_steps,
         temporal_step=temporal_step,
         temporal_tolerance=temporal_tolerance,
+        temporal_tolerance_minutes=temporal_tolerance_minutes,
     )
+
     data["tile_queries"] = tile_queries
-    tiles_database = retrieve_s1_metadata(client, tiles_info)
-    best_items = find_best_s1_items(data, src_crs, tiles_database, temporal_tolerance)
+    tiles_database = retrieve_stac_metadata(
+        client,
+        tiles_info,
+        collections=API.COLLECTIONS,
+        bands_nameplate=BANDS.NAMEPLATE,
+        cloud_coverage=None,
+        daytime_only=False,
+    )
+    best_items = find_best_items(
+        data,
+        tiles_database,
+        item_id_field="s1_item_id",
+        candidate_items_field="s1_candidate_items",
+        items_field="s1_items",
+        temporal_tolerance=temporal_tolerance,
+    )
     return best_items
 
 
-def create_s1_dataset(best_items: dict[str, pd.DataFrame]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Creates the Sentinel-1 dataset from granules found.
+class S1PointsPipeline(BasePointsDataPipeline):
+    """S1 Points Data Pipeline."""
 
-    Args:
-        best_items (dict[str, pd.DataFrame]) : A dictionary mapping each MGRS tile ID to
-        a DataFrame containing the observations that fall within that tile with their
-        associated PySTAC items representing granules.
+    def setup(self) -> None:
+        """Setup for environment to be used by Dask workers.
 
-    Returns:
-        ([dict[str, Any], dict[str, Any]): A tuple containing a dictionary mapping
-        the observations to the granules ID and a dictionary mapping the observations
-        to PySTAC items representing the granules.
+        Configures relevant GDAL options for reading COGs
+        """
+        pass
 
-    """
-    s1_dataset = {}
-    s1_dataset_with_items = {}
-    for tile_id in best_items:
-        tile_obsv_ids_counter: Any = Counter()
-        obsvs = best_items[tile_id]
-        obsvs["s1_granules"] = obsvs.apply(
-            lambda obsv: [item.id if isinstance(item, Item) else None for item in obsv["s1_items"]],
-            axis=1,
-        )
-        obsvs = obsvs.drop_duplicates(subset=["s1_granules"])
-        obsvs = obsvs[obsvs.apply(is_valid_dataset_entry, axis=1)]
-
-        for _, obsv in obsvs.iterrows():
-            tile_obsv_id = obsv.date.strftime("%Y-%m-%d") + f"_{tile_id}"
-            s1_dataset[f"{tile_obsv_id}_{tile_obsv_ids_counter[tile_obsv_id]}"] = {
-                "granules": [item.to_dict() for item in obsv["s1_items"]]
-            }
-            s1_dataset_with_items[f"{tile_obsv_id}_{tile_obsv_ids_counter[tile_obsv_id]}"] = {
-                "items": obsv["s1_items"]
-            }
-            tile_obsv_ids_counter[tile_obsv_id] += 1
-    return s1_dataset, s1_dataset_with_items
-
-
-def is_valid_dataset_entry(obsv: pd.Series) -> bool:
-    """Checks S1 granules validity for a given observation.
-
-    The granules will be added to the dataset if they are all non
-    null and unique for all timesteps.
-
-    Args:
-        obsv (pandas.Series): Observation data for which to assess the validity
-
-    Returns:
-        True if the granules are unique and non null.
-    """
-    if any(granule is None for granule in obsv["s1_granules"]) or (
-        len(obsv["s1_granules"]) != len(set(obsv["s1_granules"]))
-    ):
-        return False
-    return True
-
-
-def load_pystac_items_from_dataset(s1_dataset: dict[str, Any]) -> dict[str, Any]:
-    """Loads PySTAC items from serialized items data provided in dataset.
-
-    Args:
-        s1_dataset (dict[str, Any]): Dictionary containing the dataset.
-
-    Returns:
-        A dictionary mapping the granules ID to PySTAC items.
-    """
-    s1_dataset_with_items = {}
-    for entry in s1_dataset:
-        s1_dataset_with_items[entry] = {
-            "items": [Item.from_dict(item_dict) for item_dict in s1_dataset[entry]["granules"]]
-        }
-    return s1_dataset_with_items
-
-
-def open_s1_cogs(
-    tile_dict: dict[str, Any], load_masks: bool = False
-) -> tuple[xr.DataArray, None, str]:
-    """Opens multiple S1 COGs as an xarray DataArray from given PySTAC items.
-
-    Args:
-        tile_dict (dict[str, Any]): A dictionary containing PySTAC items to load
-        for all timesteps of interest.
-        load_masks (bool): Whether or not to load the masks COGs.
-
-    Returns:
-        (xr.DataArray, None, str): A tuple of xarray DataArray combining
-        data from all the COGs bands of interest, None (as a placeholder for the masks)
-        and the CRS used.
-    """
-    stacked_items = stackstac.stack(
-        planetary_computer.sign(ItemCollection(tile_dict["items"])),
-        assets=POLARIZATIONS,
-        epsg=4326,
-        chunksize=BLOCKSIZE,
-        properties=False,
-        rescale=False,
-        fill_value=NO_DATA_VALUES.S1,
+    @ratelimit.limits(calls=DATA_PIPELINE_SETTINGS.COG_DOWNLOAD_RATELIMIT, period=60)
+    @backoff.on_exception(
+        backoff.expo,
+        (rasterio.errors.RasterioIOError, Exception),
+        max_tries=5,
+        max_time=300,  # 5 minutes max
+        jitter=backoff.full_jitter,
     )
-    bands = adjust_dims(stacked_items.sel(band=POLARIZATIONS)).astype("float32")
-    return bands, None, bands.crs
+    def load_data(self, tile_dict: dict[str, Any]) -> tuple[xr.Dataset, xr.Dataset, str]:
+        """See parent class. Load Granules."""
+        try:
+            dsb, dsm, crs = open_stac_items(
+                tile_dict["granules"],
+                self.src_crs,
+                self.spatial_resolution,
+                bands_asset=BANDS.ASSET,
+                blocksize=(BLOCKSIZE.X, BLOCKSIZE.Y),
+                mask_band="",
+                load_masks=False,
+                fill_value=NO_DATA_VALUES.S1,
+                sign_func=sign,
+            )
+        except Exception as e:
+            logging.error(f"Error loading data: {str(e)}")
+            time.sleep(10 * 60)  # Wait 10 minutes before retrying
+            raise
 
+        return dsb, dsm, crs
 
-def decode_mask() -> None:
-    """Dummy function for decoding masks."""
-    pass
+    def process_tile(
+        self,
+        obsv_records: gpd.GeoDataFrame,
+        flags_dict: dict[str, Any],
+        tile_dict: dict[str, Any],
+        batch_size: int,
+    ) -> tuple[list[str], list[str]]:
+        """Processes a single tile.
+
+        Arguments:
+            obsv_records: Observation records dataframe.
+            flags_dict: Dictionary mapping all arguments and values needed to process the row.
+            tile_dict: Input to `self.load_data`, which contains the granules to load.
+            batch_size: Number of records to process at a time.
+        Returns: tuple of the chip and label filenames lists.
+        """
+        tile_id = obsv_records.iloc[0]["mgrs_tile_id"]
+        stac_items_str = obsv_records.iloc[0]["stac_items_str"]
+        chip_paths = []
+        label_paths = []
+
+        try:
+            date_id = obsv_records.iloc[0]["date"].strftime("%Y%m%d")
+            dsb, dsm, crs = self.load_data(tile_dict)
+            n_chips_x = dsb.sizes["x"] // self.chip_size
+            n_chips_y = dsb.sizes["y"] // self.chip_size
+            chip_coords = get_chip_coords(obsv_records, dsb, self.chip_size)
+
+            # Process chips in smaller batches to avoid overwhelming the API
+            for i in range(0, len(chip_coords), batch_size):
+                batch_coords = chip_coords[i : i + batch_size]
+                chips, seg_maps_temp_filenames, chips_temp_filenames = (
+                    [],
+                    [],
+                    [],
+                )
+
+                for x, y in batch_coords:
+                    # TODO: handle potential partially out of bound chips
+                    if (x >= n_chips_x) or (y >= n_chips_y):
+                        continue
+
+                    chip_id = f"{date_id}_{tile_id}_{x}_{y}"
+                    chip_name = f"chip_{chip_id}.tif"
+                    seg_map_name = f"seg_map_{chip_id}.tif"
+
+                    chip_filename = os.path.join(self.output_directory, "chips", chip_name)
+                    chips_temp_filenames.append(chip_filename)
+                    seg_map_filename = os.path.join(self.output_directory, "seg_maps", seg_map_name)
+                    seg_maps_temp_filenames.append(seg_map_filename)
+                    if os.path.exists(chip_filename) or os.path.exists(seg_map_filename):
+                        logging.info(f"Skipping {chip_filename} because it's already created")
+                        continue
+
+                    chip = dsb.isel(
+                        x=slice(x * self.chip_size, (x + 1) * self.chip_size),
+                        y=slice(y * self.chip_size, (y + 1) * self.chip_size),
+                    )
+                    chips.append(chip)
+
+                # Process the batch
+                try:
+                    # Compute chips locally before processing
+                    chips = [chip.compute() for chip in chips]
+
+                    for chip, chip_filename, seg_map_filename in zip(
+                        chips, chips_temp_filenames, seg_maps_temp_filenames
+                    ):
+                        if chip.where(chip != NO_DATA_VALUES.S1).count().values == 0:
+                            logging.warning(f"Skipping {chip_filename} due to no valid data pixels")
+                            continue
+
+                        seg_map = create_segmentation_map(
+                            chip, obsv_records, self.window_size, self.task_type
+                        )
+                        seg_map = mask_segmentation_map(
+                            chip,
+                            seg_map,
+                            NO_DATA_VALUES.S1,
+                            self.masking_strategy,
+                        )
+
+                        if seg_map.where(seg_map != NO_DATA_VALUES.SEG_MAP).count().values == 0:
+                            logging.warning(f"Skipping {seg_map_filename} due to empty label")
+                            continue
+
+                        label_paths.append(seg_map_filename)
+                        chip_paths.append(chip_filename)
+                        seg_map.rio.to_raster(seg_map_filename)
+                        chip.rio.to_raster(chip_filename)
+
+                except Exception as e:
+                    logging.error(f"Error processing batch: {str(e)}")
+                    continue
+
+                # Add a delay between batches to avoid rate limiting
+                time.sleep(5)
+
+        except rasterio.errors.RasterioIOError as e:
+            logging.error(f"Error {e} when reading dataset containing: {stac_items_str}")
+        except Exception as e:
+            logging.error(f"Error {e} when processing {stac_items_str}")
+
+        return chip_paths, label_paths
