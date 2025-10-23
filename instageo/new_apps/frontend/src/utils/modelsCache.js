@@ -1,7 +1,9 @@
+import apiService from '../services/apiService';
+
 const MODELS_CACHE_KEY = 'instageo_models_cache_v2';
 const MODELS_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
-export async function fetchModelsWithTTL(url) {
+export async function fetchModelsWithTTL(getAccessTokenSilently) {
   const now = Date.now();
 
   try {
@@ -17,9 +19,7 @@ export async function fetchModelsWithTTL(url) {
     localStorage.removeItem(MODELS_CACHE_KEY);
   }
 
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch models: ${res.status}`);
-  const data = await res.json();
+  const data = await apiService.getModels(getAccessTokenSilently);
 
   try {
     localStorage.setItem(

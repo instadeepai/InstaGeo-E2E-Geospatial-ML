@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Dialog,
     DialogTitle,
@@ -31,13 +31,16 @@ import {
     FilterList as FilterListIcon,
     Info as InfoIcon
 } from '@mui/icons-material';
+import { useAuth0 } from '@auth0/auth0-react';
 import VisualizationDialog from './VisualizationDialog';
 import BoundingBoxSnapshot from './BoundingBoxSnapshot';
-import { INSTAGEO_BACKEND_API_ENDPOINTS } from '../config';
 import { logger } from '../utils/logger';
 import { fetchModelsWithTTL } from '../utils/modelsCache';
+import apiService from '../services/apiService';
 
 const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
+    const { getAccessTokenSilently } = useAuth0();
+
     const [tasks, setTasks] = useState([]);
     const [filteredTasks, setFilteredTasks] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -53,15 +56,11 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
     const tasksPerPage = 5;
     const pollingInterval = useRef(null);
 
-    const fetchTasks = async () => {
+    const fetchTasks = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
-            const response = await fetch(INSTAGEO_BACKEND_API_ENDPOINTS.GET_ALL_TASKS);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            const data = await response.json();
+            const data = await apiService.getAllTasks(getAccessTokenSilently);
             setTasks(data);
         } catch (err) {
             logger.error('Error fetching tasks:', err);
@@ -69,7 +68,7 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [getAccessTokenSilently]);
 
     // Filter tasks based on search term, status filter, and model filter
     useEffect(() => {
@@ -124,7 +123,7 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
                 clearInterval(pollingInterval.current);
             }
         };
-    }, [open]);
+    }, [open, fetchTasks]);
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -245,13 +244,7 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
     const handleVisualize = async (task) => {
         try {
             // Call the TiTiler service API to get visualization data
-            const response = await fetch(INSTAGEO_BACKEND_API_ENDPOINTS.VISUALIZE(task.task_id));
-
-            if (!response.ok) {
-                throw new Error(`Failed to get visualization data: ${response.status}`);
-            }
-
-            const titilerData = await response.json();
+            const titilerData = await apiService.visualizeTask(task.task_id, getAccessTokenSilently);
 
             if (!titilerData || (titilerData && !titilerData.prediction && !titilerData.satellite)) {
                 throw new Error('Visualization data is not available yet for this task');
@@ -293,15 +286,15 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
     };
 
     // Fetch models from cache
-    const fetchModels = async () => {
+    const fetchModels = useCallback(async () => {
         try {
-            const models = await fetchModelsWithTTL(INSTAGEO_BACKEND_API_ENDPOINTS.GET_MODELS);
+            const models = await fetchModelsWithTTL(getAccessTokenSilently);
             setAvailableModels(models || []);
         } catch (error) {
             logger.warn('Failed to fetch models for filter:', error);
             setAvailableModels([]);
         }
-    };
+    }, [getAccessTokenSilently]);
 
     // Get unique model names from available models
     const getUniqueModelNames = () => {
@@ -316,7 +309,7 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
         if (open) {
             fetchModels();
         }
-    }, [open]);
+    }, [open, fetchModels]);
 
     return (
         <>

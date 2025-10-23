@@ -3,11 +3,9 @@
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
-
-import redis  # type: ignore
 
 from instageo.model.configs.config_dataclasses import dict_to_chip_inference_config
 from instageo.model.inference_pipeline import RayEvaluationPipeline
@@ -15,16 +13,10 @@ from instageo.model.registry.model_registry import ModelRegistry
 from instageo.new_apps.backend.app.cog_converter import COGConverter
 from instageo.new_apps.backend.app.data_processor import DataProcessor
 from instageo.new_apps.backend.app.jobs import Job, JobStatus
+from instageo.new_apps.backend.app.redis_client import redis_client
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# Initialize Redis connection for task storage
-redis_conn: Any = redis.Redis(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", 6379)),
-    db=int(os.getenv("REDIS_DB", 0)),
-)
 
 DATA_FOLDER = os.getenv("DATA_FOLDER", "/app/instageo-data")
 
@@ -69,9 +61,9 @@ class Task:
         self.task_id = task_id
         self.bboxes = bboxes
         self.parameters = parameters or {}
-        self.created_at = created_at or datetime.utcnow().isoformat() + "Z"
+        self.created_at = created_at or datetime.now(timezone.utc).isoformat()
         self.created_timestamp = (
-            datetime.fromisoformat(self.created_at[:-1]).replace(tzinfo=None).timestamp()
+            datetime.fromisoformat(self.created_at).replace(tzinfo=None).timestamp()
         )
 
         self.data_processing_job: Optional[Job] = None
@@ -113,7 +105,7 @@ class Task:
             "parameters": json.dumps(self.parameters),
             "status": self.status,
             "created_at": self.created_at,
-            "created_timestamp": self.created_timestamp,
+            "created_timestamp": str(self.created_timestamp),
             "data_processing_job_id": (
                 self.data_processing_job.job_id if self.data_processing_job else ""
             ),
@@ -128,34 +120,31 @@ class Task:
         }
 
         # Store task metadata in Redis
-        redis_conn.hset(f"task:{self.task_id}", mapping=task_meta)
+        redis_client.save_task(self.task_id, task_meta)
         # Add to sorted set for efficient date sorting
-        redis_conn.zadd("tasks_by_created", {self.task_id: self.created_timestamp})
+        redis_client.add_task_to_sorted_set(self.task_id, self.created_timestamp)
 
         # Store stages information
         for stage_name, stage_data in self.stages.items():
-            stage_key = f"task:{self.task_id}:stage:{stage_name}"
-            updates = {
+            stage_updates = {
                 "status": stage_data["status"],
                 "started_at": stage_data["started_at"] or "",
                 "completed_at": stage_data["completed_at"] or "",
                 "result": (json.dumps(stage_data["result"]) if stage_data["result"] else ""),
                 "error": stage_data["error"] or "",
             }
-            redis_conn.hset(stage_key, mapping=updates)
+            redis_client.save_task_stage(self.task_id, stage_name, stage_updates)
 
     def load(self) -> None:
         """Load task from Redis."""
-        task_data = redis_conn.hgetall(f"task:{self.task_id}")
+        task_data = redis_client.load_task(self.task_id)
         logger.debug(f"Loading Task {self.task_id} from Redis: {task_data}")
 
         if not task_data:
             raise ValueError(f"Task {self.task_id} not found")
 
-        # Convert bytes to strings and parse JSON fields
-        for k, v in task_data.items():
-            key = k.decode("utf-8")
-            value = v.decode("utf-8") if v is not None else None
+        # Parse task data
+        for key, value in task_data.items():
             logger.debug(f"Task {self.task_id} loading key={key}, value={value}")
             # Handle empty strings
             if value == "":
@@ -221,14 +210,11 @@ class Task:
             TaskStatus.MODEL_PREDICTION,
             TaskStatus.VISUALIZATION_PREPARATION,
         ]:
-            stage_data = redis_conn.hgetall(f"task:{self.task_id}:stage:{stage}")
+            stage_data = redis_client.load_task_stage(self.task_id, stage)
 
             if stage_data:
                 stage_info = {}
-                for k, v in stage_data.items():
-                    key = k.decode("utf-8")
-                    value = v.decode("utf-8") if v is not None else None
-
+                for key, value in stage_data.items():
                     # Handle empty strings
                     if value == "":
                         if key in ["started_at", "completed_at", "error"]:
@@ -264,7 +250,7 @@ class Task:
         """
         self.status = TaskStatus.DATA_PROCESSING
         self.stages["data_processing"]["status"] = JobStatus.RUNNING
-        self.stages["data_processing"]["started_at"] = datetime.utcnow().isoformat() + "Z"
+        self.stages["data_processing"]["started_at"] = datetime.now(timezone.utc).isoformat()
 
         # Create and enqueue data processing job
         self.data_processing_job = Job.create_data_processing(
@@ -287,7 +273,7 @@ class Task:
         """
         self.status = TaskStatus.MODEL_PREDICTION
         self.stages["model_prediction"]["status"] = JobStatus.RUNNING
-        self.stages["model_prediction"]["started_at"] = datetime.utcnow().isoformat() + "Z"
+        self.stages["model_prediction"]["started_at"] = datetime.now(timezone.utc).isoformat()
 
         # Create and enqueue model prediction job
         self.model_prediction_job = Job.create_model_prediction(
@@ -310,7 +296,9 @@ class Task:
         """
         self.status = TaskStatus.VISUALIZATION_PREPARATION
         self.stages["visualization_preparation"]["status"] = JobStatus.RUNNING
-        self.stages["visualization_preparation"]["started_at"] = datetime.utcnow().isoformat() + "Z"
+        self.stages["visualization_preparation"]["started_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
 
         # Create and enqueue visualization preparation job
         self.visualization_preparation_job = Job.create_visualization_preparation(
@@ -339,7 +327,7 @@ class Task:
             raise ValueError(f"Invalid stage: {stage}")
 
         self.stages[stage]["status"] = JobStatus.FAILED if error else JobStatus.COMPLETED
-        self.stages[stage]["completed_at"] = datetime.utcnow().isoformat() + "Z"
+        self.stages[stage]["completed_at"] = datetime.now(timezone.utc).isoformat()
         self.stages[stage]["result"] = result
         self.stages[stage]["error"] = error
 
@@ -368,6 +356,10 @@ class Task:
             self.status = TaskStatus.COMPLETED
         self.save()
 
+        # Persist to database if task is completed or failed
+        if self.status in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
+            self._persist_to_database()
+
     def get_job_status(self, job_type: str) -> Optional[Dict[str, Any]]:
         """Get status of a specific job.
 
@@ -386,6 +378,30 @@ class Task:
         ):
             return self.visualization_preparation_job.to_dict()
         return None
+
+    def _persist_to_database(self) -> None:
+        """Persist complete task metadata to database."""
+        from instageo.new_apps.backend.app.crud import update_task_metadata
+        from instageo.new_apps.backend.app.db import SessionLocal
+
+        db = SessionLocal()
+        try:
+            success = update_task_metadata(
+                db=db,
+                task_id=self.task_id,
+                status=self.status,
+                stages=self.stages,
+                model_short_name=self.parameters.get("model_short_name"),
+                model_type=self.parameters.get("model_type"),
+                model_name=self.parameters.get("model_name"),
+                model_size=self.parameters.get("model_size"),
+            )
+            if success:
+                logger.info(f"Persisted task {self.task_id} to database")
+            else:
+                logger.error(f"Failed to persist task {self.task_id} to database")
+        finally:
+            db.close()
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert task to dictionary for API response.
@@ -417,7 +433,7 @@ class Task:
 
     @classmethod
     def get(cls, task_id: str) -> "Task":
-        """Get an existing task by ID.
+        """Get an existing task by ID with Redis-first, database fallback.
 
         Args:
             task_id: Task ID.
@@ -425,9 +441,42 @@ class Task:
         Returns:
             Task instance.
         """
-        task = cls(task_id, [], {}, is_new=False)
-        task.load()
-        return task
+        try:
+            task = cls(task_id, [], {}, is_new=False)
+            task.load()
+
+            if task.stages and task.bboxes:
+                return task
+        except Exception as e:
+            logger.warning(f"Failed to load task {task_id} from Redis: {e}")
+
+        # Fallback to database
+        logger.info(f"Loading task {task_id} from database")
+        return cls._load_from_database(task_id)
+
+    @classmethod
+    def _load_from_database(cls, task_id: str) -> "Task":
+        """Load task from database."""
+        from instageo.new_apps.backend.app.crud import get_task_by_id
+        from instageo.new_apps.backend.app.db import SessionLocal
+
+        db = SessionLocal()
+        try:
+            db_task = get_task_by_id(db, task_id)
+            if not db_task:
+                raise ValueError(f"Task {task_id} not found in database")
+
+            # Reconstruct task from database
+            task = cls(task_id, [], {}, is_new=False)
+            task.bboxes = json.loads(db_task.bboxes) if db_task.bboxes else []
+            task.parameters = json.loads(db_task.parameters) if db_task.parameters else {}
+            task.status = db_task.status
+            task.created_at = db_task.created_at.isoformat()
+            task.stages = json.loads(db_task.stages) if db_task.stages else {}
+
+            return task
+        finally:
+            db.close()
 
 
 def process_data_extraction_with_task(
@@ -500,7 +549,7 @@ def process_data_extraction_with_task(
                 "status": "success",
                 "message": "Data extraction completed successfully.",
                 "processed_data": safe_results,
-                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
                 "model_job_id": processed_data.get("model_job_id"),
             }
         )
@@ -516,7 +565,7 @@ def process_data_extraction_with_task(
             {
                 "status": "error",
                 "message": f"Data extraction failed: {str(e)}",
-                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             }
         )
 
@@ -606,7 +655,7 @@ def process_model_prediction_with_task(
                 "status": "success",
                 "message": "Model prediction completed successfully.",
                 "results": safe_results,
-                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             }
         )
 
@@ -619,7 +668,7 @@ def process_model_prediction_with_task(
             {
                 "status": "error",
                 "message": f"Model prediction failed: {str(e)}",
-                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             }
         )
 
@@ -666,7 +715,7 @@ def process_visualization_preparation_with_task(
                 "status": "success",
                 "message": "Visualization preparation completed successfully.",
                 "results": results,
-                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             }
         )
 
@@ -679,6 +728,6 @@ def process_visualization_preparation_with_task(
             {
                 "status": "error",
                 "message": f"Visualization preparation failed: {str(e)}",
-                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             }
         )

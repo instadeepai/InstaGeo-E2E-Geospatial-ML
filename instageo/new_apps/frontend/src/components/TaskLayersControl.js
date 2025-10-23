@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
+import { useAuth0 } from '@auth0/auth0-react';
 import L from 'leaflet';
 import {
     Box,
@@ -29,6 +30,7 @@ import { logger } from '../utils/logger';
 const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
     const map = useMap();
     const controlRef = useRef(null);
+    const { getAccessTokenSilently } = useAuth0();
     const controlInstanceRef = useRef(null);
     const [expanded, setExpanded] = useState(true);
     const [taskCollapsed, setTaskCollapsed] = useState({}); // Track collapsed state per task
@@ -324,7 +326,7 @@ const TaskLayersControl = ({ taskLayers = [], onTaskLayerChange }) => {
                                         <Tooltip title="Generate Report">
                                             <IconButton
                                                 size="small"
-                                                onClick={() => generateTaskPdf(taskLayer)}
+                                                onClick={() => generateTaskPdf(taskLayer, getAccessTokenSilently)}
                                                 sx={{
                                                     color: 'info.main',
                                                     '&:hover': { backgroundColor: 'rgba(33, 150, 243, 0.04)' }

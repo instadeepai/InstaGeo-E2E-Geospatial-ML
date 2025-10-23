@@ -5,10 +5,14 @@ x-instageo-backend-service-defaults: &backend-defaults
     - REDIS_PORT=${REDIS_PORT}
     - REDIS_DB=${REDIS_DB}
     - TEST_FILEPATH=${TEST_FILEPATH}
+    - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+    - AUTH0_AUDIENCE=${AUTH0_AUDIENCE}
+    - DATABASE_URL=${DATABASE_URL}
   volumes:
     - ../../instageo:/app/instageo
     - shared-data:${DATA_FOLDER}
     - ${HOST_MODELS_PATH}:${APP_MODELS_PATH}:ro
+    - database-data:/app/database
 
 services:
   instageo-redis:
@@ -124,3 +128,4 @@ volumes:
   redis_data:
   shared-data:
   frontend_build:
+  database-data:

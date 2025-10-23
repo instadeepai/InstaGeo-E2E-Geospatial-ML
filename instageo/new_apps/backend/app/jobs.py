@@ -1,29 +1,22 @@
 """Job class for InstaGeo backend."""
 
-import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import redis  # type: ignore
 from rq import Queue
 from rq.job import Job as RQJob
+
+from instageo.new_apps.backend.app.redis_client import redis_client
 
 PACKAGE_TASKS_PATH = "instageo.new_apps.backend.app.tasks"
 DATA_PROCESSING_QUEUE_NAME = "data-processing"
 MODEL_PREDICTION_QUEUE_NAME = "model-prediction"
 VISUALIZATION_PREPARATION_QUEUE_NAME = "visualization-preparation"
 
-# Initialize Redis connection
-redis_conn: Any = redis.Redis(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", 6379)),
-    db=int(os.getenv("REDIS_DB", 0)),
-)
-
 # Initialize RQ queues for the two-stage pipeline
-data_processing_queue = Queue(DATA_PROCESSING_QUEUE_NAME, connection=redis_conn)
-model_prediction_queue = Queue(MODEL_PREDICTION_QUEUE_NAME, connection=redis_conn)
-visualization_preparation_queue = Queue(VISUALIZATION_PREPARATION_QUEUE_NAME, connection=redis_conn)
+data_processing_queue = redis_client.get_queue(DATA_PROCESSING_QUEUE_NAME)
+model_prediction_queue = redis_client.get_queue(MODEL_PREDICTION_QUEUE_NAME)
+visualization_preparation_queue = redis_client.get_queue(VISUALIZATION_PREPARATION_QUEUE_NAME)
 
 
 class JobType:
@@ -76,7 +69,7 @@ class Job:
         self.args = args
         self.meta = meta or {}
         self.queue = queue
-        self.created_at = created_at or datetime.utcnow().isoformat() + "Z"
+        self.created_at = created_at or datetime.now(timezone.utc).isoformat()
 
         # Status tracking
         self.status = JobStatus.PENDING
@@ -131,20 +124,17 @@ class Job:
         }
 
         # Store job metadata in Redis
-        redis_conn.hset(f"job:{self.job_id}", mapping=job_meta)
+        redis_client.save_job(self.job_id, job_meta)
 
     def load(self) -> None:
         """Load job from Redis."""
-        job_data = redis_conn.hgetall(f"job:{self.job_id}")
+        job_data = redis_client.load_job(self.job_id)
 
         if not job_data:
             raise ValueError(f"Job {self.job_id} not found")
 
-        # Convert bytes to strings
-        for k, v in job_data.items():
-            key = k.decode("utf-8")
-            value = v.decode("utf-8") if v is not None else None
-
+        # Parse job data
+        for key, value in job_data.items():
             # Handle empty strings
             if value == "":
                 if key in ["started_at", "completed_at", "error"]:
@@ -178,9 +168,9 @@ class Job:
         self.status = status
 
         if status == JobStatus.RUNNING:
-            self.started_at = datetime.utcnow().isoformat() + "Z"
+            self.started_at = datetime.now(timezone.utc).isoformat()
         elif status in [JobStatus.COMPLETED, JobStatus.FAILED]:
-            self.completed_at = datetime.utcnow().isoformat() + "Z"
+            self.completed_at = datetime.now(timezone.utc).isoformat()
 
         if result:
             self.result = result
@@ -244,7 +234,7 @@ class Job:
             "task_id": task_id,
             "bboxes": bboxes,
             "parameters": parameters,
-            "submitted_at": datetime.utcnow().isoformat() + "Z",
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
             "stage": "data_processing",
         }
 
@@ -283,7 +273,7 @@ class Job:
             "task_id": task_id,
             "processed_data": processed_data,
             "parameters": parameters,
-            "submitted_at": datetime.utcnow().isoformat() + "Z",
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
             "stage": "model_prediction",
         }
 

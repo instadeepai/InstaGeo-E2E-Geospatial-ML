@@ -7,8 +7,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from titiler.core.factory import TilerFactory
+
+from instageo.new_apps.backend.app.auth import is_task_owner, verify_access_token
+from instageo.new_apps.backend.app.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +32,23 @@ class InstaGeoTilerService:
         self.tiler = TilerFactory()
 
         # Custom router for task-based endpoints
-        self.router = APIRouter(prefix="/api/visualize", tags=["visualization"])
+        self.router = APIRouter(
+            prefix="/api/visualize",
+            tags=["visualization"],
+            dependencies=[Depends(verify_access_token)],
+        )
         self._setup_routes()
 
     def _setup_routes(self) -> None:
         """Set up routes."""
 
         @self.router.get("/{task_id}")
-        async def visualize_task(task_id: str) -> Dict[str, Any]:
+        @is_task_owner
+        async def visualize_task(
+            task_id: str,
+            db: Session = Depends(get_db),
+            claims: Dict[str, Any] = Depends(verify_access_token),
+        ) -> Dict[str, Any]:
             """Get visualization data for a task."""
             try:
                 # Try to get COG files for this task

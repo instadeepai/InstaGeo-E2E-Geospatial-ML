@@ -3,30 +3,48 @@
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-import redis  # type: ignore
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from instageo.model.configs.config_dataclasses import ModelInfo
 from instageo.model.registry.model_registry import ModelRegistry
+from instageo.new_apps.backend.app.auth import (
+    get_current_user,
+    is_task_owner,
+    verify_access_token,
+)
+from instageo.new_apps.backend.app.crud import create_task_in_db
+from instageo.new_apps.backend.app.db import get_db, init_db
 from instageo.new_apps.backend.app.jobs import (
     data_processing_queue,
     get_queues_status,
     model_prediction_queue,
     visualization_preparation_queue,
 )
+from instageo.new_apps.backend.app.models import User
+from instageo.new_apps.backend.app.redis_client import redis_client
 from instageo.new_apps.backend.app.tasks import Task
 from instageo.new_apps.backend.app.tiler_service import InstaGeoTilerService
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="InstaGeo API")
-# TODO: Handle API Key authentication
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> Any:
+    """Lifespan for the InstaGeo backend."""
+    init_db()
+    yield
+
+
+app = FastAPI(title="InstaGeo API", lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -37,12 +55,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Redis connection for health checks
-redis_conn: Any = redis.Redis(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", 6379)),
-    db=int(os.getenv("REDIS_DB", 0)),
-)
+PUBLIC_ENDPOINTS = ["/", "/api/health"]
+
+
+@app.middleware("http")
+async def verify_token_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Verify JWT token for API routes."""
+    # skip auth for public endpoints
+    if request.url.path in PUBLIC_ENDPOINTS:
+        return await call_next(request)
+
+    # skip auth for TiTiler routes since they don't use JWT auth
+    if request.url.path.startswith("/api/titiler/"):
+        return await call_next(request)
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return Response(
+            content='{"detail":"Not authenticated - Login required"}',
+            status_code=401,
+            media_type="application/json",
+        )
+
+    try:
+        credentials = HTTPAuthorizationCredentials(
+            scheme="Bearer", credentials=auth_header.split(" ")[1]
+        )
+        verify_access_token(credentials)
+        return await call_next(request)
+    except Exception:
+        return Response(
+            content='{"detail":"Not authenticated - Login required"}',
+            status_code=401,
+            media_type="application/json",
+        )
+
 
 # Initialize TiTiler service
 DATA_FOLDER = os.getenv("DATA_FOLDER", "/app/instageo-data")
@@ -183,7 +232,11 @@ async def root() -> Dict[str, str]:
 
 
 @app.post("/api/run-model", response_model=TaskCreationResponse)
-async def create_task(task_request: TaskCreationRequest) -> TaskCreationResponse:
+async def create_task(
+    task_request: TaskCreationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TaskCreationResponse:
     """Submit a task for data processing and model prediction."""
     try:
         logger.info(f"Received task creation request: {task_request}")
@@ -246,6 +299,11 @@ async def create_task(task_request: TaskCreationRequest) -> TaskCreationResponse
         )
         logger.info(f"Created task with ID: {task_id}")
 
+        # Create database record for the task
+        create_task_in_db(
+            db, current_user.sub, task_id, task_request.bboxes, parameters, task.status
+        )
+
         return TaskCreationResponse(
             status=task.status,
             task_id=task_id,
@@ -261,7 +319,12 @@ async def create_task(task_request: TaskCreationRequest) -> TaskCreationResponse
 
 
 @app.get("/api/task/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status_endpoint(task_id: str) -> TaskStatusResponse:
+@is_task_owner
+async def get_task_status_endpoint(
+    task_id: str,
+    claims: Dict[str, Any] = Depends(verify_access_token),
+    db: Session = Depends(get_db),
+) -> TaskStatusResponse:
     """Get status of a task."""
     try:
         task = Task.get(task_id)
@@ -292,36 +355,26 @@ async def get_task_status_endpoint(task_id: str) -> TaskStatusResponse:
 
 
 @app.get("/api/tasks")
-async def get_all_tasks() -> List[Dict[str, Any]]:
+async def get_all_tasks(
+    claims: Dict[str, Any] = Depends(verify_access_token), db: Session = Depends(get_db)
+) -> List[Dict[str, Any]]:
     """Get all tasks with their basic information."""
     try:
-        # Get all task IDs from the sorted set, newest first
-        task_ids = redis_conn.zrevrange("tasks_by_created", 0, -1)
+        from instageo.new_apps.backend.app.crud import (
+            get_completed_failed_tasks,
+            get_in_progress_tasks,
+        )
 
-        tasks = []
-        for task_id_bytes in task_ids:
-            task_id = task_id_bytes.decode("utf-8")
-            try:
-                task = Task.get(task_id)
-                tasks.append(
-                    {
-                        "task_id": task.task_id,
-                        "status": task.status,
-                        "created_at": task.created_at,
-                        "bboxes": task.bboxes,
-                        "model_short_name": task.parameters.get("model_short_name"),
-                        "model_type": task.parameters.get("model_type"),
-                        "model_name": task.parameters.get("model_name"),
-                        "model_size": task.parameters.get("model_size"),
-                        "classes_mapping": task.parameters.get("classes_mapping"),
-                        "stages": task.stages,
-                    }
-                )
-            except Exception as e:
-                logger.warning(f"Failed to load task {task_id}: {e}")
-                continue
+        # Get completed and failed tasks from database
+        user_sub: str | Any = claims.get("sub")
+        completed_tasks = get_completed_failed_tasks(db, user_sub)
 
-        return tasks
+        # Get in-progress tasks (Redis with database fallback)
+        in_progress_tasks = get_in_progress_tasks(db, user_sub)
+
+        # Combine and return all tasks
+        all_tasks = completed_tasks + in_progress_tasks
+        return all_tasks
 
     except Exception as e:
         logger.error(f"Error getting all tasks: {str(e)}")
@@ -400,7 +453,7 @@ async def health_check() -> Dict[str, Any]:
 
         # Check Redis connection
         try:
-            redis_conn.ping()
+            redis_client.ping()
             health_status["components"]["redis"]["status"] = "healthy"
             health_status["components"]["redis"]["message"] = "Redis connection successful"
         except Exception as e:

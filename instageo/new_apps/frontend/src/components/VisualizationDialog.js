@@ -23,8 +23,11 @@ import {
 } from '@mui/icons-material';
 import { generateTiTilerColormap } from '../utils/segmentationColors';
 import { logger } from '../utils/logger';
+import apiService from '../services/apiService';
+import { useAuth0 } from '@auth0/auth0-react';
 
 const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMonitor }) => {
+    const { getAccessTokenSilently } = useAuth0();
     const [satelliteImageLoading, setSatelliteImageLoading] = useState(true);
     const [satelliteImageError, setSatelliteImageError] = useState(false);
     const [predictionImageLoading, setPredictionImageLoading] = useState(true);
@@ -80,8 +83,8 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                         setPredictionStats(null);
                         return;
                     }
-                    const response = await fetch(titiler_data.prediction.stats_url);
-                    const stats = await response.json();
+                    const response = await apiService.get(titiler_data.prediction.stats_url, getAccessTokenSilently);
+                    const stats = await response;
                     setPredictionStats({
                         type: "reg",
                         min: stats.b1?.min || 0,
@@ -118,7 +121,7 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
         };
 
         fetchPredictionStats();
-    }, [task]);
+    }, [task, getAccessTokenSilently]);
 
     const getDynamicPredictionParams = () => {
         if (!predictionStats) return null;
@@ -145,12 +148,12 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
             try {
                 // Fetch TileJSON for both satellite and prediction to get bounds and zoom levels
                 const [satelliteTileJsonResponse, predictionTileJsonResponse] = await Promise.all([
-                    fetch(titiler_data.satellite.tilejson_url),
-                    fetch(titiler_data.prediction.tilejson_url)
+                    apiService.get(titiler_data.satellite.tilejson_url, getAccessTokenSilently),
+                    apiService.get(titiler_data.prediction.tilejson_url, getAccessTokenSilently)
                 ]);
 
-                const satelliteTileJson = await satelliteTileJsonResponse.json();
-                const predictionTileJson = await predictionTileJsonResponse.json();
+                const satelliteTileJson = await satelliteTileJsonResponse;
+                const predictionTileJson = await predictionTileJsonResponse;
 
                 // Use satellite bounds as primary (they should be the same for same task)
                 // But fall back to prediction bounds if satellite is missing

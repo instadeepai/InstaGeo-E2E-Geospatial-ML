@@ -5,10 +5,14 @@ x-instageo-backend-service-defaults: &backend-defaults
     - REDIS_PORT=${REDIS_PORT}
     - REDIS_DB=${REDIS_DB}
     - TEST_FILEPATH=${TEST_FILEPATH}
+    - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+    - AUTH0_AUDIENCE=${AUTH0_AUDIENCE}
+    - DATABASE_URL=${DATABASE_URL}
   volumes:
     - ../../instageo:/app/instageo
     - shared-data:${DATA_FOLDER}
     - ${HOST_MODELS_PATH}:${APP_MODELS_PATH}:ro
+    - database-data:/app/database
 
 services:
   instageo-redis:
@@ -83,8 +87,8 @@ services:
       - REACT_APP_ENV=dev
       - REACT_APP_AUTH0_DOMAIN=${REACT_APP_AUTH0_DOMAIN}
       - REACT_APP_AUTH0_CLIENT_ID=${REACT_APP_AUTH0_CLIENT_ID}
-      - REACT_APP_AUTH0_AUDIENCE=${REACT_APP_AUTH0_AUDIENCE}
       - REACT_APP_AUTH0_REDIRECT_URI=${REACT_APP_AUTH0_REDIRECT_URI}
+      - REACT_APP_AUTH0_AUDIENCE=${REACT_APP_AUTH0_AUDIENCE}
     expose:
       - "3000"
     volumes:
@@ -108,3 +112,4 @@ services:
 volumes:
   redis_data:
   shared-data:
+  database-data:

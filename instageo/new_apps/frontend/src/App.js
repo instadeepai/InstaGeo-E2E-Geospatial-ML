@@ -7,6 +7,7 @@ import AnalyticsIcon from '@mui/icons-material/Analytics';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
+import { useAuth0 } from '@auth0/auth0-react';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import { lightTheme, darkTheme } from './theme';
 import MapComponent from './components/MapComponent';
@@ -15,10 +16,11 @@ import ControlPanel from './components/ControlPanel';
 import BoundingBoxInfo from './components/BoundingBoxInfo';
 import TaskResultPopup from './components/TaskResultPopup';
 import TasksMonitor from './components/TasksMonitor';
-import { INSTAGEO_BACKEND_API_ENDPOINTS, CONFIG } from './config';
+import { CONFIG } from './config';
 import { APP_THEMES, BASE_MAP_CONFIG, DARK_MODE_MAP_FILTER } from './constants';
 import TaskLayersControl from './components/TaskLayersControl';
 import { logger } from './utils/logger';
+import apiService from './services/apiService';
 
 // Configure default Leaflet marker icons
 L.Icon.Default.mergeOptions({
@@ -28,6 +30,9 @@ L.Icon.Default.mergeOptions({
 });
 
 const App = () => {
+    // Auth0 hook
+    const { getAccessTokenSilently } = useAuth0();
+
     const [controlPanelOpen, setControlPanelOpen] = useState(false);
     const [hasBoundingBox, setHasBoundingBox] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -49,10 +54,8 @@ const App = () => {
         if (taskResult?.task_id && taskResult.status !== 'completed' && taskResult.status !== 'failed') {
             const pollStatus = async () => {
                 try {
-                    const response = await fetch(INSTAGEO_BACKEND_API_ENDPOINTS.TASK_STATUS(taskResult.task_id));
-                    if (response.ok) {
-                        const updatedResult = await response.json();
-                        setTaskResult(updatedResult);
+                    const updatedResult = await apiService.getTaskStatus(taskResult.task_id, getAccessTokenSilently);
+                    setTaskResult(updatedResult);
 
                         // Stop polling if task is completed or failed
                         if (updatedResult.status === 'completed' || updatedResult.status === 'failed') {
@@ -61,11 +64,10 @@ const App = () => {
                                 statusPollingRef.current = null;
                             }
                         }
+                    } catch (error) {
+                        logger.error('Error polling task status:', error);
                     }
-                } catch (error) {
-                    logger.error('Error polling task status:', error);
-                }
-            };
+                };
 
             // Poll every 15 seconds
             statusPollingRef.current = setInterval(pollStatus, 15000);
@@ -78,7 +80,7 @@ const App = () => {
                 }
             };
         }
-    }, [taskResult?.task_id, taskResult?.status]);
+    }, [taskResult?.task_id, taskResult?.status, getAccessTokenSilently]);
 
     const handleAddTaskLayer = (taskLayerData) => {
         logger.log('handleAddTaskLayer called with:', taskLayerData);
@@ -194,20 +196,8 @@ const App = () => {
                 ...(modelParams),
             };
             logger.log('Payload being sent:', payload);
-            const response = await fetch(INSTAGEO_BACKEND_API_ENDPOINTS.RUN_MODEL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload),
-            });
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const result = await response.json();
+            const result = await apiService.runModel(payload, getAccessTokenSilently);
             logger.log('Task result:', result);
 
             // Set the task result and show popup

@@ -3,16 +3,17 @@ import { Drawer, Box, Typography, Select, MenuItem, FormControl, InputLabel, Sli
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { useAuth0 } from '@auth0/auth0-react';
 import dayjs from 'dayjs';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { DEFAULT_TASK_PARAMS, PARAMS_HELP, LOGO_PATHS } from '../constants';
 import { logger } from '../utils/logger';
-import { INSTAGEO_BACKEND_API_ENDPOINTS } from '../config';
 import { fetchModelsWithTTL, clearModelsCache } from '../utils/modelsCache';
 import ProfileMenu from './ProfileMenu';
 
 const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing, appTheme }) => {
+  const { getAccessTokenSilently } = useAuth0();
 
   const [params, setParams] = useState(DEFAULT_TASK_PARAMS);
   const [models, setModels] = useState([]);
@@ -36,7 +37,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
     const load = async () => {
       setLoadingModels(true);
       try {
-        const data = await fetchModelsWithTTL(INSTAGEO_BACKEND_API_ENDPOINTS.GET_MODELS);
+        const data = await fetchModelsWithTTL(getAccessTokenSilently);
         if (!mounted) return;
         setModels(data || []);
       } catch (e) {
@@ -48,7 +49,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
     };
     load();
     return () => { mounted = false; };
-  }, []);
+  }, [getAccessTokenSilently]);
 
   const handleReloadModels = async () => {
     try {
@@ -56,7 +57,7 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
     } catch {}
     setLoadingModels(true);
     try {
-      const data = await fetchModelsWithTTL(INSTAGEO_BACKEND_API_ENDPOINTS.GET_MODELS);
+      const data = await fetchModelsWithTTL(getAccessTokenSilently);
       setModels(data || []);
     } catch (e) {
       logger.warn('Failed to reload models:', e);
