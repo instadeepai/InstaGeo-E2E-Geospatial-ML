@@ -71,6 +71,10 @@ async def verify_token_middleware(
     if request.url.path.startswith("/api/titiler/"):
         return await call_next(request)
 
+        # skip auth for OPTIONS requests (CORS preflight)
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         return Response(
