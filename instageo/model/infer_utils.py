@@ -79,8 +79,13 @@ def chip_inference(
     model.eval()
     model.to(device)
 
-    tracker = EmissionsTracker(measure_power_secs=5, tracking_mode="machine", log_level="error")
-    tracker.start()
+    try:
+        tracker = EmissionsTracker(measure_power_secs=5, tracking_mode="machine", log_level="error")
+    except Exception:
+        tracker = None
+
+    if tracker is not None:
+        tracker.start()
 
     with torch.no_grad():
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -122,8 +127,10 @@ def chip_inference(
                 for future in futures:
                     future.result()
 
-        tracker.stop()
-        emissions_data = tracker._prepare_emissions_data()
-        carbon_info = get_carbon_info(emissions_data)
+        if tracker is not None:
+            tracker.stop()
+            emissions_data = tracker._prepare_emissions_data()
+            carbon_info = get_carbon_info(emissions_data)
+            return carbon_info
 
-    return carbon_info
+        return {}

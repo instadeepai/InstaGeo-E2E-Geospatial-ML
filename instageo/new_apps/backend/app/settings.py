@@ -17,11 +17,12 @@ class Settings(BaseSettings):
 settings = Settings()
 
 if not settings.database_url:
-    database_dir = "/app/database"
-    os.makedirs(database_dir, exist_ok=True)
-    settings.database_url = f"sqlite:///{database_dir}/instageo.db"
+    raise ValueError("DATABASE_URL is not set")
 else:
     if settings.database_url.startswith("sqlite:///"):
         db_path = settings.database_url.replace("sqlite:///", "")
-        db_path_obj = Path(db_path)
-        db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            db_path_obj = Path(db_path)
+            db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            raise ValueError(f"Failed to create database directory: {e}")

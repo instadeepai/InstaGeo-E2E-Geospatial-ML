@@ -1,6 +1,18 @@
 // API Configuration
 const INSTAGEO_BACKEND_API_BASE_URL = process.env.REACT_APP_INSTAGEO_BACKEND_API_BASE_URL
 
+// Helper function to prefix TiTiler URLs with API base URL
+export const prefixTitilerUrl = (url) => {
+    if (!url) return url;
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url; // Already absolute
+    }
+    if (url.startsWith('/')) {
+        return `${INSTAGEO_BACKEND_API_BASE_URL}${url}`;
+    }
+    return url;
+};
+
 // API Endpoints
 export const INSTAGEO_BACKEND_API_ENDPOINTS = {
     RUN_MODEL: `${INSTAGEO_BACKEND_API_BASE_URL}/api/run-model`,
@@ -9,6 +21,7 @@ export const INSTAGEO_BACKEND_API_ENDPOINTS = {
     GET_MODELS: `${INSTAGEO_BACKEND_API_BASE_URL}/api/models`,
     HEALTH: `${INSTAGEO_BACKEND_API_BASE_URL}/api/health`,
     VISUALIZE: (taskId) => `${INSTAGEO_BACKEND_API_BASE_URL}/api/visualize/${taskId}`,
+    GET_TITILER_DATA: (url) => `${INSTAGEO_BACKEND_API_BASE_URL}${url}`,
 };
 
 // Environment configuration

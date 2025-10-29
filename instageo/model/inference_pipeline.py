@@ -237,8 +237,21 @@ class RayEvaluationPipeline:
         """Initialize Ray and Ray Serve."""
         log.info("Initializing Ray and Ray Serve...")
 
+        logging_config = ray.LoggingConfig(
+            encoding="TEXT", log_level="INFO", additional_log_standard_attrs=["name"]
+        )
         if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True)
+            try:
+                ray.init(
+                    ignore_reinit_error=True,
+                    log_to_driver=True,
+                    logging_config=logging_config,
+                    object_store_memory=1024 * 1024 * 1024 * 4,  # 4GB
+                )
+            except Exception as e:
+                log.error(f"Error initializing Ray: {e}")
+                raise
+
             self.ray_initialized = True
 
         serve.start(detached=True)

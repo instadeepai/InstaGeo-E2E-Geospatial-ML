@@ -2,24 +2,12 @@ import { INSTAGEO_BACKEND_API_ENDPOINTS } from '../config';
 import { logger } from '../utils/logger';
 
 class ApiService {
-  async get(endpoint, getAccessTokenSilently) {
-    return this.makeRequest(endpoint, { method: 'GET' }, getAccessTokenSilently);
-  }
+  async getTitilerData(url, getAccessTokenSilently) {
 
-  async fetchImageDataFromURL(url, getAccessTokenSilently) {
-    const authHeaders = await this.getAuthHeaders(getAccessTokenSilently);
-    const headers = {
-      ...authHeaders,
-    };
-
-    const response = await fetch(url, { headers });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    return response;
+    return this.makeRequest(
+      INSTAGEO_BACKEND_API_ENDPOINTS.GET_TITILER_DATA(url),
+      { method: 'GET' },
+      getAccessTokenSilently);
   }
 
   async getAuthHeaders(getAccessTokenSilently) {
