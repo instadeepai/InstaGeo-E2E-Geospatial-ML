@@ -1,0 +1,215 @@
+name: Builds and deploy app
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+jobs:
+  setup-vars:
+    name: Setup variables
+    environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+    runs-on:
+      group: kao-products-runners
+      labels: instadeep-ci
+    container:
+      image: ghcr.io/catthehacker/ubuntu:runner-latest
+    outputs:
+      ENV: ${{ steps.setup-vars.outputs.ENV }}
+      VALUES_FILE: ${{ steps.setup-vars.outputs.VALUES_FILE }}
+      GIT_SHA: ${{ steps.build-tags.outputs.GIT_SHA }}
+      API_BASE_URL: ${{ steps.setup-vars.outputs.API_BASE_URL }}
+      AUTH0_REDIRECT_URI: ${{ steps.setup-vars.outputs.AUTH0_REDIRECT_URI }}
+      AUTH0_AUDIENCE: ${{ steps.setup-vars.outputs.AUTH0_AUDIENCE }}
+      AUTH0_DOMAIN: ${{ steps.setup-vars.outputs.AUTH0_DOMAIN }}
+      AUTH0_CLIENT_ID: ${{ steps.setup-vars.outputs.AUTH0_CLIENT_ID }}
+    steps:
+      - name: Build tags
+        id: build-tags
+        uses: instadeepai/mlops-reusable-ci/.github/actions/build-tags@add-build-tags-reusable-ci
+
+      - name: Setup variables
+        id: setup-vars
+        run: |
+          if [ "${{ steps.build-tags.outputs.BRANCH_NAME }}" = "main" ]; then
+            echo "VALUES_FILE=values/prod-values.yaml" >> "$GITHUB_OUTPUT"
+          else
+            echo "VALUES_FILE=values/dev-values.yaml" >> "$GITHUB_OUTPUT"
+          fi
+          echo "AUTH0_AUDIENCE=${{ vars.AUTH0_AUDIENCE }}" >> "$GITHUB_OUTPUT"
+          echo "AUTH0_DOMAIN=${{ vars.AUTH0_DOMAIN }}" >> "$GITHUB_OUTPUT"
+          echo "AUTH0_CLIENT_ID=${{ vars.AUTH0_CLIENT_ID }}" >> "$GITHUB_OUTPUT"
+          echo "AUTH0_REDIRECT_URI=${{ vars.AUTH0_REDIRECT_URI }}" >> "$GITHUB_OUTPUT"
+          echo "API_BASE_URL=${{ vars.API_BASE_URL }}" >> "$GITHUB_OUTPUT"
+
+  build-api-image:
+    uses: instadeepai/mlops-reusable-ci/.github/workflows/docker-build.yaml@add-build-tags-reusable-ci
+    with:
+      display-name: "Build & push api docker Image"
+      image: "${{ vars.REGISTRY_HOST }}/${{ vars.REGISTRY_PROJECT }}/api"
+      cache-image: "${{ vars.REGISTRY_HOST }}/${{ vars.REGISTRY_PROJECT }}/api/cache"
+      build-path: "."
+      filename: "instageo/new_apps/backend/Dockerfile.ci"
+      dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+      registry-host: "ghcr.io"
+      registry-username: ${{ github.actor }}
+    secrets:
+      registry-password: "${{ secrets.GITHUB_TOKEN }}"
+      dockerhub-password: "${{ secrets.DOCKERHUB_TOKEN }}"
+      build-secrets: |
+        EARTHDATA_USERNAME=${{ secrets.EARTHDATA_USERNAME }}
+        EARTHDATA_PASSWORD=${{ secrets.EARTHDATA_PASSWORD }}
+  build-web-image:
+    uses: instadeepai/mlops-reusable-ci/.github/workflows/docker-build.yaml@add-build-tags-reusable-ci
+    needs: setup-vars
+    with:
+      display-name: "Build & push web docker Image"
+      image: "${{ vars.REGISTRY_HOST }}/${{ vars.REGISTRY_PROJECT }}/web"
+      cache-image: "${{ vars.REGISTRY_HOST }}/${{ vars.REGISTRY_PROJECT }}/web/cache"
+      build-path: "instageo/new_apps/frontend"
+      filename: "instageo/new_apps/frontend/Dockerfile.ci"
+      dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+      registry-host: "ghcr.io"
+      registry-username: ${{ github.actor }}
+      build-args: |
+          REACT_APP_INSTAGEO_BACKEND_API_BASE_URL=${{ needs.setup-vars.outputs.API_BASE_URL }}
+          REACT_APP_ENV=${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+          REACT_APP_MIN_AREA_KM2=${{ vars.MIN_AREA_KM2 }}
+          REACT_APP_MAX_AREA_KM2=${{ vars.MAX_AREA_KM2 }}
+          REACT_APP_AUTH0_DOMAIN=${{ needs.setup-vars.outputs.AUTH0_DOMAIN }}
+          REACT_APP_AUTH0_CLIENT_ID=${{ needs.setup-vars.outputs.AUTH0_CLIENT_ID }}
+          REACT_APP_AUTH0_REDIRECT_URI=${{ needs.setup-vars.outputs.AUTH0_REDIRECT_URI }}
+          REACT_APP_AUTH0_AUDIENCE=${{ needs.setup-vars.outputs.AUTH0_AUDIENCE }}
+    secrets:
+      registry-password: "${{ secrets.GITHUB_TOKEN }}"
+      dockerhub-password: "${{ secrets.DOCKERHUB_TOKEN }}"
+
+  build-api-chart:
+    uses: instadeepai/mlops-reusable-ci/.github/workflows/helm-build.yaml@add-build-tags-reusable-ci
+    with:
+      display-name: "🏛️ Build api Chart"
+      helm-user: ${{ vars.HELM_USER }}
+      registry-host: "${{ vars.REGISTRY_HOST }}"
+      build-path: "deployment/charts/api"
+      registry-project: "${{ vars.REGISTRY_PROJECT }}"
+      chart-version: ${{ vars.TARGET_CHART_VERSION }}
+      append-sha: true
+      dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+      job-runner: instadeep-ci-4
+    secrets:
+      helm-password: ${{ secrets.GITHUB_TOKEN }}
+      dockerhub-password: "${{ secrets.DOCKERHUB_TOKEN }}"
+
+  build-rq-chart:
+    uses: instadeepai/mlops-reusable-ci/.github/workflows/helm-build.yaml@add-build-tags-reusable-ci
+    with:
+      display-name: "🏛️ Build rq Chart"
+      helm-user: ${{ vars.HELM_USER }}
+      registry-host: "${{ vars.REGISTRY_HOST }}"
+      build-path: "deployment/charts/rq"
+      registry-project: "${{ vars.REGISTRY_PROJECT }}"
+      chart-version: ${{ vars.TARGET_CHART_VERSION }}
+      append-sha: true
+      dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+      job-runner: instadeep-ci-4
+    secrets:
+      helm-password: ${{ secrets.GITHUB_TOKEN }}
+      dockerhub-password: "${{ secrets.DOCKERHUB_TOKEN }}"
+
+  build-web-chart:
+    uses: instadeepai/mlops-reusable-ci/.github/workflows/helm-build.yaml@add-build-tags-reusable-ci
+    with:
+      display-name: "🏛️ Build web Chart"
+      helm-user: ${{ vars.HELM_USER }}
+      registry-host: "${{ vars.REGISTRY_HOST }}"
+      build-path: "deployment/charts/web"
+      registry-project: "${{ vars.REGISTRY_PROJECT }}"
+      chart-version: ${{ vars.TARGET_CHART_VERSION }}
+      append-sha: true
+      dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+      job-runner: instadeep-ci-4
+    secrets:
+      helm-password: ${{ secrets.GITHUB_TOKEN }}
+      dockerhub-password: "${{ secrets.DOCKERHUB_TOKEN }}"
+
+  build-instageo-chart:
+    uses: instadeepai/mlops-reusable-ci/.github/workflows/helm-build.yaml@add-build-tags-reusable-ci
+    needs: [build-api-chart, build-web-chart, build-rq-chart]
+    with:
+      display-name: "🏛️ Build instageo Chart"
+      helm-user: ${{ vars.HELM_USER }}
+      registry-host: "${{ vars.REGISTRY_HOST }}"
+      build-path: "deployment/charts/instageo"
+      registry-project: "${{ vars.REGISTRY_PROJECT }}"
+      chart-version: ${{ vars.TARGET_CHART_VERSION }}
+      append-sha: true
+      dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+      job-runner: instadeep-ci-4
+    secrets:
+      helm-password: ${{ secrets.GITHUB_TOKEN }}
+      dockerhub-password: "${{ secrets.DOCKERHUB_TOKEN }}"
+
+  deploy-app:
+    runs-on:
+      group: kao-products-runners
+      labels: instadeep-ci
+    needs: [
+      setup-vars,
+      build-api-image,
+      build-web-image,
+      build-instageo-chart
+    ]
+    environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+    container:
+      image: alpine/k8s:1.28.0
+    steps:
+      - name: checkout current repo
+        uses: actions/checkout@v4
+
+      - name: Setup Kubeconfig
+        run: |
+          echo "$KUBECONFIG_PREM" | base64 -d > /tmp/kubeconfig
+          echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
+        env:
+          KUBECONFIG_PREM: ${{ secrets.DEPRECATED_KAO_PRODUCTS_KUBECONFIG_B64 }}
+
+
+      - name: helm login
+        shell: bash
+        env:
+          HELM_USER: ${{ github.actor }}
+          HELM_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$HELM_PASSWORD" | helm registry login -u "$HELM_USER" --password-stdin ghcr.io
+
+      - name: helm deploy
+        shell: bash
+        env:
+          VALUES_FILE: ${{ needs.setup-vars.outputs.VALUES_FILE }}
+          GIT_SHA: ${{ needs.setup-vars.outputs.GIT_SHA }}
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
+          REGISTRY_PROJECT: ${{ vars.REGISTRY_PROJECT }}
+          AUTH0_DOMAIN: ${{ needs.setup-vars.outputs.AUTH0_DOMAIN }}
+          AUTH0_AUDIENCE: ${{ needs.setup-vars.outputs.AUTH0_AUDIENCE }}
+          CORS_ALLOWED_ORIGINS: ${{ needs.setup-vars.outputs.API_BASE_URL }} # Setup properly in the values file
+        working-directory: deployment
+        run: |
+
+          components=(
+            ".api.image.tag"
+            ".web.image.tag"
+            ".rq.dashboard.image.tag"
+            ".rq.dataProcessing.image.tag"
+            ".rq.modelPrediction.image.tag"
+            ".rq.visualizationPreparation.image.tag"
+          )
+
+          for component in "${components[@]}"; do
+            yq e -i "$component = strenv(GIT_SHA)" "$VALUES_FILE"
+          done
+
+          helm upgrade --install instageo oci://$REGISTRY_HOST/$REGISTRY_PROJECT/helm/instageo \
+           --namespace ${{ vars.NAMESPACE }}  \
+           --values $VALUES_FILE \
+          --set api.env.visible.AUTH0_DOMAIN="$AUTH0_DOMAIN" \
+          --set api.env.visible.AUTH0_AUDIENCE="$AUTH0_AUDIENCE" \
+          --set api.env.visible.CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"

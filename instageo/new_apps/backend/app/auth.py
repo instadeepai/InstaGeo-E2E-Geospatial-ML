@@ -114,11 +114,12 @@ def get_current_user(
         User: The current user.
     """
     sub = claims.get("sub")
-    access_token = claims.get("access_token")
-    user_info: Any = get_user_info(access_token) if access_token else None
+
     if not sub:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token invalid")
 
+    access_token = claims.get("access_token")
+    user_info: Any = get_user_info(access_token) if access_token else None
     user = add_user_to_db(db, sub, user_info)
     return user
 

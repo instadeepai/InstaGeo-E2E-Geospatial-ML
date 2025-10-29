@@ -25,6 +25,7 @@ import { generateTiTilerColormap } from '../utils/segmentationColors';
 import { logger } from '../utils/logger';
 import apiService from '../services/apiService';
 import { useAuth0 } from '@auth0/auth0-react';
+import { prefixTitilerUrl } from '../config';
 
 const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMonitor }) => {
     const { getAccessTokenSilently } = useAuth0();
@@ -83,7 +84,7 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                         setPredictionStats(null);
                         return;
                     }
-                    const response = await apiService.get(titiler_data.prediction.stats_url, getAccessTokenSilently);
+                    const response = await apiService.getTitilerData(titiler_data.prediction.stats_url, getAccessTokenSilently);
                     const stats = await response;
                     setPredictionStats({
                         type: "reg",
@@ -148,8 +149,8 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
             try {
                 // Fetch TileJSON for both satellite and prediction to get bounds and zoom levels
                 const [satelliteTileJsonResponse, predictionTileJsonResponse] = await Promise.all([
-                    apiService.get(titiler_data.satellite.tilejson_url, getAccessTokenSilently),
-                    apiService.get(titiler_data.prediction.tilejson_url, getAccessTokenSilently)
+                    apiService.getTitilerData(titiler_data.satellite.tilejson_url, getAccessTokenSilently),
+                    apiService.getTitilerData(titiler_data.prediction.tilejson_url, getAccessTokenSilently)
                 ]);
 
                 const satelliteTileJson = await satelliteTileJsonResponse;
@@ -170,8 +171,8 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
                 const maxZoom = Math.min(satelliteTileJson.maxzoom || 18, predictionTileJson.maxzoom || 18);
 
                 // Add both satellite and prediction layers in one call
-                const satelliteRgbTilesUrl = titiler_data.satellite.tiles_url + satellite_params;
-                const predictionTilesUrl = titiler_data.prediction.tiles_url + getDynamicPredictionParams();
+                const satelliteRgbTilesUrl = prefixTitilerUrl(titiler_data.satellite.tiles_url) + satellite_params;
+                const predictionTilesUrl = prefixTitilerUrl(titiler_data.prediction.tiles_url) + getDynamicPredictionParams();
 
                 onAddToMap({
                     taskId: task.task_id,
@@ -198,8 +199,8 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
             } catch (error) {
                 logger.error('Error fetching TileJSON:', error);
                 // Fallback without bounds and zoom constraints
-                const satelliteRgbTilesUrl = titiler_data.satellite.tiles_url + satellite_params;
-                const predictionTilesUrl = titiler_data.prediction.tiles_url + getDynamicPredictionParams();
+                const satelliteRgbTilesUrl = prefixTitilerUrl(titiler_data.satellite.tiles_url) + satellite_params;
+                const predictionTilesUrl = prefixTitilerUrl(titiler_data.prediction.tiles_url) + getDynamicPredictionParams();
 
                 onAddToMap({
                     taskId: task.task_id,
@@ -226,14 +227,14 @@ const VisualizationDialog = ({ open, onClose, task, onAddToMap, onCloseTasksMoni
 
     const getSatellitePreviewUrl = () => {
         if (!titiler_data?.satellite?.preview_url) return '';
-        return titiler_data.satellite.preview_url + satellite_params;
+        return prefixTitilerUrl(titiler_data.satellite.preview_url + satellite_params);
     };
 
     const getPredictionPreviewUrl = () => {
         if (!titiler_data?.prediction?.preview_url) return '';
         const params = getDynamicPredictionParams();
         if (!params) return '';
-        return titiler_data.prediction.preview_url + params;
+        return prefixTitilerUrl(titiler_data.prediction.preview_url + params);
     };
 
     const handleSatelliteImageLoad = () => {

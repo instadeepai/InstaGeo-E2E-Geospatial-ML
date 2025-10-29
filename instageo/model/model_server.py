@@ -121,8 +121,8 @@ class RayModelServer(Deployment):
         return {
             "status": "chip_inference_completed",
             "model/GFLOPs": complexity["GFLOPs"],
-            "CO2_emissions": emissions_data["carbon/emissions (g CO₂)"],
-            "energy_consumed": emissions_data["carbon/energy_consumed (kWh)"],
+            "CO2_emissions": emissions_data.get("carbon/emissions (g CO₂)", "N/A"),
+            "energy_consumed": emissions_data.get("carbon/energy_consumed (kWh)", "N/A"),
             "inference_time": inference_time,
         }
 

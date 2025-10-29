@@ -7,6 +7,7 @@ import { useCurrentPng } from 'recharts-to-png';
 import { LOGO_PATHS } from '../constants';
 import { logger } from './logger';
 import apiService from '../services/apiService';
+import { prefixTitilerUrl } from '../config';
 // Viridis palette for gradients & bar colors
 const VIRIDIS_PALETTE = ['#440154','#482777','#3f4a8a','#31678e','#26838f','#1f9d8a','#6cce5a','#b6de2b','#fee825'];
 
@@ -58,7 +59,12 @@ function waitForPngData(intervalMs = 60) {
 
 // Util to fetch remote image -> dataURL
 async function fetchImageDataURL(url, getAccessTokenSilently) {
-  const res = await apiService.fetchImageDataFromURL(url, getAccessTokenSilently);
+  const authHeaders = await apiService.getAuthHeaders(getAccessTokenSilently);
+  const res = await fetch(url, { headers: authHeaders });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch image: ${res.status} ${res.statusText}`);
+  }
+
   const blob = await res.blob();
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -261,8 +267,10 @@ export async function generateTaskPdf(taskLayer, getAccessTokenSilently) {
     };
 
     // ---------- Satellite & Prediction Images ---------- //
-    const satData = taskLayer.satellitePreviewUrl ? await fetchImageDataURL(taskLayer.satellitePreviewUrl, getAccessTokenSilently) : null;
-    const predData = taskLayer.predictionPreviewUrl ? await fetchImageDataURL(taskLayer.predictionPreviewUrl, getAccessTokenSilently) : null;
+    const satPreviewUrl = prefixTitilerUrl(taskLayer.satellitePreviewUrl);
+    const predPreviewUrl = prefixTitilerUrl(taskLayer.predictionPreviewUrl);
+    const satData = satPreviewUrl ? await fetchImageDataURL(satPreviewUrl, getAccessTokenSilently) : null;
+    const predData = predPreviewUrl ? await fetchImageDataURL(predPreviewUrl, getAccessTokenSilently) : null;
     if (satData || predData) {
       if (currentY + 100 > 280) { doc.addPage(); currentY = 10; }
       drawSectionHeader('Satellite RGB Composite & Prediction Images');

@@ -1,11 +1,12 @@
 name: Tests and Linters 🧪
 
-on: [push, pull_request]
+on:
+  push:
 
 jobs:
   tests-and-linters:
     name: "Python 3.11 on instadeep-ci"
-    runs-on: instadeep-ci
+    runs-on: instadeep-ci-4
     container:
       image: python:3.11
 
