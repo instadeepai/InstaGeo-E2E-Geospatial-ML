@@ -18,8 +18,7 @@ It leverages the [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-10
 3. [**Apps**](./instageo/new_apps/README.md): A geospatial analysis platform featuring interactive mapping, task-based processing, and real-time monitoring capabilities.
 <div align="center">
 
-![instageo_app](https://github.com/user-attachments/assets/034482d8-9a33-4ea1-a46d-c8f35ba2e8bb)
-
+![InstaGeo App](assets/instageo_app.gif)
 </div>
 
 ## Paper and Key Results
