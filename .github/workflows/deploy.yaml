@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - develop
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   setup-vars:
     name: Setup variables

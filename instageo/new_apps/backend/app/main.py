@@ -90,7 +90,10 @@ async def verify_token_middleware(
         )
         verify_access_token(credentials)
         return await call_next(request)
-    except Exception:
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.debug(f"Token verification failed {e}")
         return Response(
             content='{"detail":"Not authenticated - Login required"}',
             status_code=401,

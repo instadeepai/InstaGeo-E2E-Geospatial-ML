@@ -12,7 +12,7 @@ export const auth0Config = {
   clientId: process.env.REACT_APP_AUTH0_CLIENT_ID || 'auth0-client-id',
   audience: process.env.REACT_APP_AUTH0_AUDIENCE || 'auth0-api-identifier',
   redirectUri: getRedirectUri(),
-  scope: 'openid profile email',
+  scope: 'openid profile email offline_access',
 };
 
 export const isAuth0Configured = () => {
