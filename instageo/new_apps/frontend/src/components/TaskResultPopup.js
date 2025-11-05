@@ -23,9 +23,15 @@ import {
     Close as CloseIcon,
     ContentCopy as CopyIcon,
     PlayArrow as RunningIcon,
+    Login as LoginIcon,
 } from '@mui/icons-material';
+import { useAuth0 } from '@auth0/auth0-react';
+import { isAuth0Configured } from '../auth0-config';
+import { isAuthenticationError } from '../utils/authErrors';
 
 const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) => {
+    const { loginWithRedirect } = useAuth0();
+    const auth0Enabled = isAuth0Configured();
     const handleCopyTaskId = () => {
         if (result?.task_id) {
             navigator.clipboard.writeText(result.task_id);
@@ -163,6 +169,18 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
         }
     };
 
+    const isAuthError = isAuthenticationError(error);
+
+    const handleSignIn = () => {
+        if (auth0Enabled) {
+            loginWithRedirect({
+                appState: {
+                    returnTo: window.location.pathname,
+                },
+            });
+        }
+    };
+
     if (error) {
         return (
             <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -174,7 +192,9 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
                 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <ErrorIcon color="error" />
-                        <Typography variant="h6">Task Submission Failed</Typography>
+                        <Typography variant="h6">
+                            {isAuthError ? 'Authentication Required' : 'Task Submission Failed'}
+                        </Typography>
                     </Box>
                     <IconButton onClick={onClose} size="small">
                         <CloseIcon />
@@ -183,20 +203,39 @@ const TaskResultPopup = ({ open, onClose, result, error, onOpenTasksMonitor }) =
                 <DialogContent>
                     <Alert severity="error" sx={{ mb: 2 }}>
                         <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
-                            Error Details:
+                            {isAuthError ? 'Authentication Error:' : 'Error Details:'}
                         </Typography>
                         <Typography variant="body2">
                             {error.message || 'An unexpected error occurred while submitting the task.'}
                         </Typography>
                     </Alert>
                     <Typography variant="body2" color="text.secondary">
-                        Please check your input and try again. If the problem persists, contact support.
+                        {isAuthError
+                            ? 'Please sign in to continue. Your session may have expired.'
+                            : 'Please check your input and try again. If the problem persists, contact support.'
+                        }
                     </Typography>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={onClose} variant="contained" color="primary">
-                        Close
-                    </Button>
+                    {isAuthError && auth0Enabled ? (
+                        <>
+                            <Button onClick={onClose} variant="outlined" color="primary">
+                                Close
+                            </Button>
+                            <Button
+                                onClick={handleSignIn}
+                                variant="contained"
+                                color="primary"
+                                startIcon={<LoginIcon />}
+                            >
+                                Sign In
+                            </Button>
+                        </>
+                    ) : (
+                        <Button onClick={onClose} variant="contained" color="primary">
+                            Close
+                        </Button>
+                    )}
                 </DialogActions>
             </Dialog>
         );

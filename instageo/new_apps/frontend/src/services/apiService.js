@@ -19,9 +19,7 @@ class ApiService {
       };
     } catch (error) {
       logger.error('Failed to get access token:', error);
-      return {
-        'Content-Type': 'application/json'
-      };
+      throw new Error('Not authenticated. Please sign in to continue.');
     }
   }
 
@@ -39,6 +37,11 @@ class ApiService {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      if (response.status === 401 || response.status === 403) {
+        const errorMessage = errorData.detail || 'Authentication required. Please sign in again.';
+        throw new Error(errorMessage);
+      }
+
       throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
     }
 

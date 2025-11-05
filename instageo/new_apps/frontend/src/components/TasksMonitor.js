@@ -17,7 +17,8 @@ import {
     MenuItem,
     Pagination,
     Link,
-    Tooltip as MuiTooltip
+    Tooltip as MuiTooltip,
+    useTheme
 } from '@mui/material';
 import {
     Close as CloseIcon,
@@ -29,7 +30,8 @@ import {
     Pause as PauseIcon,
     Visibility as VisibilityIcon,
     FilterList as FilterListIcon,
-    Info as InfoIcon
+    Info as InfoIcon,
+    Login as LoginIcon
 } from '@mui/icons-material';
 import { useAuth0 } from '@auth0/auth0-react';
 import VisualizationDialog from './VisualizationDialog';
@@ -37,9 +39,25 @@ import BoundingBoxSnapshot from './BoundingBoxSnapshot';
 import { logger } from '../utils/logger';
 import { fetchModelsWithTTL } from '../utils/modelsCache';
 import apiService from '../services/apiService';
+import { isAuth0Configured } from '../auth0-config';
+import { isAuthenticationError } from '../utils/authErrors';
 
 const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
-    const { getAccessTokenSilently } = useAuth0();
+    const { getAccessTokenSilently, loginWithRedirect } = useAuth0();
+    const auth0Enabled = isAuth0Configured();
+    const theme = useTheme();
+    const isDark = theme.palette.mode === 'dark';
+
+    // Theme-aware styling using MUI theme colors
+    const primaryColor = theme.palette.primary.main;
+    const primaryDark = theme.palette.primary.dark;
+
+    const themeStyles = {
+        primaryColor: primaryColor,
+        buttonBorder: primaryColor,
+        buttonHover: isDark ? 'rgba(33, 150, 243, 0.08)' : 'rgba(33, 150, 243, 0.04)',
+        buttonHoverBorder: isDark ? primaryDark : primaryColor,
+    };
 
     const [tasks, setTasks] = useState([]);
     const [filteredTasks, setFilteredTasks] = useState([]);
@@ -431,11 +449,50 @@ const TasksMonitor = ({ open, onClose, onAddTaskLayer }) => {
                     </Box>
                 )}
 
-                {error && (
-                    <Alert severity="error" sx={{ mb: 2 }}>
-                        {error}
-                    </Alert>
-                )}
+                {error && (() => {
+                    const isAuthError = isAuthenticationError(error);
+
+                    const handleSignIn = () => {
+                        if (auth0Enabled) {
+                            loginWithRedirect({
+                                appState: {
+                                    returnTo: window.location.pathname,
+                                },
+                            });
+                        }
+                    };
+
+                    return (
+                        <Alert
+                            severity="error"
+                            sx={{ mb: 2 }}
+                            action={
+                                isAuthError && auth0Enabled ? (
+                                    <Button
+                                        variant="outlined"
+                                        size="small"
+                                        onClick={handleSignIn}
+                                        startIcon={<LoginIcon />}
+                                        sx={{
+                                            borderColor: themeStyles.buttonBorder,
+                                            color: themeStyles.primaryColor,
+                                            '&:hover': {
+                                                borderColor: themeStyles.buttonHoverBorder,
+                                                backgroundColor: themeStyles.buttonHover
+                                            }
+                                        }}
+                                    >
+                                        Sign In
+                                    </Button>
+                                ) : null
+                            }
+                        >
+                            <Typography variant="body2" component="div">
+                                {error}
+                            </Typography>
+                        </Alert>
+                    );
+                })()}
 
                 {filteredTasks.length === 0 && !loading && !error && (
                     <Box textAlign="center" p={3}>
