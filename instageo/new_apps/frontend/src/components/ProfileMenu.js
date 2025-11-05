@@ -76,8 +76,11 @@ const ProfileMenu = ({ appTheme = 'light' }) => {
     };
   }, [isAuthenticated, isLoading, auth0Enabled, getAccessTokenSilently]);
 
-  // Theme-aware styling
-  const isDark = appTheme === 'dark';
+  // Theme-aware styling using MUI theme colors
+  const isDark = theme.palette.mode === 'dark';
+  const primaryColor = theme.palette.primary.main;
+  const primaryDark = theme.palette.primary.dark;
+
   const themeStyles = {
     paper: {
       border: isDark ? '1px solid #37474f' : '1px solid #e3f2fd',
