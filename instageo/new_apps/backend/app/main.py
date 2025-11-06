@@ -381,7 +381,9 @@ async def get_all_tasks(
         in_progress_tasks = get_in_progress_tasks(db, user_sub)
 
         # Combine and return all tasks
-        all_tasks = sorted(completed_tasks + in_progress_tasks, key=lambda x: x["created_at"], reverse=True)
+        all_tasks = sorted(
+            completed_tasks + in_progress_tasks, key=lambda x: x["created_at"], reverse=True
+        )
         return all_tasks
 
     except Exception as e:
