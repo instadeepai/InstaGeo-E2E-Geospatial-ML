@@ -21,8 +21,8 @@ class User(Base):
     sub = Column(String, primary_key=True)
     email = Column(String, nullable=True)
     name = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
-    last_seen_at = Column(DateTime, default=datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     tasks = relationship("Task", back_populates="user")
 
@@ -38,7 +38,7 @@ class Task(Base):
     bboxes = Column(Text, nullable=True)
     parameters = Column(Text, nullable=True)
     status = Column(String, default="data_processing")
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     stages = Column(Text, nullable=True)
     model_short_name = Column(String, nullable=True)
