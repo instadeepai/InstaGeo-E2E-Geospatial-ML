@@ -1,8 +1,8 @@
 export const DEFAULT_TASK_PARAMS = {
     model_key: '',
     model_size: '',
-    temporal_tolerance: 10,  // Default: 10 days (range: 1-30)
-    cloud_coverage: 100,     // Default: 100% (range: 0-100)
+    temporal_tolerance: 10,
+    cloud_coverage: 100,
     date: new Date().toISOString().split('T')[0],
 };
 
