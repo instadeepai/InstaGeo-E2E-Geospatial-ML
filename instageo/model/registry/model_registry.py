@@ -20,7 +20,10 @@ class ModelRegistry:
     def __init__(self) -> None:
         """Initialize the model registry by loading the models.yaml file."""
         current_dir = Path(__file__).parent
-        self.model_registry_path = current_dir / "models_registry.yaml"
+        self.model_registry_path = Path(
+            (os.getenv("MODELS_REGISTRY_PATH") or "").strip()
+            or (current_dir / "models_registry.yaml")
+        )
 
         if not self.model_registry_path.exists():
             raise FileNotFoundError(f"Model registry not found at {self.model_registry_path}")
