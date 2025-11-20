@@ -16,6 +16,7 @@ import ControlPanel from './components/ControlPanel';
 import BoundingBoxInfo from './components/BoundingBoxInfo';
 import TaskResultPopup from './components/TaskResultPopup';
 import TasksMonitor from './components/TasksMonitor';
+import Footer from './components/Footer';
 import { CONFIG } from './config';
 import { APP_THEMES, BASE_MAP_CONFIG, DARK_MODE_MAP_FILTER } from './constants';
 import TaskLayersControl from './components/TaskLayersControl';
@@ -382,7 +383,7 @@ const App = () => {
                 onAddTaskLayer={handleAddTaskLayer}
             />
 
-            {/* Snackbar for area validation messages */}
+            <Footer appTheme={appTheme} />
             <Snackbar
                 open={snackbarOpen}
                 autoHideDuration={4000}
@@ -465,7 +466,7 @@ function LocateControl() {
                 sx={{
                     position: 'absolute',
                     left: '50%',
-                    bottom: 20,
+                    bottom: 60,
                     transform: 'translateX(-50%)',
                     zIndex: 1000,
                     backgroundColor: 'background.paper',
