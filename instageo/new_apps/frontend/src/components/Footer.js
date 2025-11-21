@@ -23,8 +23,8 @@ const Footer = ({ appTheme = APP_THEMES.DARK }) => {
     const textStyles = {
         fontSize: '0.75rem',
         color: theme.palette.text.secondary,
-        backgroundColor: appTheme === APP_THEMES.DARK 
-        ? 'rgba(0, 0, 0, 0.35)' 
+        backgroundColor: appTheme === APP_THEMES.DARK
+        ? 'rgba(0, 0, 0, 0.35)'
         : 'rgba(255, 255, 255, 0.5)',
         padding: theme.spacing(0.5, 1.5),
         borderRadius: theme.shape.borderRadius || 4,
@@ -41,4 +41,3 @@ const Footer = ({ appTheme = APP_THEMES.DARK }) => {
 };
 
 export default Footer;
-
