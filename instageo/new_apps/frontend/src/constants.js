@@ -37,3 +37,25 @@ export const PARAMS_HELP = {
     temporal_tolerance: 'Allowed ± days around the selected date to search for usable imagery. Larger windows increase availability but may shift seasonal conditions.',
     cloud_coverage: 'Maximum acceptable percentage of cloud cover in the original tile from which the chips are extracted. Lower values yield clearer imagery but fewer candidates.',
 };
+
+export const HELP_DIALOG = {
+    TITLE: 'Contact Support',
+    DESCRIPTION: 'Need assistance?',
+    SECTIONS: {
+        DOCUMENTATION: {
+            TITLE: '📚 GitHub Repo',
+            DESCRIPTION: 'Check out our GitHub repository for source code and examples. Also submit issues and feature requests.',
+            BUTTON: 'View GitHub Repo',
+            URL: 'https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML'
+        },
+        CONTACT_SUPPORT: {
+            TITLE: '📧 Contact Support',
+            DESCRIPTION: 'If you need direct assistance, please send us an email.',
+            EMAIL: 'support-instageo@instadeep.com',
+            BUTTON: 'Submit Support Request'
+        }
+    },
+    BUTTONS: {
+        CLOSE: 'Close'
+    }
+};

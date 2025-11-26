@@ -7,10 +7,12 @@ import { useAuth0 } from '@auth0/auth0-react';
 import dayjs from 'dayjs';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { DEFAULT_TASK_PARAMS, PARAMS_HELP, LOGO_PATHS } from '../constants';
 import { logger } from '../utils/logger';
 import { fetchModelsWithTTL, clearModelsCache } from '../utils/modelsCache';
 import ProfileMenu from './ProfileMenu';
+import SupportDialog from './SupportDialog';
 
 const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing, appTheme }) => {
   const { getAccessTokenSilently } = useAuth0();
@@ -30,6 +32,8 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
     cloud_coverage: false,
   });
 
+
+  const [helpDialogOpen, setHelpDialogOpen] = useState(false);
 
 
   useEffect(() => {
@@ -462,7 +466,29 @@ const ControlPanel = ({ open, onClose, hasBoundingBox, onRunModel, isProcessing,
           )}
         </Button>
       </Box>
+      <Divider sx={{ my: 2 }} />
 
+        <Box sx={{ mb: 2 }}>
+          <Button
+            variant="text"
+            color="primary"
+            fullWidth
+            startIcon={<HelpOutlineIcon fontSize="small" />}
+            onClick={() => setHelpDialogOpen(true)}
+            sx={{
+              py: 1.2,
+              fontSize: '0.75rem',
+              textTransform: 'none'
+            }}
+          >
+            Contact Support
+          </Button>
+        </Box>
+
+      <SupportDialog
+        open={helpDialogOpen}
+        onClose={() => setHelpDialogOpen(false)}
+      />
     </Drawer>
   );
 };
