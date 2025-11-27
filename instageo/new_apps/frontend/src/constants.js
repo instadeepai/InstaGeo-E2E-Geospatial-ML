@@ -59,3 +59,5 @@ export const HELP_DIALOG = {
         CLOSE: 'Close'
     }
 };
+
+export const FOOTER_DISCLAIMER_TEXT = '© 2025 InstaDeep Ltd. All rights reserved. InstaGeo® is a registered trademark of InstaDeep Ltd.'
