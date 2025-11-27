@@ -75,4 +75,3 @@ const SupportDialog = ({ open, onClose }) => {
     };
 
     export default SupportDialog;
-
