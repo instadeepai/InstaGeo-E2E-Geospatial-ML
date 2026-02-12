@@ -157,3 +157,7 @@ instageo/new_apps/config.env
 # Cloudflare tunnel
 instageo/new_apps/cloudflared/credentials.json
 instageo/new_apps/cloudflared/config.yml
+
+# JOSS files
+paper/paper.pdf
+paper/jats/
