@@ -9,7 +9,6 @@ tags:
   - deployment
 authors:
   - name: Ibrahim Salihu Yusuf
-    orcid: 
     affiliation: 1
   - name: Iffanice Houndayi
     affiliation: 1
@@ -48,7 +47,7 @@ on many Earth observation (EO) tasks. However, two key bottlenecks still limit t
 are used in practice.
 
 First, most published GFMs provide only model checkpoints and do not release the data pipelines needed to
-convert raw satellite imagery into model-ready inputs [@cong2023satmae], [@xiong2024dofa], [@mendieta2023gfm], 
+convert raw satellite imagery into model-ready inputs [@cong2023satmae], [@xiong2024dofa], [@mendieta2023gfm],
 [@hong2024spectralgpt], [@szwarcman2025prithvi]. Practitioners are left to independently implement
 STAC querying, temporal alignment, cloud masking, and label rasterisation. This process is time-consuming,
 error-prone, and often becomes the main barrier to using GFMs in real applications.
