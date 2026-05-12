@@ -2,11 +2,8 @@ name: Draft PDF
 
 on:
   push:
-    paths:
-      - paper/**
-
-  workflow_dispatch:
-
+    branches:
+      - pdf-build
 permissions:
   contents: read
 
