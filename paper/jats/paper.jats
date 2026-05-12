@@ -1,0 +1,619 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE article PUBLIC "-//NLM//DTD JATS (Z39.96) Journal Publishing DTD v1.2 20190208//EN"
+                  "JATS-publishing1.dtd">
+<article xmlns:mml="http://www.w3.org/1998/Math/MathML" xmlns:xlink="http://www.w3.org/1999/xlink" dtd-version="1.2" article-type="other">
+<front>
+<journal-meta>
+<journal-id></journal-id>
+<journal-title-group>
+<journal-title>Journal of Open Source Software</journal-title>
+<abbrev-journal-title>JOSS</abbrev-journal-title>
+</journal-title-group>
+<issn publication-format="electronic">2475-9066</issn>
+<publisher>
+<publisher-name>Open Journals</publisher-name>
+</publisher>
+</journal-meta>
+<article-meta>
+<article-id pub-id-type="publisher-id">0</article-id>
+<article-id pub-id-type="doi">N/A</article-id>
+<title-group>
+<article-title><monospace>InstaGeo</monospace>: Compute-Efficient
+Geospatial Machine Learning from Data to Deployment</article-title>
+</title-group>
+<contrib-group>
+<contrib contrib-type="author">
+<name>
+<surname>Yusuf</surname>
+<given-names>Ibrahim Salihu</given-names>
+</name>
+<xref ref-type="aff" rid="aff-1"/>
+</contrib>
+<contrib contrib-type="author">
+<name>
+<surname>Houndayi</surname>
+<given-names>Iffanice</given-names>
+</name>
+<xref ref-type="aff" rid="aff-1"/>
+</contrib>
+<contrib contrib-type="author">
+<name>
+<surname>Oualha</surname>
+<given-names>Rym</given-names>
+</name>
+<xref ref-type="aff" rid="aff-1"/>
+</contrib>
+<contrib contrib-type="author">
+<name>
+<surname>Cherif</surname>
+<given-names>Mohamed Aziz</given-names>
+</name>
+<xref ref-type="aff" rid="aff-1"/>
+</contrib>
+<contrib contrib-type="author">
+<contrib-id contrib-id-type="orcid">https://orcid.org/0000-0003-1835-2509</contrib-id>
+<name>
+<surname>Panford-Quainoo</surname>
+<given-names>Kobby</given-names>
+</name>
+<xref ref-type="aff" rid="aff-1"/>
+</contrib>
+<contrib contrib-type="author">
+<name>
+<surname>Pretorius</surname>
+<given-names>Arnu</given-names>
+</name>
+<xref ref-type="aff" rid="aff-1"/>
+</contrib>
+<aff id="aff-1">
+<institution-wrap>
+<institution>InstaDeep</institution>
+</institution-wrap>
+</aff>
+</contrib-group>
+<pub-date date-type="pub" publication-format="electronic" iso-8601-date="2026-02-10">
+<day>10</day>
+<month>2</month>
+<year>2026</year>
+</pub-date>
+<volume>¿VOL?</volume>
+<issue>¿ISSUE?</issue>
+<fpage>¿PAGE?</fpage>
+<permissions>
+<copyright-statement>Authors of papers retain copyright and release the
+work under a Creative Commons Attribution 4.0 International License (CC
+BY 4.0)</copyright-statement>
+<copyright-year>1970</copyright-year>
+<copyright-holder>The article authors</copyright-holder>
+<license license-type="open-access" xlink:href="https://creativecommons.org/licenses/by/4.0/">
+<license-p>Authors of papers retain copyright and release the work under
+a Creative Commons Attribution 4.0 International License (CC BY
+4.0)</license-p>
+</license>
+</permissions>
+<kwd-group kwd-group-type="author">
+<kwd>geospatial</kwd>
+<kwd>earth observation</kwd>
+<kwd>machine learning</kwd>
+<kwd>remote sensing</kwd>
+<kwd>foundation models</kwd>
+<kwd>deployment</kwd>
+</kwd-group>
+</article-meta>
+</front>
+<body>
+<sec id="summary">
+  <title>Summary</title>
+  <p><monospace>InstaGeo</monospace> is an open-source Python framework
+  that helps users turn raw satellite imagery and in-situ observations
+  into practical machine learning models and interactive web-map
+  applications. It is built around three modular components: (1)
+  automated dataset creation that converts raw satellite imagery such as
+  Sentinel-1, Sentinel-2, and Harmonised Landsat Sentinel (HLS) into
+  model-ready formats, (2) fine-tuning and task-specific distillation of
+  geospatial foundation models (GFMs), and (3) browser-based inference
+  with interactive visualisation.</p>
+  <p>By connecting these pieces, <monospace>InstaGeo</monospace> closes
+  the gap between GFM research and real-world deployment. Manages the
+  entire workflow—from geolocated field observations to production-ready
+  predictions—so users can move from data to decisions without requiring
+  users to integrate disparate tools or implement custom pipelines.</p>
+</sec>
+<sec id="statement-of-need">
+  <title>Statement of Need</title>
+  <p>Geospatial foundation models trained on open-access multispectral
+  imagery have significantly improved performance on many Earth
+  observation (EO) tasks. However, two key bottlenecks still limit the
+  extent to which they are used in practice.</p>
+  <p>First, most published GFMs provide only model checkpoints and do
+  not release the data pipelines needed to convert raw satellite imagery
+  into model-ready inputs
+  (<xref alt="Cong et al., 2023" rid="ref-cong2023satmae" ref-type="bibr">Cong
+  et al., 2023</xref>),
+  (<xref alt="Xiong et al., 2024" rid="ref-xiong2024dofa" ref-type="bibr">Xiong
+  et al., 2024</xref>),
+  (<xref alt="Mendieta et al., 2023" rid="ref-mendieta2023gfm" ref-type="bibr">Mendieta
+  et al., 2023</xref>),
+  (<xref alt="Hong et al., 2024" rid="ref-hong2024spectralgpt" ref-type="bibr">Hong
+  et al., 2024</xref>),
+  (<xref alt="Szwarcman et al., 2025" rid="ref-szwarcman2025prithvi" ref-type="bibr">Szwarcman
+  et al., 2025</xref>). Practitioners are left to independently
+  implement STAC querying, temporal alignment, cloud masking, and label
+  rasterisation. This process is time-consuming, error-prone, and often
+  becomes the main barrier to using GFMs in real applications.</p>
+  <p>Second, the standard adaptation workflow typically fine-tunes the
+  full encoder, regardless of how simple or complex the downstream task
+  is. As a result, adapted models maintain their original size and
+  computational cost, even when lighter models would be sufficient. This
+  makes deployment on resource-constrained infrastructure unnecessarily
+  expensive and can prevent models from being used operationally.</p>
+  <p>These issues create a divide. Domain experts in areas like
+  agriculture or disaster response often have valuable in-situ
+  observations but lack the machine learning expertise needed to
+  effectively use GFMs. Conversely, ML practitioners may be comfortable
+  with model adaptation but are less familiar with the practical
+  challenges of working with geospatial data.</p>
+  <p><monospace>InstaGeo</monospace> addresses both bottlenecks by
+  bringing dataset construction, model compression, and deployment into
+  a single, coherent, open-source workflow. It aims to enable
+  collaboration between geo-experts and ML practitioners on deployable
+  geospatial ML systems.</p>
+</sec>
+<sec id="state-of-the-field">
+  <title>State of the Field</title>
+  <p>Several geospatial foundation models have already shown strong
+  performance on standard benchmarks. SatMAE
+  (<xref alt="Cong et al., 2023" rid="ref-cong2023satmae" ref-type="bibr">Cong
+  et al., 2023</xref>) introduced masked autoencoder pre-training for
+  Sentinel-2 time series. DOFA
+  (<xref alt="Xiong et al., 2024" rid="ref-xiong2024dofa" ref-type="bibr">Xiong
+  et al., 2024</xref>) and GFM
+  (<xref alt="Mendieta et al., 2023" rid="ref-mendieta2023gfm" ref-type="bibr">Mendieta
+  et al., 2023</xref>) use teacher–student training schemes to reduce
+  pre-training costs. SpectralGPT
+  (<xref alt="Hong et al., 2024" rid="ref-hong2024spectralgpt" ref-type="bibr">Hong
+  et al., 2024</xref>) focuses on preserving richer spectral
+  information, and Prithvi-EO-2.0
+  (<xref alt="Szwarcman et al., 2025" rid="ref-szwarcman2025prithvi" ref-type="bibr">Szwarcman
+  et al., 2025</xref>) achieves strong results on GEO-Bench
+  (<xref alt="Lacoste et al., 2023" rid="ref-lacoste2023geobench" ref-type="bibr">Lacoste
+  et al., 2023</xref>) through large-scale HLS pre-training.</p>
+  <p>Despite these advances, existing projects generally do not provide
+  open-source, end-to-end pipelines for turning raw satellite tiles into
+  training chips. They also tend to produce full-sized models after
+  fine-tuning, even when smaller models would be sufficient for
+  downstream tasks.</p>
+  <p>TorchGeo
+  (<xref alt="Stewart et al., 2025" rid="ref-stewart2025torchgeo" ref-type="bibr">Stewart
+  et al., 2025</xref>) is a widely used library that offers geospatial
+  datasets, samplers, transforms, and pre-trained models. However, it
+  does not cover the entire path from in-situ observations through
+  dataset construction and model adaptation to deployed predictions.
+  <monospace>InstaGeo</monospace> complements existing tools by focusing
+  on the full process of adapting geospatial foundation models and
+  deploying them in real-world systems.</p>
+</sec>
+<sec id="software-design">
+  <title>Software Design</title>
+  <p><monospace>InstaGeo</monospace> follows a modular design with three
+  loosely coupled components: (i) a data pipeline that converts raw
+  imagery into task-ready, multi-temporal chips, (ii) a model component
+  for fine-tuning or distilling geospatial foundation models (GFMs) for
+  downstream tasks, and (iii) an interactive web-map application for
+  running inference and visualising predictions in the browser. This
+  design is illustrated in
+  <xref alt="[fig:components_overview]" rid="figU003Acomponents_overview">[fig:components_overview]</xref>.</p>
+  <p>These components communicate through standardised
+  artefacts—GeoTIFFs for imagery and PyTorch checkpoints for models—so
+  they can be used independently or combined into a full pipeline.</p>
+  <fig id="sylt">
+    <caption><p><bold>Overview of InstaGeo.</bold> (a) The data pipeline
+    builds cloud-masked multi-temporal chips and labels. (b)
+    Teacher–student distillation trains a lightweight model. (c) The
+    application serves predictions as web-map tiles.
+    <styled-content id="figU003Acomponents_overview"></styled-content></p></caption>
+    <graphic mimetype="application" mime-subtype="pdf" xlink:href="appComponents.pdf" />
+  </fig>
+  <p><bold>Modularity over monolithic integration.</bold> Users can
+  adopt only the parts they need: geo-experts can build datasets with
+  the data pipeline, while ML practitioners can plug in existing
+  datasets and focus on model adaptation and evaluation.</p>
+  <p><bold>Data pipeline and <italic>chip_creator</italic>.</bold> The
+  <italic>chip_creator</italic> module turns geolocated labels into
+  paired image/label chips by querying STAC catalogues, selecting
+  suitable acquisitions (e.g., low cloud cover) and exporting
+  multi-temporal tensors (T, C, H, W) plus segmentation maps as
+  GeoTIFFs. It supports HLS and Sentinel-1/2 and is extensible to other
+  STAC sources.</p>
+  <p><bold>Task-specific distillation over universal fine-tuning.</bold>
+  <monospace>InstaGeo</monospace> supports teacher–student distillation:
+  a student with the first N encoder layers is trained with task loss
+  plus KL divergence to a frozen teacher, reducing inference cost with
+  minimal accuracy loss.</p>
+  <p><bold>STAC-first data access and browser-based deployment.</bold>
+  The imagery is accessed through STAC APIs (cloud-hosted COGs),
+  reducing local storage but requiring network access during the
+  construction of the dataset. For deployment, predictions are served as
+  map tiles (TiTiler) and explored in a browser (see
+  <xref alt="[fig:app_component]" rid="figU003Aapp_component">[fig:app_component]</xref>).</p>
+  <fig id="sylt">
+    <caption><p><bold>Application component interface.</bold> Users draw
+    bounding boxes to define regions of interest and select model to run
+    inference, monitor task progress, and view predictions as
+    interactive map overlays.
+    <styled-content id="figU003Aapp_component"></styled-content></p></caption>
+    <graphic mimetype="application" mime-subtype="pdf" xlink:href="appInterface.pdf" />
+  </fig>
+</sec>
+<sec id="research-impact">
+  <title>Research Impact</title>
+  <p><monospace>InstaGeo</monospace> has been validated across three
+  published benchmarks: flood mapping, multi-temporal crop
+  classification, and desert locust breeding ground prediction. A key
+  requirement for the broad adoption of geospatial foundation models is
+  a data pipeline that can accurately reproduce the exact chip tensors
+  used during training, ensuring that the performance of the original
+  model is preserved at inference time.</p>
+  <p>Using <monospace>InstaGeo</monospace>’s data pipeline, we
+  reconstructed a replica dataset from scratch that matches the spatial,
+  temporal, and spectral specifications of each original study, and then
+  re-trained the corresponding models on the replica. Across all tasks,
+  replica models reproduced the original performance within ±2
+  percentage points mean Intersection over Union (pp mIoU) (see
+  <xref alt="Table 1" rid="tableU003Aresults">Table 1</xref>)—differences
+  minimal enough to attribute to floating point precision—demonstrating
+  that <monospace>InstaGeo</monospace> effectively replicates complex EO
+  pipelines with minimal performance degradation.</p>
+  <p>Due to the ease of use of the data pipeline, we curated a larger
+  crop segmentation dataset, achieving a new state-of-the-art mIoU of
+  60.65%, an improvement of 12 pp over the previous baseline.</p>
+  <p>Task-specific distillation reduced model size by up to 8× while
+  retaining comparable accuracy—for example, compressing a
+  389M-parameter encoder to 46M parameters with less than 1 pp mIoU loss
+  on locust prediction.</p>
+  <p>End-to-end, the framework reduces the data-to-deployment cycle to
+  under nine hours on standard hardware, enabling rapid iteration for
+  time-sensitive applications such as emergency flood response. Full
+  benchmark results and reproduction scripts are available in the
+  project
+  <ext-link ext-link-type="uri" xlink:href="https://github.com/instadeepai/InstaGeo-E2E-Geospatial-ML">repository</ext-link>.</p>
+  <table-wrap>
+    <caption>
+      <p>InstaGeo reproduces unpublished data pipelines. For each task,
+      we report the performance of (i) the Baseline performance reported
+      in the corresponding study, (ii) the InstaGeo-Baseline model
+      trained on the authors’ data but using InstaGeo’s model component,
+      and (iii) the InstaGeo-Replica model trained on a dataset
+      reconstructed entirely with InstaGeo. The flood mapping replica
+      has a version derived from HLS and another derived from
+      Sentinel-2.
+      <styled-content id="tableU003Aresults"></styled-content></p>
+    </caption>
+    <table>
+      <colgroup>
+        <col width="31%" />
+        <col width="20%" />
+        <col width="14%" />
+        <col width="9%" />
+        <col width="6%" />
+        <col width="10%" />
+        <col width="11%" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th align="left">Task</th>
+          <th align="left">Model</th>
+          <th align="left">GFM</th>
+          <th align="left">mIoU (std)</th>
+          <th align="left">Acc</th>
+          <th align="left">mF1 (std)</th>
+          <th align="left">ROC-AUC (std)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td align="left">Flood Mapping</td>
+          <td align="left">Baseline</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">88.3 (0.3)</td>
+          <td align="left">-</td>
+          <td align="left">97.3 (0.1)</td>
+          <td align="left">-</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left">InstaGeo-Baseline</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">88.53</td>
+          <td align="left">97.24</td>
+          <td align="left">93.71</td>
+          <td align="left">99.16</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left">InstaGeo-Replica (HLS)</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">85.40</td>
+          <td align="left">96.39</td>
+          <td align="left">91.78</td>
+          <td align="left">97.15</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left">InstaGeo-Replica (S2)</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">87.80</td>
+          <td align="left">97.07</td>
+          <td align="left">93.26</td>
+          <td align="left">97.61</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+        </tr>
+        <tr>
+          <td align="left">Multi-Temporal Crop Segmentation (US)</td>
+          <td align="left">Baseline</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">42.70</td>
+          <td align="left">60.7</td>
+          <td align="left">-</td>
+          <td align="left">-</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left">InstaGeo-Baseline</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">48.07</td>
+          <td align="left">65.77</td>
+          <td align="left">64.34</td>
+          <td align="left">95.79</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left">InstaGeo-Replica</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">47.87</td>
+          <td align="left">66.10</td>
+          <td align="left">64.19</td>
+          <td align="left">95.82</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+          <td align="left"></td>
+        </tr>
+        <tr>
+          <td align="left">Locust Breeding Ground Prediction</td>
+          <td align="left">Baseline</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">-</td>
+          <td align="left">83.03</td>
+          <td align="left">81.53</td>
+          <td align="left">-</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left">InstaGeo-Baseline</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">71.51</td>
+          <td align="left">83.39</td>
+          <td align="left">83.39</td>
+          <td align="left">86.74</td>
+        </tr>
+        <tr>
+          <td align="left"></td>
+          <td align="left">InstaGeo-Replica</td>
+          <td align="left">Prithvi-V1-100M</td>
+          <td align="left">73.30</td>
+          <td align="left">84.60</td>
+          <td align="left">84.60</td>
+          <td align="left">88.66</td>
+        </tr>
+      </tbody>
+    </table>
+  </table-wrap>
+</sec>
+<sec id="ai-usage-disclosure">
+  <title>AI usage disclosure</title>
+  <p>No generative AI tools were used to generate the scientific claims,
+  experimental results, or evaluations described in this paper.
+  Generative AI tools have been used for minor language editing and
+  formatting, and all text was reviewed by the authors for accuracy and
+  clarity.</p>
+</sec>
+</body>
+<back>
+<ref-list>
+  <title></title>
+  <ref id="ref-cong2023satmae">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Cong</surname><given-names>Y.</given-names></name>
+        <name><surname>Khanna</surname><given-names>S.</given-names></name>
+        <name><surname>Meng</surname><given-names>C.</given-names></name>
+        <name><surname>Liu</surname><given-names>P.</given-names></name>
+        <name><surname>Rozi</surname><given-names>E.</given-names></name>
+        <name><surname>He</surname><given-names>Y.</given-names></name>
+        <name><surname>Burke</surname><given-names>M.</given-names></name>
+        <name><surname>Lobell</surname><given-names>D. B.</given-names></name>
+        <name><surname>Ermon</surname><given-names>S.</given-names></name>
+      </person-group>
+      <article-title>SatMAE: Pre-training transformers for temporal and multi-spectral satellite imagery</article-title>
+      <source>arXiv preprint arXiv:2207.08051</source>
+      <year iso-8601-date="2023">2023</year>
+      <uri>https://arxiv.org/abs/2207.08051</uri>
+    </element-citation>
+  </ref>
+  <ref id="ref-xiong2024dofa">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Xiong</surname><given-names>Z.</given-names></name>
+        <name><surname>Wang</surname><given-names>Y.</given-names></name>
+        <name><surname>Zhang</surname><given-names>F.</given-names></name>
+        <name><surname>Stewart</surname><given-names>A. J.</given-names></name>
+        <name><surname>Hanna</surname><given-names>J.</given-names></name>
+        <name><surname>Borth</surname><given-names>D.</given-names></name>
+        <name><surname>Papoutsis</surname><given-names>I.</given-names></name>
+        <name><surname>Le Saux</surname><given-names>B.</given-names></name>
+        <name><surname>Camps-Valls</surname><given-names>G.</given-names></name>
+        <name><surname>Zhu</surname><given-names>X. X.</given-names></name>
+      </person-group>
+      <article-title>Neural plasticity-inspired multimodal foundation model for earth observation</article-title>
+      <source>arXiv preprint arXiv:2403.15356</source>
+      <year iso-8601-date="2024">2024</year>
+      <uri>https://arxiv.org/abs/2403.15356</uri>
+    </element-citation>
+  </ref>
+  <ref id="ref-mendieta2023gfm">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Mendieta</surname><given-names>M.</given-names></name>
+        <name><surname>Han</surname><given-names>B.</given-names></name>
+        <name><surname>Shi</surname><given-names>X.</given-names></name>
+        <name><surname>Zhu</surname><given-names>Y.</given-names></name>
+        <name><surname>Chen</surname><given-names>C.</given-names></name>
+      </person-group>
+      <article-title>Towards geospatial foundation models via continual pretraining</article-title>
+      <source>2023 IEEE/CVF International Conference on Computer Vision (ICCV)</source>
+      <year iso-8601-date="2023">2023</year>
+      <uri>https://api.semanticscholar.org/CorpusID:256697124</uri>
+      <pub-id pub-id-type="doi">10.1109/ICCV51070.2023.01541</pub-id>
+      <fpage>16760</fpage>
+      <lpage>16770</lpage>
+    </element-citation>
+  </ref>
+  <ref id="ref-hong2024spectralgpt">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Hong</surname><given-names>D.</given-names></name>
+        <name><surname>Zhang</surname><given-names>B.</given-names></name>
+        <name><surname>Li</surname><given-names>X.</given-names></name>
+        <name><surname>Li</surname><given-names>Y.</given-names></name>
+        <name><surname>Li</surname><given-names>C.</given-names></name>
+        <name><surname>Yao</surname><given-names>J.</given-names></name>
+        <name><surname>Yokoya</surname><given-names>N.</given-names></name>
+        <name><surname>Li</surname><given-names>H.</given-names></name>
+        <name><surname>Ghamisi</surname><given-names>P.</given-names></name>
+        <name><surname>Jia</surname><given-names>X.</given-names></name>
+        <name><surname>Plaza</surname><given-names>A.</given-names></name>
+        <name><surname>Gamba</surname><given-names>P.</given-names></name>
+        <name><surname>Benediktsson</surname><given-names>J. A.</given-names></name>
+        <name><surname>Chanussot</surname><given-names>J.</given-names></name>
+      </person-group>
+      <article-title>SpectralGPT: Spectral remote sensing foundation model</article-title>
+      <source>IEEE Transactions on Pattern Analysis and Machine Intelligence</source>
+      <year iso-8601-date="2024">2024</year>
+      <volume>46</volume>
+      <issue>8</issue>
+      <uri>http://dx.doi.org/10.1109/TPAMI.2024.3362475</uri>
+      <pub-id pub-id-type="doi">10.1109/TPAMI.2024.3362475</pub-id>
+      <fpage>5227</fpage>
+      <lpage>5244</lpage>
+    </element-citation>
+  </ref>
+  <ref id="ref-szwarcman2025prithvi">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Szwarcman</surname><given-names>D.</given-names></name>
+        <name><surname>Roy</surname><given-names>S.</given-names></name>
+        <name><surname>Fraccaro</surname><given-names>P.</given-names></name>
+        <name><surname>Gíslason</surname><given-names>Þ. E.</given-names></name>
+        <name><surname>Blumenstiel</surname><given-names>B.</given-names></name>
+        <name><surname>Ghosal</surname><given-names>R.</given-names></name>
+        <name><surname>Oliveira</surname><given-names>P. H. de</given-names></name>
+        <name><surname>Almeida</surname><given-names>J. L. S.</given-names></name>
+        <name><surname>Sedona</surname><given-names>R.</given-names></name>
+        <name><surname>Kang</surname><given-names>Y.</given-names></name>
+        <name><surname>Chakraborty</surname><given-names>S.</given-names></name>
+        <name><surname>Wang</surname><given-names>S.</given-names></name>
+        <name><surname>Gomes</surname><given-names>C.</given-names></name>
+        <name><surname>Kumar</surname><given-names>A.</given-names></name>
+        <name><surname>Truong</surname><given-names>M.</given-names></name>
+        <name><surname>Godwin</surname><given-names>D.</given-names></name>
+        <name><surname>Lee</surname><given-names>H.</given-names></name>
+        <name><surname>Hsu</surname><given-names>C.-Y.</given-names></name>
+        <name><surname>Asanjan</surname><given-names>A. A.</given-names></name>
+        <name><surname>Mujeci</surname><given-names>B.</given-names></name>
+        <name><surname>Shidham</surname><given-names>D.</given-names></name>
+        <name><surname>Keenan</surname><given-names>T.</given-names></name>
+        <name><surname>Arevalo</surname><given-names>P.</given-names></name>
+        <name><surname>Li</surname><given-names>W.</given-names></name>
+        <name><surname>Alemohammad</surname><given-names>H.</given-names></name>
+        <name><surname>Olofsson</surname><given-names>P.</given-names></name>
+        <name><surname>Hain</surname><given-names>C.</given-names></name>
+        <name><surname>Kennedy</surname><given-names>R.</given-names></name>
+        <name><surname>Zadrozny</surname><given-names>B.</given-names></name>
+        <name><surname>Bell</surname><given-names>D.</given-names></name>
+        <name><surname>Cavallaro</surname><given-names>G.</given-names></name>
+        <name><surname>Watson</surname><given-names>C.</given-names></name>
+        <name><surname>Maskey</surname><given-names>M.</given-names></name>
+        <name><surname>Ramachandran</surname><given-names>R.</given-names></name>
+        <name><surname>Moreno</surname><given-names>J. B.</given-names></name>
+      </person-group>
+      <article-title>Prithvi-EO-2.0: A versatile multi-temporal foundation model for earth observation applications</article-title>
+      <source>arXiv preprint arXiv:2412.02732</source>
+      <year iso-8601-date="2025">2025</year>
+      <uri>https://arxiv.org/abs/2412.02732</uri>
+    </element-citation>
+  </ref>
+  <ref id="ref-lacoste2023geobench">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Lacoste</surname><given-names>A.</given-names></name>
+        <name><surname>Lehmann</surname><given-names>N.</given-names></name>
+        <name><surname>Rodriguez</surname><given-names>P.</given-names></name>
+        <name><surname>Sherwin</surname><given-names>E. D.</given-names></name>
+        <name><surname>Kerner</surname><given-names>H.</given-names></name>
+        <name><surname>Lütjens</surname><given-names>B.</given-names></name>
+        <name><surname>Irvin</surname><given-names>J. A.</given-names></name>
+        <name><surname>Dao</surname><given-names>D.</given-names></name>
+        <name><surname>Alemohammad</surname><given-names>H.</given-names></name>
+        <name><surname>Drouin</surname><given-names>A.</given-names></name>
+        <name><surname>Gunturkun</surname><given-names>M.</given-names></name>
+        <name><surname>Huang</surname><given-names>G.</given-names></name>
+        <name><surname>Vazquez</surname><given-names>D.</given-names></name>
+        <name><surname>Newman</surname><given-names>D.</given-names></name>
+        <name><surname>Bengio</surname><given-names>Y.</given-names></name>
+        <name><surname>Ermon</surname><given-names>S.</given-names></name>
+        <name><surname>Zhu</surname><given-names>X. X.</given-names></name>
+      </person-group>
+      <article-title>Geo-bench: Toward foundation models for earth monitoring</article-title>
+      <source>arXiv preprint arXiv:2306.03831</source>
+      <year iso-8601-date="2023">2023</year>
+      <uri>https://arxiv.org/abs/2306.03831</uri>
+    </element-citation>
+  </ref>
+  <ref id="ref-stewart2025torchgeo">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Stewart</surname><given-names>Adam J.</given-names></name>
+        <name><surname>Robinson</surname><given-names>Caleb</given-names></name>
+        <name><surname>Corley</surname><given-names>Isaac A.</given-names></name>
+        <name><surname>Ortiz</surname><given-names>Anthony</given-names></name>
+        <name><surname>Lavista Ferres</surname><given-names>Juan M.</given-names></name>
+        <name><surname>Banerjee</surname><given-names>Arindam</given-names></name>
+      </person-group>
+      <article-title>TorchGeo: Deep learning with geospatial data</article-title>
+      <publisher-name>Association for Computing Machinery</publisher-name>
+      <publisher-loc>New York, NY, USA</publisher-loc>
+      <year iso-8601-date="2025">2025</year>
+      <volume>11</volume>
+      <issue>4</issue>
+      <issn>2374-0353</issn>
+      <uri>https://doi.org/10.1145/3707459</uri>
+      <pub-id pub-id-type="doi">10.1145/3707459</pub-id>
+    </element-citation>
+  </ref>
+</ref-list>
+</back>
+</article>
