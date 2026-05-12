@@ -3,10 +3,48 @@ name: Tests and Linters 🧪
 on:
   push:
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
+  select-runner:
+    name: Select Runner
+    runs-on: ubuntu-latest
+
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+
+    steps:
+      - name: Check runner availability
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RESPONSE=$(curl -s \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/orgs/instadeepai/actions/runners)
+          echo "$RESPONSE"
+          RUNNER_AVAILABLE=$(echo "$RESPONSE" | jq -r '
+            any(
+              (.runners // [])[];
+              .status == "online"
+              and .busy == false
+              and any(.labels[]; .name == "instadeep-ci")
+            )
+          ')
+          if [ "$RUNNER_AVAILABLE" = "true" ]; then
+            echo 'runner=["self-hosted","instadeep-ci"]' >> $GITHUB_OUTPUT
+          else
+            echo 'runner="ubuntu-latest"' >> $GITHUB_OUTPUT
+          fi
   tests-and-linters:
-    name: "Python 3.11 on instadeep-ci"
-    runs-on: instadeep-ci-4
+    name: "Python 3.11"
+    needs: select-runner
+
+    runs-on: ${{ fromJson(needs.select-runner.outputs.runner) }}
+
     container:
       image: python:3.11
 
@@ -14,10 +52,17 @@ jobs:
       - name: Install OS dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends xvfb redis-server curl ca-certificates
+          apt-get install -y --no-install-recommends \
+            xvfb \
+            redis-server \
+            curl \
+            ca-certificates \
+            jq
           rm -rf /var/lib/apt/lists/*
       - name: Checkout repo 📦
         uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -27,25 +72,22 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "UV_LINK_MODE=copy" >> $GITHUB_ENV
           echo "UV_SYSTEM_PYTHON=false" >> $GITHUB_ENV
-
       - name: Install project dependencies and activate venv
         run: |
           uv sync --locked --extra all --extra cpu --extra dev
-          # Activate the virtual environment by adding it to PATH
           echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
           echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> $GITHUB_ENV
-
       - name: Git safe.directory
-        run: git config --system --add safe.directory "$GITHUB_WORKSPACE"
-
+        run: |
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
       - name: Run linters 🖌️
-        run: which python && pre-commit run --all-files --verbose
-
+        run: |
+          which python
+          pre-commit run --all-files --verbose
       - name: Start Redis service
         run: |
           redis-server --daemonize yes
           redis-cli ping
-
       - name: Run tests 🧪
         env:
           EARTHDATA_USERNAME: ${{ secrets.EARTHDATA_USERNAME }}
@@ -54,4 +96,11 @@ jobs:
           REDIS_PORT: 6379
           REDIS_DB: 0
 
-        run: pytest --cov --cov-config=.coveragerc --cov-report=html --cov-report=term-missing --cov-fail-under=50 -m "not auth"
+        run: |
+          pytest \
+            --cov \
+            --cov-config=.coveragerc \
+            --cov-report=html \
+            --cov-report=term-missing \
+            --cov-fail-under=50 \
+            -m "not auth"
