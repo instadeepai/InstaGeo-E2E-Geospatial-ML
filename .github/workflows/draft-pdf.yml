@@ -4,19 +4,16 @@ on:
   push:
     paths:
       - paper/**
+
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: draft-pdf-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   paper:
-    name: Paper Draft
     runs-on: ubuntu-latest
+    name: Paper Draft
 
     steps:
       - name: Checkout
