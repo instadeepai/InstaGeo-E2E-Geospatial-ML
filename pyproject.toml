@@ -7,9 +7,9 @@ requires-python = ">=3.11,<3.13"
 license = "CC-BY-NC-SA-4.0"
 
 maintainers = [
-    "Kobby Panford-Quainoo <k.panford-quainoo@instadeep.com>",
-    "Iffanice Houndayi <i.houndayi@instadeep.com>",
-    "Ibrahim Salihu Yusuf <i.yusuf@instadeep.com>",
+    { name = "Kobby Panford-Quainoo", email = "k.panford-quainoo@instadeep.com" },
+    { name = "Iffanice Houndayi", email = "i.houndayi@instadeep.com" },
+    { name = "Ibrahim Salihu Yusuf", email = "i.yusuf@instadeep.com" },
 ]
 
 authors = [
