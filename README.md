@@ -1,6 +1,6 @@
 <picture>
-  <source srcset="assets/logo-dark.png" media="(prefers-color-scheme: dark)">
-  <img src="assets/logo.png" alt="Logo">
+  <source srcset="https://raw.githubusercontent.com/instadeepai/InstaGeo-E2E-Geospatial-ML/main/assets/logo-dark.png" media="(prefers-color-scheme: dark)">
+  <img src="https://raw.githubusercontent.com/instadeepai/InstaGeo-E2E-Geospatial-ML/main/assets/logo.png" alt="Logo">
 </picture>
 
 ## Overview
@@ -18,7 +18,7 @@ It leverages the [Prithvi](https://huggingface.co/ibm-nasa-geospatial/Prithvi-10
 3. [**Apps**](./instageo/new_apps/README.md): A geospatial analysis platform featuring interactive mapping, task-based processing, and real-time monitoring capabilities.
 <div align="center">
 
-![InstaGeo App](assets/instageo_app.gif)
+![InstaGeo App](https://raw.githubusercontent.com/instadeepai/InstaGeo-E2E-Geospatial-ML/main/assets/instageo_app.gif)
 </div>
 
 ## Paper and Key Results

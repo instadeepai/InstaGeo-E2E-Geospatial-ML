@@ -3,6 +3,11 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.1.1)"
+        required: true
 
 jobs:
   build:
@@ -14,6 +19,11 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
+
+      - name: Set version from release tag or input
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          uv version "${VERSION#v}"
 
       - name: Build package
         run: uv build
@@ -33,7 +43,6 @@ jobs:
       url: https://pypi.org/project/instageo/
     permissions:
       id-token: write
-
     steps:
       - name: Download dist artifacts
         uses: actions/download-artifact@v4

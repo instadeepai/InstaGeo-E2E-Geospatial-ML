@@ -1,10 +1,17 @@
 [project]
 name = "instageo"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Python framework for geospatial machine learning using open-source multispectral satellite imagery."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = "CC-BY-NC-SA-4.0"
+
+maintainers = [
+    "Kobby Panford-Quainoo <k.panford-quainoo@instadeep.com>",
+    "Iffanice Houndayi <i.houndayi@instadeep.com>",
+    "Ibrahim Salihu Yusuf <i.yusuf@instadeep.com>",
+]
+
 authors = [
   { name = "Ibrahim Salihu Yusuf", email = "i.yusuf@instadeep.com" },
   { name = "Iffanice Houndayi", email = "i.houndayi@instadeep.com" },
@@ -15,7 +22,8 @@ authors = [
 ]
 keywords = ["HLS", "Sentinel-2", "gfm", "geospatial-ml", "raster", "remote-sensing", "serve", "tiling", "xarray"]
 classifiers = [
-  "Intended Audience :: Engineering/Science/Research",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering :: GIS"
