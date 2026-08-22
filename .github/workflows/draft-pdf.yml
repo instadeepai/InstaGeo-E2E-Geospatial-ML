@@ -1,28 +1,35 @@
 name: Draft PDF
+
 on:
   push:
-    paths:
-      - paper/paper.md
-      - paper/paper.bib
+    branches:
+      - pdf-subs
+permissions:
+  contents: read
 
 jobs:
   paper:
     runs-on: ubuntu-latest
     name: Paper Draft
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Build draft PDF
-        uses: openjournals/openjournals-draft-action@v1.0
-        with:
-          journal: joss
-          # This should be the path to the paper within your repo.
-          paper-path: paper/paper.md
-      - name: Upload
+        env:
+          JOURNAL: joss
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          docker run --rm \
+            -e JOURNAL="${JOURNAL}" \
+            -e GIT_SHA="${GIT_SHA}" \
+            -v "${GITHUB_WORKSPACE}:/github/workspace" \
+            -w /github/workspace \
+            openjournals/inara:latest \
+            -o pdf paper/paper.md
+      - name: Upload PDF artifact
         uses: actions/upload-artifact@v4
         with:
           name: paper
-          # This is the output path where Pandoc will write the compiled
-          # PDF. Note, this should be the same directory as the input
-          # paper.md
           path: paper/paper.pdf
