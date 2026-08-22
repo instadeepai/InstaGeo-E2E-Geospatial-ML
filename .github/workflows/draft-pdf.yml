@@ -3,7 +3,7 @@ name: Draft PDF
 on:
   push:
     branches:
-      - pdf-subs
+      - joss-submission
 permissions:
   contents: read
 
